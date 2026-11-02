@@ -1,0 +1,37 @@
+.venv/
+.run/
+node_modules/
+frontend/dist/
+__pycache__/
+*.py[cod]
+.env
+*.env
+data/*
+!data/.gitkeep
+data/*.sqlite*
+data/cache/
+logs/
+*.log
+playwright-report/
+test-results/
+.playwright-cli/
+
+*.tsbuildinfo
+
+# Research accounts, credentials and local evidence must not be published.
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.sqlite3-*
+*.db
+*.db-wal
+*.db-shm
+/docs/reports/**
+/knowledge/**/evidence/
+/knowledge/**/audit/
+/frontend/.remote-access-src/
+/remote-access/
+!.env.example
+
+# Local UI capture noise (not secrets)
+frontend/output/

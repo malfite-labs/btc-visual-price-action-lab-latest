@@ -1,0 +1,774 @@
+{
+  "knowledge_base_id": "BTC_VISUAL_PA_BOOK_KB",
+  "version": "1.0.0",
+  "created_at": "2026-10-30",
+  "source": {
+    "title": "裸K线技术分析与交易",
+    "author": "胡云生",
+    "input": "用户提供PDF",
+    "pdf_page_count": 268,
+    "page_reference": "1-based physical PDF page numbers"
+  },
+  "status": "KNOWLEDGE_ONLY_NOT_BACKTESTED",
+  "scope": "Independent read-only research module; not existing A/B/C instructions or order execution",
+  "claim_type_legend": {
+    "SOURCE_SUMMARY": "原书思想的改写和章节溯源",
+    "ENGINEERING_TRANSLATION": "BTC视觉研究工程建议",
+    "RESEARCH_CANDIDATE": "尚无BTC样本外验证"
+  },
+  "core_principles": [
+    {
+      "id": "KB-CORE-01",
+      "name": "交易的对象是价格行为，不是形态名称",
+      "definition_and_source": "开高低收反映一定时间段中的价格结果；长影线、吞噬、双底等只有放在结构和位置里才有交易意义。[原书：2.1、2.2、3.2；PDF 23–51、79–88 页]",
+      "claim_type": "SOURCE_SUMMARY"
+    },
+    {
+      "id": "KB-CORE-02",
+      "name": "先价格结构，后关键区域，再信号 K 线",
+      "definition_and_source": "买卖信号必须落在事先标出的候选交易区，单独出现 Pinbar 不能自动产生交易。[原书：1.2–1.3；PDF 8–19 页]",
+      "claim_type": "SOURCE_SUMMARY"
+    },
+    {
+      "id": "KB-CORE-03",
+      "name": "价格结构主要呈现区间—突破—趋势的交替",
+      "definition_and_source": "威科夫价格循环的简化框架是横盘/吸筹—上涨趋势—横盘/派发—下跌趋势；具体市场可能更复杂，并存在再吸筹。[原书：3.1.2；PDF 73–76 页]",
+      "claim_type": "SOURCE_SUMMARY"
+    },
+    {
+      "id": "KB-CORE-04",
+      "name": "突破是状态转换，未完成时具有高度不确定性",
+      "definition_and_source": "假突破可在短时间两次穿越同一关键线；有效突破重视压力支撑互换及趋势性 K 线，但是看似有效的突破以后仍可能失败。[原书：3.4；PDF 120–139 页]",
+      "claim_type": "SOURCE_SUMMARY"
+    },
+    {
+      "id": "KB-CORE-05",
+      "name": "高质量机会强调盈亏比与失效位置",
+      "definition_and_source": "作者反复将计划盈亏比约 2:1 或以上作为优先筛选标准；它是**原书的候选机会质量偏好**，并不是 BTC 净盈利保证或全策略统一硬阈值。[原书：1.3、3.2、5.2；PDF 15–19、79–85、178–192 页]",
+      "claim_type": "SOURCE_SUMMARY"
+    },
+    {
+      "id": "KB-CORE-06",
+      "name": "交易数学优先于命中率神话",
+      "definition_and_source": "核心是单笔止损、账户风险、真实胜率、实际盈亏比、收益期望和连续亏损的承受力。[原书：第 4、6 章；PDF 151–172、228–247 页]",
+      "claim_type": "SOURCE_SUMMARY"
+    },
+    {
+      "id": "KB-CORE-07",
+      "name": "先看见、再交易；复盘看执行一致性",
+      "definition_and_source": "“三等二算”：等价格进入目标区、等信号 K 线、等退出信号；算风险、算盈亏比。训练先练识别，再练上下文，再练执行；复盘不能仅用是否赚钱评判。[原书：1.2–1.3、7.2；PDF 8–19、253–255 页]",
+      "claim_type": "SOURCE_SUMMARY"
+    }
+  ],
+  "pattern_and_term_entries": [
+    {
+      "id": "KB-K01",
+      "name": "单根 K 线",
+      "description": "开盘价、最高价、最低价、收盘价；实体和上下影线表达价格分布",
+      "extra": null,
+      "claim_type": "SOURCE_SUMMARY",
+      "status": "KNOWLEDGE_ONLY",
+      "source_references": [
+        "2.1.1，PDF 23–25"
+      ],
+      "detail": "开盘价、最高价、最低价、收盘价；实体和上下影线表达价格分布"
+    },
+    {
+      "id": "KB-K02",
+      "name": "Pinbar",
+      "description": "长单向影线 + 小实体；原书以锤子线的影线达到实体约两倍以上作为典型例子；颜色不是关键",
+      "extra": null,
+      "claim_type": "SOURCE_SUMMARY",
+      "status": "KNOWLEDGE_ONLY",
+      "source_references": [
+        "2.1.2，PDF 26–27"
+      ],
+      "detail": "长单向影线 + 小实体；原书以锤子线的影线达到实体约两倍以上作为典型例子；颜色不是关键"
+    },
+    {
+      "id": "KB-K03",
+      "name": "看涨/看跌吞噬",
+      "description": "反向实体覆盖前一实体，原书还讨论全价格区间覆盖；双重包含更强是作者经验判断",
+      "extra": null,
+      "claim_type": "SOURCE_SUMMARY",
+      "status": "KNOWLEDGE_ONLY",
+      "source_references": [
+        "2.1.2，PDF 28–34"
+      ],
+      "detail": "反向实体覆盖前一实体，原书还讨论全价格区间覆盖；双重包含更强是作者经验判断"
+    },
+    {
+      "id": "KB-K04",
+      "name": "启明星/黄昏星",
+      "description": "三段式反转：原趋势力量—短暂停滞—反向确认",
+      "extra": null,
+      "claim_type": "SOURCE_SUMMARY",
+      "status": "KNOWLEDGE_ONLY",
+      "source_references": [
+        "2.1.2，PDF 30–34"
+      ],
+      "detail": "三段式反转：原趋势力量—短暂停滞—反向确认"
+    },
+    {
+      "id": "KB-K05",
+      "name": "双线反转/穿刺线",
+      "description": "两 K 线价格逆向收复；穿刺通常弱于更完整的反转，需额外确认",
+      "extra": null,
+      "claim_type": "SOURCE_SUMMARY",
+      "status": "KNOWLEDGE_ONLY",
+      "source_references": [
+        "2.1.2，PDF 30–34"
+      ],
+      "detail": "两 K 线价格逆向收复；穿刺通常弱于更完整的反转，需额外确认"
+    },
+    {
+      "id": "KB-K06",
+      "name": "K 线合并",
+      "description": "多 K 以首根开盘、末根收盘、区间极值构造合并蜡烛，辅助理解形态内在结构",
+      "extra": null,
+      "claim_type": "SOURCE_SUMMARY",
+      "status": "KNOWLEDGE_ONLY",
+      "source_references": [
+        "2.1.2，PDF 34"
+      ],
+      "detail": "多 K 以首根开盘、末根收盘、区间极值构造合并蜡烛，辅助理解形态内在结构"
+    },
+    {
+      "id": "KB-K07",
+      "name": "大阳/大阴/缺口",
+      "description": "大实体、小影线显示一方阶段性优势；股市缺口特征不可直接移植 BTC 15m",
+      "extra": null,
+      "claim_type": "SOURCE_SUMMARY",
+      "status": "KNOWLEDGE_ONLY",
+      "source_references": [
+        "2.1.3，PDF 35–36"
+      ],
+      "detail": "大实体、小影线显示一方阶段性优势；股市缺口特征不可直接移植 BTC 15m"
+    },
+    {
+      "id": "KB-K08",
+      "name": "持续 K 线",
+      "description": "同方向极值持续推进，显示原趋势惯性",
+      "extra": null,
+      "claim_type": "SOURCE_SUMMARY",
+      "status": "KNOWLEDGE_ONLY",
+      "source_references": [
+        "2.1.4，PDF 36–37"
+      ],
+      "detail": "同方向极值持续推进，显示原趋势惯性"
+    },
+    {
+      "id": "KB-K09",
+      "name": "停滞 K 线",
+      "description": "小实体、交叠密集；停滞不等于立即反转",
+      "extra": null,
+      "claim_type": "SOURCE_SUMMARY",
+      "status": "KNOWLEDGE_ONLY",
+      "source_references": [
+        "2.1.5，PDF 37–38"
+      ],
+      "detail": "小实体、交叠密集；停滞不等于立即反转"
+    },
+    {
+      "id": "KB-K10",
+      "name": "孕线（内包）",
+      "description": "后一 K 线位于前一根 K 线价格范围内的整理，书中用作训练与策略示例",
+      "extra": null,
+      "claim_type": "SOURCE_SUMMARY",
+      "status": "KNOWLEDGE_ONLY",
+      "source_references": [
+        "3.5、7.2–7.3，PDF 141–143、253–259"
+      ],
+      "detail": "后一 K 线位于前一根 K 线价格范围内的整理，书中用作训练与策略示例"
+    },
+    {
+      "id": "KB-P01",
+      "name": "锤子线（看涨 Pinbar）",
+      "description": "单根长下影，小实体靠近上部",
+      "detail": "单根长下影，小实体靠近上部",
+      "extra": null,
+      "claim_type": "SOURCE_SUMMARY",
+      "status": "KNOWLEDGE_ONLY",
+      "source_references": [
+        "2.1.2｜PDF 26–34"
+      ],
+      "validation_limit": "必须结合支撑/结构与收盘；非底部保证"
+    },
+    {
+      "id": "KB-P02",
+      "name": "倒锤子线（看跌 Pinbar，按本书分类）",
+      "description": "单根长上影，小实体靠近下部",
+      "detail": "单根长上影，小实体靠近下部",
+      "extra": null,
+      "claim_type": "SOURCE_SUMMARY",
+      "status": "KNOWLEDGE_ONLY",
+      "source_references": [
+        "2.1.2｜PDF 26–34"
+      ],
+      "validation_limit": "必须结合阻力与此前上涨"
+    },
+    {
+      "id": "KB-P03",
+      "name": "看涨吞噬",
+      "description": "前阴后阳，后者实体/价格区间包容前者",
+      "detail": "前阴后阳，后者实体/价格区间包容前者",
+      "extra": null,
+      "claim_type": "SOURCE_SUMMARY",
+      "status": "KNOWLEDGE_ONLY",
+      "source_references": [
+        "2.1.2｜PDF 26–34"
+      ],
+      "validation_limit": "在关键支撑或下跌尾端才有较强研究意义"
+    },
+    {
+      "id": "KB-P04",
+      "name": "看跌吞噬",
+      "description": "前阳后阴，后者收复前者上涨空间",
+      "detail": "前阳后阴，后者收复前者上涨空间",
+      "extra": null,
+      "claim_type": "SOURCE_SUMMARY",
+      "status": "KNOWLEDGE_ONLY",
+      "source_references": [
+        "2.1.2｜PDF 26–34"
+      ],
+      "validation_limit": "同上，反方向"
+    },
+    {
+      "id": "KB-P05",
+      "name": "启明星",
+      "description": "阴线—小实体停滞—阳线反向推进",
+      "detail": "阴线—小实体停滞—阳线反向推进",
+      "extra": null,
+      "claim_type": "SOURCE_SUMMARY",
+      "status": "KNOWLEDGE_ONLY",
+      "source_references": [
+        "2.1.2｜PDF 26–34"
+      ],
+      "validation_limit": "BTC 全天候无常规隔夜缺口，需调整定义并回测"
+    },
+    {
+      "id": "KB-P06",
+      "name": "黄昏星",
+      "description": "阳线—小实体停滞—阴线反向推进",
+      "detail": "阳线—小实体停滞—阴线反向推进",
+      "extra": null,
+      "claim_type": "SOURCE_SUMMARY",
+      "status": "KNOWLEDGE_ONLY",
+      "source_references": [
+        "2.1.2｜PDF 26–34"
+      ],
+      "validation_limit": "同上，反方向"
+    },
+    {
+      "id": "KB-P07",
+      "name": "看涨双线反转",
+      "description": "先阴后阳、两根低点相近，反向实体收复",
+      "detail": "先阴后阳、两根低点相近，反向实体收复",
+      "extra": null,
+      "claim_type": "SOURCE_SUMMARY",
+      "status": "KNOWLEDGE_ONLY",
+      "source_references": [
+        "2.1.2｜PDF 26–34"
+      ],
+      "validation_limit": "可能与双针探底重叠，不能重复计独立证据"
+    },
+    {
+      "id": "KB-P08",
+      "name": "看跌双线反转",
+      "description": "先阳后阴、两根高点相近，反向实体收复",
+      "detail": "先阳后阴、两根高点相近，反向实体收复",
+      "extra": null,
+      "claim_type": "SOURCE_SUMMARY",
+      "status": "KNOWLEDGE_ONLY",
+      "source_references": [
+        "2.1.2｜PDF 26–34"
+      ],
+      "validation_limit": "同上，反方向"
+    },
+    {
+      "id": "KB-P09",
+      "name": "看涨穿刺线",
+      "description": "后阳线进入前阴线实体，原书通常要求越过阴线实体中线",
+      "detail": "后阳线进入前阴线实体，原书通常要求越过阴线实体中线",
+      "extra": null,
+      "claim_type": "SOURCE_SUMMARY",
+      "status": "KNOWLEDGE_ONLY",
+      "source_references": [
+        "2.1.2｜PDF 26–34"
+      ],
+      "validation_limit": "信号相对较弱，需更充分确认"
+    },
+    {
+      "id": "KB-P10",
+      "name": "看跌穿刺线",
+      "description": "看涨穿刺线的相反结构（沿用本书命名）",
+      "detail": "看涨穿刺线的相反结构（沿用本书命名）",
+      "extra": null,
+      "claim_type": "SOURCE_SUMMARY",
+      "status": "KNOWLEDGE_ONLY",
+      "source_references": [
+        "2.1.2｜PDF 26–34"
+      ],
+      "validation_limit": "需额外确认，避免将常见上影误判为反转"
+    },
+    {
+      "id": "KB-M01",
+      "name": "底部反转",
+      "description": "头肩底",
+      "detail": "三次低点，第二次最低，颈线确认",
+      "extra": null,
+      "claim_type": "SOURCE_SUMMARY",
+      "status": "KNOWLEDGE_ONLY",
+      "source_references": [
+        "2.2｜PDF 39–51"
+      ],
+      "shape_description": "三次低点，第二次最低，颈线确认",
+      "validation_limit": "突破颈线前只是候选"
+    },
+    {
+      "id": "KB-M02",
+      "name": "底部反转",
+      "description": "双底（W）",
+      "detail": "两次测试支撑 + 反弹高点形成颈线",
+      "extra": null,
+      "claim_type": "SOURCE_SUMMARY",
+      "status": "KNOWLEDGE_ONLY",
+      "source_references": [
+        "2.2｜PDF 39–51"
+      ],
+      "shape_description": "两次测试支撑 + 反弹高点形成颈线",
+      "validation_limit": "第二底可略高、近似或略低"
+    },
+    {
+      "id": "KB-M03",
+      "name": "底部反转",
+      "description": "三重底",
+      "detail": "三次支撑测试",
+      "extra": null,
+      "claim_type": "SOURCE_SUMMARY",
+      "status": "KNOWLEDGE_ONLY",
+      "source_references": [
+        "2.2｜PDF 39–51"
+      ],
+      "shape_description": "三次支撑测试",
+      "validation_limit": "多次测试不等于必定上涨"
+    },
+    {
+      "id": "KB-M04",
+      "name": "底部反转",
+      "description": "圆弧底",
+      "detail": "下跌放缓、窄幅运动、低点逐步抬升",
+      "extra": null,
+      "claim_type": "SOURCE_SUMMARY",
+      "status": "KNOWLEDGE_ONLY",
+      "source_references": [
+        "2.2｜PDF 39–51"
+      ],
+      "shape_description": "下跌放缓、窄幅运动、低点逐步抬升",
+      "validation_limit": "拟合误差大，识别主观"
+    },
+    {
+      "id": "KB-M05",
+      "name": "快速反转",
+      "description": "V 形底",
+      "detail": "急跌后急涨",
+      "extra": null,
+      "claim_type": "SOURCE_SUMMARY",
+      "status": "KNOWLEDGE_ONLY",
+      "source_references": [
+        "2.2｜PDF 39–51"
+      ],
+      "shape_description": "急跌后急涨",
+      "validation_limit": "历史显著，实时识别较难"
+    },
+    {
+      "id": "KB-M06",
+      "name": "顶部反转",
+      "description": "头肩顶、双顶、三重顶、圆弧顶、A 字顶",
+      "detail": "阻力测试、颈线及结构破坏",
+      "extra": null,
+      "claim_type": "SOURCE_SUMMARY",
+      "status": "KNOWLEDGE_ONLY",
+      "source_references": [
+        "2.2｜PDF 39–51"
+      ],
+      "shape_description": "阻力测试、颈线及结构破坏",
+      "validation_limit": "未确认前可能只是持续形态内部结构"
+    },
+    {
+      "id": "KB-M07",
+      "name": "趋势持续",
+      "description": "牛旗/熊旗",
+      "detail": "强趋势后形成与原趋势反向倾斜的小通道",
+      "extra": null,
+      "claim_type": "SOURCE_SUMMARY",
+      "status": "KNOWLEDGE_ONLY",
+      "source_references": [
+        "2.2｜PDF 39–51"
+      ],
+      "shape_description": "强趋势后形成与原趋势反向倾斜的小通道",
+      "validation_limit": "名称不保证后续继续原趋势"
+    },
+    {
+      "id": "KB-M08",
+      "name": "趋势持续",
+      "description": "对称/上升/下降三角形",
+      "detail": "高低点收敛；水平边界的特例",
+      "extra": null,
+      "claim_type": "SOURCE_SUMMARY",
+      "status": "KNOWLEDGE_ONLY",
+      "source_references": [
+        "2.2｜PDF 39–51"
+      ],
+      "shape_description": "高低点收敛；水平边界的特例",
+      "validation_limit": "必须等待方向被价格确认"
+    },
+    {
+      "id": "KB-M09",
+      "name": "区间整理",
+      "description": "矩形/箱体",
+      "detail": "上下近似水平边界、反复测试",
+      "extra": null,
+      "claim_type": "SOURCE_SUMMARY",
+      "status": "KNOWLEDGE_ONLY",
+      "source_references": [
+        "2.2｜PDF 39–51"
+      ],
+      "shape_description": "上下近似水平边界、反复测试",
+      "validation_limit": "可向任一方向突破"
+    },
+    {
+      "id": "KB-M10",
+      "name": "复杂整理",
+      "description": "楔形",
+      "detail": "两边界收敛，推进力度改变",
+      "extra": null,
+      "claim_type": "SOURCE_SUMMARY",
+      "status": "KNOWLEDGE_ONLY",
+      "source_references": [
+        "2.2｜PDF 39–51"
+      ],
+      "shape_description": "两边界收敛，推进力度改变",
+      "validation_limit": "位置、规模、持续时间决定研究意义"
+    },
+    {
+      "id": "KB-M11",
+      "name": "通道变化",
+      "description": "破轨",
+      "detail": "冲破趋势通道上沿/下沿",
+      "extra": null,
+      "claim_type": "SOURCE_SUMMARY",
+      "status": "KNOWLEDGE_ONLY",
+      "source_references": [
+        "2.2｜PDF 39–51"
+      ],
+      "shape_description": "冲破趋势通道上沿/下沿",
+      "validation_limit": "成功变轨与失败逆转须区分"
+    },
+    {
+      "id": "KB-M12",
+      "name": "波动扩张",
+      "description": "喇叭形、钻石形",
+      "detail": "收敛扩张与再收敛",
+      "extra": null,
+      "claim_type": "SOURCE_SUMMARY",
+      "status": "KNOWLEDGE_ONLY",
+      "source_references": [
+        "2.2｜PDF 39–51"
+      ],
+      "shape_description": "收敛扩张与再收敛",
+      "validation_limit": "形态完整前方向不确定"
+    }
+  ],
+  "structure_and_levels": [
+    {
+      "id": "KB-S01",
+      "name": "摆动高点 SH、摆动低点 SL",
+      "description": "两者与中间 K 线构成摆动；实时标注存在时间尺度歧义，不存在所有交易者统一的唯一划法。",
+      "claim_type": "SOURCE_SUMMARY",
+      "source_references": [
+        "3.1.4，PDF 77–78"
+      ]
+    },
+    {
+      "id": "KB-S02",
+      "name": "高低点结构",
+      "description": "上涨通常表现为更高高点 HH 与更高低点 HL；下跌表现为更低低点 LL 与更低高点 LH。",
+      "claim_type": "SOURCE_SUMMARY",
+      "source_references": [
+        "2.4.1，PDF 62–63"
+      ]
+    },
+    {
+      "id": "KB-S03",
+      "name": "关键水平线",
+      "description": "反复产生支撑/阻力转换、触线急转、突破后较大持续运动的区域优先；所谓线在实践中是小区域。",
+      "claim_type": "SOURCE_SUMMARY",
+      "source_references": [
+        "2.3，PDF 52–61"
+      ]
+    },
+    {
+      "id": "KB-S04",
+      "name": "趋势线与通道",
+      "description": "上升趋势连接重要 HL 得支撑趋势线，配合 HH 构造通道线；早期与晚期趋势线用途不同。",
+      "claim_type": "SOURCE_SUMMARY",
+      "source_references": [
+        "2.4、3.3.1，PDF 62–68、89–93"
+      ]
+    }
+  ],
+  "market_states": [
+    {
+      "code": "MS-RANGE",
+      "label": "横盘区间",
+      "description": "支撑/阻力反复测试，水平摆动",
+      "features": "支撑/阻力反复测试，水平摆动",
+      "not_guarantee": "不是价格永不突破",
+      "claim_type": "ENGINEERING_TRANSLATION"
+    },
+    {
+      "code": "MS-COMPRESS",
+      "label": "收敛整理",
+      "description": "波幅收窄，高低点逐渐靠拢",
+      "features": "波幅收窄，高低点逐渐靠拢",
+      "not_guarantee": "不能单凭收敛预测方向",
+      "claim_type": "ENGINEERING_TRANSLATION"
+    },
+    {
+      "code": "MS-UP-STRONG",
+      "label": "强上涨趋势",
+      "description": "连续大阳线、少重叠、回撤浅",
+      "features": "连续大阳线、少重叠、回撤浅",
+      "not_guarantee": "不保证下一根上涨",
+      "claim_type": "ENGINEERING_TRANSLATION"
+    },
+    {
+      "code": "MS-UP-NORMAL",
+      "label": "正常上涨趋势",
+      "description": "`HH/HL` 的阶梯推进，回踩前阻力区域",
+      "features": "`HH/HL` 的阶梯推进，回踩前阻力区域",
+      "not_guarantee": "回踩不一定精准触线",
+      "claim_type": "ENGINEERING_TRANSLATION"
+    },
+    {
+      "code": "MS-DOWN",
+      "label": "下降趋势",
+      "description": "`LL/LH`、支撑压力互换、下跌推进",
+      "features": "`LL/LH`、支撑压力互换、下跌推进",
+      "not_guarantee": "不能以单个阳线判断反转",
+      "claim_type": "ENGINEERING_TRANSLATION"
+    },
+    {
+      "code": "MS-TRANSITION",
+      "label": "结构转换/不确定",
+      "description": "突破、假突破、趋势线破坏、重建区间",
+      "features": "突破、假突破、趋势线破坏、重建区间",
+      "not_guarantee": "应能输出 WAIT/UNKNOWN",
+      "claim_type": "ENGINEERING_TRANSLATION"
+    }
+  ],
+  "strategy_cards": [
+    {
+      "id": "STR-01",
+      "name": "区间支撑阻力交易（原书三大基本策略之一）",
+      "status": "RESEARCH_CANDIDATE",
+      "no_auto_order": true,
+      "fields": {
+        "市场背景": "已辨识的区间，支撑与阻力区域相对清晰，潜在盈利空间允许合理盈亏比。",
+        "形态准备": "价格靠近下边界（做多）或上边界（做空）；有支撑/阻力测试经历。",
+        "候选触发": "在目标边界出现已收盘反转 K 线、局部双底/双顶、或小型假突破后重返区间。",
+        "失效条件": "边界不再起作用，价格形成持续的外侧趋势；结构不符合原计划。",
+        "退出假设": "区间对侧的阻力/支撑，或预先设定的计划目标；止损参考关键区以外。",
+        "不交易": "区间中部、无确认、边界模糊、盈利空间不足或已开始持续突破。"
+      },
+      "source_note": "5.2.1、3.2；PDF 79–88、178–182"
+    },
+    {
+      "id": "STR-02",
+      "name": "假突破反转（原书三大基本策略之一）",
+      "status": "RESEARCH_CANDIDATE",
+      "no_auto_order": true,
+      "fields": {
+        "市场背景": "关键水平线已存在；区间或阶段性高低点结构清楚。",
+        "形态准备": "价格先穿越关键线，随后在较短时间内再次反向穿越并返回原区间。",
+        "候选触发": "二次穿越后的反转信号或再次测试失败；先记录回归事实，再讨论进场。",
+        "失效条件": "重新有效向突破方向推进，且预设的反向结构不成立。",
+        "退出假设": "先看区间内可达的下一关键区域；若走势不符合预期应依计划早退。",
+        "不交易": "只有第一次穿越、未收盘、边界临时凭空指定、止损距远且目标过近。"
+      },
+      "source_note": "3.4.2、5.2.2；PDF 123–124、182–189"
+    },
+    {
+      "id": "STR-03",
+      "name": "压力支撑互换（原书三大基本策略之一）",
+      "status": "RESEARCH_CANDIDATE",
+      "no_auto_order": true,
+      "fields": {
+        "市场背景": "有已识别的阻力区，价格从该区向上推进；做空方向对称为支撑压力互换。",
+        "形态准备": "先出现具有空间意义的突破，之后回踩原阻力区。",
+        "候选触发": "回踩得到支持，价格在已收盘 K 线上再次向突破方向推进；可观察更高低点 HL。",
+        "失效条件": "价格重新跌回旧区间并且原阻力支撑假设被破坏。",
+        "退出假设": "新阻力区、结构点跟踪或预设目标；先用实际止损距离计算净盈亏比。",
+        "不交易": "尚未有明确突破幅度、只是线上微幅震荡、回踩后没有方向确认。"
+      },
+      "source_note": "3.4.5、5.2.3、5.4.1；PDF 134–137、189–195"
+    },
+    {
+      "id": "STR-04",
+      "name": "趋势内逆向假突破进场",
+      "status": "RESEARCH_CANDIDATE",
+      "no_auto_order": true,
+      "fields": {
+        "市场背景": "原趋势仍持续，趋势中途出现窄幅收敛的小区间。",
+        "形态准备": "小区间向逆趋势方向短暂假突破。",
+        "候选触发": "重新返回原小区间且恢复顺趋势推进的价格证据。",
+        "失效条件": "假突破演化为真正的趋势反转，或原趋势结构失效。",
+        "退出假设": "沿原趋势跟随，或按计划目标止盈。"
+      },
+      "source_note": "5.4.2；PDF 196–198"
+    },
+    {
+      "id": "STR-05",
+      "name": "顺趋势突破进场",
+      "status": "RESEARCH_CANDIDATE",
+      "no_auto_order": true,
+      "fields": {
+        "市场背景": "趋势存在，价格面临上方/下方新的关键水平线。",
+        "形态准备": "同方向较强 K 线推进并越过关键区域。",
+        "候选触发": "突破完成且潜在盈亏比足够；原书讨论在大 K 线中点、价格空间中点附近设置止损的例子。",
+        "失效条件": "突破后快速失效、价格没有按趋势方向推进。",
+        "退出假设": "偏短线应关注推进速度、动能衰减与时间成本；不得追高后无限扩大止损。"
+      },
+      "source_note": "5.4.3；PDF 198–199"
+    },
+    {
+      "id": "STR-06",
+      "name": "趋势大实体 K 线跟进",
+      "status": "RESEARCH_CANDIDATE",
+      "no_auto_order": true,
+      "fields": {
+        "市场背景": "趋势阶段出现明显趋势性大阳/大阴线。",
+        "形态准备": "大实体相对之前 K 线具有优势方向确定意义。",
+        "候选触发": "原书示例在大阳线出现后的下一交易日择机跟进；BTC 15m 转换为**下一已闭合周期观察**，不能照搬 A 股“次日”的日历含义。",
+        "失效条件": "参考大 K 线的技术止损或原趋势结构被破坏。",
+        "退出假设": "依旧参考趋势继续/失效与计划盈亏比。"
+      },
+      "source_note": "5.4.4；PDF 199–200"
+    },
+    {
+      "id": "STR-07",
+      "name": "辅助线顺势进场",
+      "status": "RESEARCH_CANDIDATE",
+      "no_auto_order": true,
+      "fields": {
+        "市场背景": "可确认的趋势，存在可追溯的趋势线或其他原书辅助线。",
+        "形态准备": "价格回到辅助线附近，形成可理解的支持/阻力作用。",
+        "候选触发": "已闭合确认 K 线显示顺势恢复。",
+        "失效条件": "辅助线与真实结构不再一致，或趋势结构明显破坏。",
+        "特殊说明": "原书含 20/60 均线；纯裸图初版只保存此知识，不把均线画进模型输入。"
+      },
+      "source_note": "5.4.5、2.4；PDF 62–68、200–201"
+    },
+    {
+      "id": "STR-08",
+      "name": "收敛—扩张漏斗模式（第七章扩展模式）",
+      "status": "RESEARCH_CANDIDATE",
+      "no_auto_order": true,
+      "fields": {
+        "市场背景": "先有窄幅收敛区，随后出现明显扩张阶段。",
+        "形态准备": "价格可向两侧扩张；收敛区中线成为结构参考。",
+        "候选触发": "例如价格从原收敛区下方返回中线上方，并完成中线支撑确认。",
+        "失效条件": "中线确认失效，价格重新进入不利的一侧并破坏预设结构。",
+        "退出假设": "顺势小段推进结束、重新收敛，或预先确定的出场条件。",
+        "特殊说明": "原书作者明确表示举例的比较结果不能外推到整个市场。"
+      },
+      "source_note": "7.4；PDF 260–265"
+    },
+    {
+      "id": "STR-09",
+      "name": "趋势持有及结构点离场（管理方法，不单独计算为新开仓策略）",
+      "status": "RESEARCH_CANDIDATE",
+      "no_auto_order": true,
+      "fields": {
+        "市场背景": "已持有顺趋势仓位，出现反复的 HH/HL 或 LL/LH。",
+        "持有条件": "趋势线、通道或重要摆动结构未发生预设的有效失效。",
+        "风险约束": "【研究迁移】移动止损与原仓位风险绑定；【原书 5.5.2】上涨趋势中价格有效跌破前一个 HL 可作为离场参考；复杂再吸筹存在假跌破例外。",
+        "特殊说明": "该卡是出场与持有规则，不赋予新开仓权力。"
+      },
+      "source_note": "5.5；PDF 202–205"
+    }
+  ],
+  "negative_tests": [
+    {
+      "id": "NEG-01",
+      "condition": "支撑区以外出现锤子线",
+      "expected_behavior": "不能只凭 Pinbar 发做多候选"
+    },
+    {
+      "id": "NEG-02",
+      "condition": "只有一根 K 线越过阻力",
+      "expected_behavior": "标记首次穿越，不能认定有效突破"
+    },
+    {
+      "id": "NEG-03",
+      "condition": "已跌破支撑且持续创新低",
+      "expected_behavior": "不得强行解释为假突破反弹"
+    },
+    {
+      "id": "NEG-04",
+      "condition": "趋势中部的双顶轮廓未破颈线",
+      "expected_behavior": "仅候选形态，不能直接反转方向"
+    },
+    {
+      "id": "NEG-05",
+      "condition": "窄幅收敛还没有突破",
+      "expected_behavior": "可观察，不得写“必然上涨”"
+    },
+    {
+      "id": "NEG-06",
+      "condition": "图像时间比 OHLC 晚一根",
+      "expected_behavior": "数据无效或重新同步，不做计划"
+    },
+    {
+      "id": "NEG-07",
+      "condition": "候选盈利空间不足以覆盖损失与成本",
+      "expected_behavior": "`NO_TRADE`"
+    },
+    {
+      "id": "NEG-08",
+      "condition": "同一根 K 线生成三个相关形态标签",
+      "expected_behavior": "不可当成三个独立胜率证据"
+    },
+    {
+      "id": "NEG-09",
+      "condition": "看似有效突破随后转为假突破",
+      "expected_behavior": "保留原判断并记录真实失效，不重写历史"
+    },
+    {
+      "id": "NEG-10",
+      "condition": "研究模块试图调用订单接口",
+      "expected_behavior": "必须拒绝，V1.0 研究只读"
+    }
+  ],
+  "required_constraints": [
+    "15m closed bars",
+    "72h approximately 288 candles",
+    "no lookahead",
+    "visual only source chart",
+    "precise prices from synchronized OHLC",
+    "A/B/C unchanged",
+    "C V3.0 unchanged",
+    "BOX-15M-V1 inactive",
+    "no real or sim orders from knowledge research",
+    "no fabricated parameter thresholds"
+  ],
+  "machine_readable_note": "Use source Markdown for full context; this JSON is index of explicitly described concepts and strategy research cards, not executable entry/exit code.",
+  "content_counts": {
+    "source_core_principles": 7,
+    "pattern_and_term_entries": 32,
+    "research_strategies_and_management_cards": 9,
+    "research_market_states": 6,
+    "negative_tests": 10
+  }
+}

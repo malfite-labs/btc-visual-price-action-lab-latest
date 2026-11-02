@@ -1,0 +1,394 @@
+{
+  "dataset_version": "adjudicated-v1",
+  "fixture_kind": "synthetic_blinded_visual_evaluation",
+  "market_data": false,
+  "prompt_must_not_include_ground_truth": true,
+  "scoring_rules": "tests/vision_ground_truth_rules_v1.md",
+  "bars_per_image": {
+    "global_3d": 288,
+    "local_1d": 96
+  },
+  "excluded_cases": {
+    "case_04": {
+      "scoring_status": "excluded_reclassified",
+      "historical_label": {
+        "pattern": "downtrend_then_reversal",
+        "global_bias": "falling",
+        "local_bias": "rising_reversal",
+        "assessment": "reversal_structure",
+        "image": "case_04.png",
+        "sha256": "b1f33fd06751c3b54f24ca5f3c8e1106f6a9ee1c0a62e037888dc7cea3af7748",
+        "global_count": 288,
+        "local_count": 96,
+        "price_axes": {
+          "global": [
+            "60972.00",
+            "59909.50",
+            "58847.00",
+            "57784.50",
+            "56722.00"
+          ],
+          "local": [
+            "60972.00",
+            "59917.50",
+            "58863.00",
+            "57808.50",
+            "56754.00"
+          ]
+        },
+        "synthetic": true
+      },
+      "reason": "288-bar endpoint is positive; objective global structure is mixed, so the historical falling label is not retained for scoring."
+    }
+  },
+  "cases": {
+    "case_01": {
+      "ohlc_file": "case_01_ohlc.json",
+      "ohlc_sha256": "c08778f09f637319de996498d40e29c0c6d1471a7479adddaf7ad14bfd19b6e6",
+      "chart_candle_sha256": "ee3230656d3447268cd73c3bbeb5d8a53f4373a4464af2aee2da991c45f0838a",
+      "global_count": 288,
+      "local_count": 96,
+      "score_key": {
+        "global_bias": "rising",
+        "local_bias": "rising",
+        "local_event": "rally_not_confirmed_reversal",
+        "assessment": "trend_structure"
+      },
+      "metrics": {
+        "global": {
+          "bar_count": 288,
+          "start_open": "49180",
+          "end_close": "52636",
+          "endpoint_change_pct": "7.027246848312322082147214300",
+          "high": {
+            "price": "52742",
+            "index": 287,
+            "open_at": "2026-01-04T23:45:00Z"
+          },
+          "low": {
+            "price": "48974",
+            "index": 1,
+            "open_at": "2026-01-02T00:15:00Z"
+          },
+          "segment_returns_pct": [
+            "2.342415616104107360715738100",
+            "2.288802352380195501867599100",
+            "2.237588376971486287001787000"
+          ],
+          "structure_direction": "rising"
+        },
+        "local": {
+          "bar_count": 96,
+          "start_open": "51484",
+          "end_close": "52636",
+          "endpoint_change_pct": "2.237588376971486287001787000",
+          "high": {
+            "price": "52742",
+            "index": 95,
+            "open_at": "2026-01-04T23:45:00Z"
+          },
+          "low": {
+            "price": "51318",
+            "index": 1,
+            "open_at": "2026-01-04T00:15:00Z"
+          },
+          "segment_returns_pct": [
+            "0.683707559630176365472768200",
+            "0.679064742649895825295161700",
+            "0.858434889246570092741626400"
+          ],
+          "structure_direction": "rising",
+          "structure_checks": {
+            "higher_high_second_half": true,
+            "higher_low_second_half": true,
+            "close_breaks_first_half_high": true
+          },
+          "event": "rally_not_confirmed_reversal"
+        },
+        "assessment": "trend_structure"
+      },
+      "images": {
+        "legacy": {
+          "path": "legacy/case_01.png",
+          "sha256": "923c0c0c04af535a7e5fe0a997193475b85a6501c22f7227d747f40163a015c6",
+          "candle_sha256": "ee3230656d3447268cd73c3bbeb5d8a53f4373a4464af2aee2da991c45f0838a",
+          "size": [
+            1280,
+            950
+          ]
+        },
+        "v2": {
+          "path": "layout_v2/case_01.png",
+          "sha256": "0ddd04e8d224a679f21567733fa9b09ed4edd729f843c08c92f8e7756c997bd8",
+          "candle_sha256": "ee3230656d3447268cd73c3bbeb5d8a53f4373a4464af2aee2da991c45f0838a",
+          "size": [
+            1920,
+            1280
+          ]
+        }
+      },
+      "synthetic": true
+    },
+    "case_02": {
+      "ohlc_file": "case_02_ohlc.json",
+      "ohlc_sha256": "1e5bee00693b12e0e8968569f4c8d4fcdac26736b363857f50d724346572eb38",
+      "chart_candle_sha256": "c16ef0266f7fe5ca0bd29aa52417dcff3454aba29ff4bbb867ad06b5f78a027d",
+      "global_count": 288,
+      "local_count": 96,
+      "score_key": {
+        "global_bias": "falling",
+        "local_bias": "falling",
+        "local_event": "no_confirmed_reversal",
+        "assessment": "trend_structure"
+      },
+      "metrics": {
+        "global": {
+          "bar_count": 288,
+          "start_open": "60820",
+          "end_close": "57364",
+          "endpoint_change_pct": "-5.682341335087142387372574810",
+          "high": {
+            "price": "60990",
+            "index": 1,
+            "open_at": "2026-01-02T00:15:00Z"
+          },
+          "low": {
+            "price": "57244",
+            "index": 287,
+            "open_at": "2026-01-04T23:45:00Z"
+          },
+          "segment_returns_pct": [
+            "-1.894113778362380795790858270",
+            "-1.930683113226520077763625390",
+            "-1.968692323467085925217034660"
+          ],
+          "structure_direction": "falling"
+        },
+        "local": {
+          "bar_count": 96,
+          "start_open": "58516",
+          "end_close": "57364",
+          "endpoint_change_pct": "-1.968692323467085925217034660",
+          "high": {
+            "price": "58710",
+            "index": 1,
+            "open_at": "2026-01-04T00:15:00Z"
+          },
+          "low": {
+            "price": "57244",
+            "index": 95,
+            "open_at": "2026-01-04T23:45:00Z"
+          },
+          "segment_returns_pct": [
+            "-0.6015448766149429215940939200",
+            "-0.6051853380097654906815212200",
+            "-0.7749256209783435964851587900"
+          ],
+          "structure_direction": "falling",
+          "structure_checks": {
+            "higher_high_second_half": false,
+            "higher_low_second_half": false,
+            "close_breaks_first_half_high": false
+          },
+          "event": "no_confirmed_reversal"
+        },
+        "assessment": "trend_structure"
+      },
+      "images": {
+        "legacy": {
+          "path": "legacy/case_02.png",
+          "sha256": "252f8469a94b65497e803a1c8d68a0bf0bf49f692e6fa72f037dcde4b0a5d9af",
+          "candle_sha256": "c16ef0266f7fe5ca0bd29aa52417dcff3454aba29ff4bbb867ad06b5f78a027d",
+          "size": [
+            1280,
+            950
+          ]
+        },
+        "v2": {
+          "path": "layout_v2/case_02.png",
+          "sha256": "eae67df15a24e8a0125b42e3d98cc1857d7bd3e78644cb503e8cf2c163aae6e8",
+          "candle_sha256": "c16ef0266f7fe5ca0bd29aa52417dcff3454aba29ff4bbb867ad06b5f78a027d",
+          "size": [
+            1920,
+            1280
+          ]
+        }
+      },
+      "synthetic": true
+    },
+    "case_03": {
+      "ohlc_file": "case_03_ohlc.json",
+      "ohlc_sha256": "fc5d413cc733cf1dc6290e458015096a19606ab4e523f487e7feca59f475cb74",
+      "chart_candle_sha256": "6c525a9c25d85056c6b61d9204dcc540d7fcb3c1f6cd2b7562e9946f11d01133",
+      "global_count": 288,
+      "local_count": 96,
+      "score_key": {
+        "global_bias": "range",
+        "local_bias": "range",
+        "local_event": "no_confirmed_reversal",
+        "assessment": "range_or_wait"
+      },
+      "metrics": {
+        "global": {
+          "bar_count": 288,
+          "start_open": "52334",
+          "end_close": "51895",
+          "endpoint_change_pct": "-0.8388428172889517330989414100",
+          "high": {
+            "price": "52610",
+            "index": 273,
+            "open_at": "2026-01-04T20:15:00Z"
+          },
+          "low": {
+            "price": "51371",
+            "index": 162,
+            "open_at": "2026-01-03T16:30:00Z"
+          },
+          "segment_returns_pct": [
+            "0.315282607864867963465433600",
+            "-0.3676260500200003809596373300",
+            "-0.7857607157878637250028677400"
+          ],
+          "structure_direction": "range"
+        },
+        "local": {
+          "bar_count": 96,
+          "start_open": "52306",
+          "end_close": "51895",
+          "endpoint_change_pct": "-0.7857607157878637250028677400",
+          "high": {
+            "price": "52610",
+            "index": 81,
+            "open_at": "2026-01-04T20:15:00Z"
+          },
+          "low": {
+            "price": "51371",
+            "index": 61,
+            "open_at": "2026-01-04T15:15:00Z"
+          },
+          "segment_returns_pct": [
+            "0.013382785913661912591289700",
+            "-1.460440043583812818993366850",
+            "0.671206036974529088828105300"
+          ],
+          "structure_direction": "range",
+          "structure_checks": {
+            "higher_high_second_half": true,
+            "higher_low_second_half": false,
+            "close_breaks_first_half_high": false
+          },
+          "event": "no_confirmed_reversal"
+        },
+        "assessment": "range_or_wait"
+      },
+      "images": {
+        "legacy": {
+          "path": "legacy/case_03.png",
+          "sha256": "5f42eca43bde8b233ba375796c027d78cdcf2f84496b1b37cb8c35dd030e1999",
+          "candle_sha256": "6c525a9c25d85056c6b61d9204dcc540d7fcb3c1f6cd2b7562e9946f11d01133",
+          "size": [
+            1280,
+            950
+          ]
+        },
+        "v2": {
+          "path": "layout_v2/case_03.png",
+          "sha256": "9929999b0b359cef67c7793cbf13217cc51f251042b8f1f58bc2d8a071e8a3a2",
+          "candle_sha256": "6c525a9c25d85056c6b61d9204dcc540d7fcb3c1f6cd2b7562e9946f11d01133",
+          "size": [
+            1920,
+            1280
+          ]
+        }
+      },
+      "synthetic": true
+    },
+    "case_05": {
+      "ohlc_file": "case_05_ohlc.json",
+      "ohlc_sha256": "660b0d1a51e42885c35bcee6faae6ed02e4ddb380f6b5eb1d913998979c3c512",
+      "chart_candle_sha256": "d2b95a0ec7138160dd99dde211f79c5413c23c6a450e9b79ecf7e43a7dfc1237",
+      "global_count": 288,
+      "local_count": 96,
+      "score_key": {
+        "global_bias": "falling",
+        "local_bias": "rising",
+        "local_event": "confirmed_reversal",
+        "assessment": "reversal_structure"
+      },
+      "metrics": {
+        "global": {
+          "bar_count": 288,
+          "start_open": "59150",
+          "end_close": "56078",
+          "endpoint_change_pct": "-5.193575655114116652578191040",
+          "high": {
+            "price": "59202",
+            "index": 0,
+            "open_at": "2026-02-02T00:00:00Z"
+          },
+          "low": {
+            "price": "53339",
+            "index": 190,
+            "open_at": "2026-02-03T23:30:00Z"
+          },
+          "segment_returns_pct": [
+            "-4.868977176669484361792054100",
+            "-5.118180202594633019370890350",
+            "5.034650683648623337703689800"
+          ],
+          "structure_direction": "falling"
+        },
+        "local": {
+          "bar_count": 96,
+          "start_open": "53390",
+          "end_close": "56078",
+          "endpoint_change_pct": "5.034650683648623337703689800",
+          "high": {
+            "price": "56144",
+            "index": 95,
+            "open_at": "2026-02-04T23:45:00Z"
+          },
+          "low": {
+            "price": "53339",
+            "index": 0,
+            "open_at": "2026-02-04T00:00:00Z"
+          },
+          "segment_returns_pct": [
+            "1.678216894549541112567896600",
+            "1.650517628854584975868548100",
+            "1.623717879018520532057555000"
+          ],
+          "structure_direction": "rising",
+          "structure_checks": {
+            "higher_high_second_half": true,
+            "higher_low_second_half": true,
+            "close_breaks_first_half_high": true
+          },
+          "event": "confirmed_reversal"
+        },
+        "assessment": "reversal_structure"
+      },
+      "images": {
+        "legacy": {
+          "path": "legacy/case_05.png",
+          "sha256": "af77a5a07d1d05ff1c48381124c96cb01cdfbea8def6b440cba17ac6b43a0b94",
+          "candle_sha256": "d2b95a0ec7138160dd99dde211f79c5413c23c6a450e9b79ecf7e43a7dfc1237",
+          "size": [
+            1280,
+            950
+          ]
+        },
+        "v2": {
+          "path": "layout_v2/case_05.png",
+          "sha256": "9c9776db48874900d089186b800789e84d50792903ac7278b915f3a7d3060a88",
+          "candle_sha256": "d2b95a0ec7138160dd99dde211f79c5413c23c6a450e9b79ecf7e43a7dfc1237",
+          "size": [
+            1920,
+            1280
+          ]
+        }
+      },
+      "synthetic": true
+    }
+  }
+}

@@ -1,0 +1,26 @@
+requirement_id,requirement_summary,source,modules,api_or_event_contract,acceptance_ids,phase,status
+PR-001,三名视觉代理及上下文账户记忆隔离,PRD §1 / source pack §0,M04|M05|M09|M10,GET /api/v1/agents; Decision.agent_id,AG-02|ORD-02|EVO-03,P2, FROZEN
+PR-002,15m已收盘裸K线及288+96视图,PRD §1 / source pack §0,M01|M02|M03,MarketCandle|VisualSnapshot,VIS-01|MKT-01,P1,FROZEN
+PR-003,三代理图像字节同一且策略上下文独立,PRD §1 / source pack §1.3,M03|M05|M06,VisualSnapshot.image_sha256,VIS-02|VIS-03|AG-02,P2,FROZEN
+PR-004,每账户10000 USDT/单仓/无加仓/只模拟,PRD §1 / source pack §0,M07|M08|M09,Account|Position|OrderIntent,ENV-02|ORD-01|ORD-02,P3,FROZEN
+PR-005,权益1x敞口上限/2%风险/成本/保证金/流动性/精度收敛,本对话确认 + source pack §6.2,M07|M08|M09,POST internal risk validation; GET account,RSK-01|RSK-02|RSK-03|LED-02,P3,FROZEN_FORMULA_CFG_TBC
+PR-006,标记价触发/对手价退出/报价故障持久恢复,本对话确认 + source pack §6.1,M01|M08|M09|M13,QuoteEvent|MarkEvent|StopExitPending,STP-01|STP-02|STP-03|MKT-03,P3,FROZEN
+PR-007,同一主图 A红/B绿/C橙仅绘实际fills,PRD §1 / source pack §3.2,M09|M11|M12,GET /api/v1/fills; fill_id,UI-01|UI-02,P4,FROZEN
+PR-008,追加账本/UTC事件时间与接收时间及审计,PRD §1 / source pack §1.3,M01|M02|M06|M09|M13,AuditEvent|AccountLedgerEvent,LED-01|LED-02|LED-03,E2E-03,P1|P3,FROZEN
+PR-009,每50笔完整交易一个批次/单候选/排队,PRD §1 / source pack §5.4,M09|M10,GET /api/v1/evolutions; EvolutionBatch,EVO-01|EVO-02,P5,FROZEN
+PR-010,影子对照共同起点/隔离/固定检查日/各20笔,本对话确认 + source pack §6.3,M03|M05|M06|M09|M10,ShadowExperiment|Checkpoint,EVO-03|EVO-04,P5,FROZEN
+PR-011,收益盈亏比回撤联合门槛/30天截止/不可判定不升级,本对话确认 + source pack §6.3,M09|M10,ComparisonResult,EVO-04|EVO-05|EVO-06|EVO-07,P5,FROZEN
+PR-012,有旧仓则自然平仓后在下一合格决策切换,本对话确认 + source pack §5.4,M07|M09|M10,PromotionPending; StrategyActivated,ORD-01|EVO-07,P5,FROZEN
+PR-013,MD版本不可变/C核心保护/无原稿不伪造,PRD §1 / source pack §7,M04|M10|M11,StrategyVersion; POST /api/v1/strategies/C/drafts,STR-01|EVO-05,P2|P5,FROZEN_BOUNDARY_C_SOURCE_TBC
+PR-014,状态真实/模型降级禁新仓/止损与模型隔离,PRD §1 / source pack §3.3|§5.3,M01|M08|M13|M11|M12,GET /api/v1/system/status; system events,MKT-03|AG-04|STP-03|UI-03,P1|P3|P4,FROZEN
+PR-015,验收证据标记合成/真实行情/真实模型,PRD §1 / source pack §8.1|§9,M13|M11,AcceptanceEvidence,E2E-01|E2E-02|E2E-03,P0|P6,FROZEN
+CFG-01,报价最大年龄/时钟健康窗口,source pack §10,M01|M08,/config manifest; QuoteEvent,MKT-02|MKT-03|RSK-02,P0,TBC_BLOCKS_LIVE
+CFG-02,手续费档位及数据来源有效期,source pack §10,M08|M09,FeeSchedule|LedgerEvent,RSK-02|LED-02,P0,TBC_BLOCKS_P3
+CFG-03,滑点模型及价格边界,source pack §10,M08,ExecutionConfig|Fill,RSK-02|STP-01,P0,TBC_BLOCKS_P3
+CFG-04,价格数量精度和symbol限制,source pack §10,M01|M08,SymbolFilters,RSK-02|RSK-03,P0,TBC_BLOCKS_P3
+CFG-05,模型预算超时重试和周期安全余量,source pack §10,M05|M06,ModelCallEvidence,AG-01|AG-04|E2E-01,P0,TBC_BLOCKS_P2
+CFG-06,影子候选故障恢复次数,source pack §10,M10,ShadowExperiment.failure_count,EVO-06|EVO-07,P0,TBC_BLOCKS_P5
+CFG-07,资金费率事件来源/时点,source pack §10,M01|M09,FundingRateEvent,LED-02|MKT-01,P0,TBC_BLOCKS_ACCOUNTING
+CFG-08,可用保证金口径,source pack §6.2 + explicit P1 fix,M08|M09,AccountSnapshot,RSK-01|RSK-03,P0,TBC_BLOCKS_P3
+CFG-09,C原始理念及章节边界,source pack §7,M04|M10,StrategyVersion.core_lock_hash,STR-01|EVO-05,P0,TBC_BLOCKS_C_BEHAVIOR_ACCEPTANCE
+

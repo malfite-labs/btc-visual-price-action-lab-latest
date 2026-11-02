@@ -1,0 +1,8 @@
+{
+  "agent": "E",
+  "version": "E-V1.0",
+  "seed_sha256": "65eab5d3a24057e37653214f70d81e8a62e05162b02187c6194ab95e1accd907",
+  "md_sha256": "f037df5d752aeaf3304f0871eee850af71d67c7df2da7354290f2aa94df5c8df",
+  "immutable": true,
+  "status": "READY_FOR_VALIDATION"
+}

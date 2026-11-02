@@ -1,0 +1,21 @@
+# TEMPLATE ONLY — requires healthy local backend on 127.0.0.1:8011.
+# Shadow worker uses local HTTP only (no second Alpaca connection).
+[Unit]
+Description=BTC Visual Price Action Lab Shadow Forward Worker
+After=network.target btc-backend.service
+Requires=btc-backend.service
+
+[Service]
+Type=simple
+User=box
+WorkingDirectory=/home/box/btc-visual-price-lab/runtime/app
+Environment=BTC_LAB_OFFLINE=1
+Environment=PAPER_AUTOMATION_ENABLED=false
+ExecStart=/home/box/btc-visual-price-lab/runtime/app/.venv/bin/python scripts/run_forward_v26.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

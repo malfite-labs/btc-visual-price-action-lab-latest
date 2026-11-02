@@ -1,0 +1,25 @@
+requirement_id,requirement_summary,source,modules,api_or_event_contract,acceptance_ids,phase,status
+PR-001,Three independent visual agents and isolated private context,Parent V1.0.1 PRD,M04|M05|M09|M10,GET /agents; Decision.agent_id,AG-02|ORD-02|EVO-03,P2,FROZEN_UNCHANGED
+PR-002,15m closed BTC/USD spot source and 288+96 views,Approved ECR-MARKET-SOURCE-001,M01|M02|M03,MarketCandle.source_id|price_basis,MKT-ADP-01|MKT-DATA-01|VIS-01,P1,FROZEN_V1.0.2
+PR-003,Same chart image bytes for A/B/C,Parent V1.0.1 PRD,M03|M05|M06,VisualSnapshot.source_fingerprint,VIS-02|VIS-03,P2,FROZEN_UNCHANGED
+PR-004,Three independent simulated accounts/no real orders; frozen seed currency USDT,Parent PRD + approved scope,M07|M08|M09,Account.currency|market source,RSK-CUR-01,P3,FROZEN_CURRENCY_GATE
+PR-005,1x exposure and 2% planned loss with cost/book/precision constraints,Parent PRD + V1.0.2 risk spec,M07|M08|M09,OrderIntent|paper cost config,RSK-CUR-01|RSK-COST-01|RSK-COST-02,P3,FROZEN_RULES_CONFIG_TBC
+PR-006,Spot latest-trade trigger/fresh L2 exit; future Binance mark trigger,Approved ECR + V1.0.2 state spec,M01|M08|M09|M13,TriggerReference|StopExitPending,STP-SRC-01|STP-REC-04,P3,FROZEN_V1.0.2
+PR-007,Single shared chart A/B/C actual-fill markers with existing colors,Parent PRD,M09|M11|M12,GET /fills|fill_id,UI-01|UI-SRC-01,P4,FROZEN_UNCHANGED
+PR-008,Append-only idempotent ledger and source/cost evidence; spot funding not applicable,Approved ECR,M01|M06|M09,AccountLedgerEvent|Funding applicability,LED-01|LED-02|MKT-ADP-03,P1|P3,FROZEN_V1.0.2
+PR-009,Review every 50 complete round trips,Parent PRD,M09|M10,GET /evolutions,EVO-01|EVO-02,P5,FROZEN_UNCHANGED
+PR-010,Isolated shadow comparison and checkpoints day 7/14/21/30 >=20 trades each,Parent PRD,M03|M05|M09|M10,ShadowExperiment,EVO-03|EVO-04|EVO-SRC-01,P5,FROZEN_UNCHANGED
+PR-011,Net gain/average win-loss ratio/MDD auto-promotion gates; 30-day max,Parent PRD,M09|M10,ComparisonResult,EVO-04|EVO-05|EVO-06|EVO-07,P5,FROZEN_UNCHANGED
+PR-012,Upgrade pending until incumbent naturally flat,Parent PRD,M07|M09|M10,PromotionPending,ORD-01|EVO-07,P5,FROZEN_UNCHANGED
+PR-013,Immutable MD/C-core protection; C source remains user-supplied,Parent PRD,M04|M10|M11,StrategyVersion.core_lock_hash,STR-01|EVO-05,P2|P5,FROZEN_C_SOURCE_TBC
+PR-014,Fail closed on data/model/ledger/protection degradation; report provenance,Parent PRD + approved ECR,M01|M08|M11|M12|M13,GET /market/status|system/status,MKT-DATA-04|UI-SRC-02,P1|P3|P4,FROZEN_V1.0.2
+PR-015,Separate synthetic/fixed/live public/live model evidence; source-bound claims,Parent PRD + approved ECR,M01|M11|M13,AcceptanceEvidence.source_id,MKT-REST-01|MKT-COMP-01,P0|P6,FROZEN_V1.0.2
+CFG-01,Source event freshness and reconnect health thresholds,Parent source pack, M01|M08,MarketStatus|Quote.age_ms,MKT-DATA-04,P0,TBC_BLOCKS_LIVE
+CFG-02,Internal paper fee rate,Approved internal simulation model,M08|M09,PaperCostConfig.fee_rate,RSK-COST-01|02,P0,TBC_BLOCKS_P3
+CFG-03,Internal adverse slippage rate and price guard,Approved internal simulation model,M08|M09,PaperCostConfig.slippage_rate,RSK-COST-01|02,P0,TBC_BLOCKS_P3
+CFG-04,Internal quantity precision/minimum constraints,Parent baseline + no provider orders,M08|M09,QuantityFilter,RSK-COST-02,P0,TBC_BLOCKS_P3
+CFG-05,Vision budget/timeout/retries,Parent baseline,M05|M06,ModelCallEvidence,AG-01|AG-04,P0,TBC_BLOCKS_P2
+CFG-06,Shadow candidate failure recovery cap,Parent baseline,M10,EvolutionExperiment.failure_count,EVO-06|07,P0,TBC_BLOCKS_P5
+CFG-07,Funding source applicability,Approved Alpaca spot mode,M01|M09,FundingRateEvent.applicability,LED-02,P0,FROZEN_NOT_APPLICABLE_IN_SPOT
+CFG-08,USDT account vs USD instrument conversion/valuation,Approved source switch plus parent seed currency,M08|M09,Account.currency|ConversionSnapshot,RSK-CUR-01,P0,TBC_BLOCKS_P3
+CFG-09,User-authored C MD and protected chapter boundary,Parent baseline,M04|M10,StrategyVersion.core_lock_hash,STR-01|EVO-05,P0,TBC_BLOCKS_C_ACCEPTANCE

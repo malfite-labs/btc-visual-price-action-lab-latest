@@ -1,0 +1,16 @@
+{
+  "state": "MARKET_RECOVERY_MANAGED",
+  "attempts": 0,
+  "last_attempt_epoch": 1793323952.813374,
+  "last_recovery_result": "SUCCESS",
+  "updated_utc": "2026-10-31T03:42:23.383604+00:00",
+  "automatic": true,
+  "pid": 17876,
+  "backend": true,
+  "feed": "LIVE",
+  "scheduler": "ENABLED_INTERNAL_PAPER",
+  "shadow": "RUNNING",
+  "pending_exit": false,
+  "frontend": true,
+  "cycle_age_seconds": 30442.333119
+}
