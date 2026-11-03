@@ -236,4 +236,46 @@ describe('workbench safeguards', () => {
     expect(hanba).not.toHaveTextContent('当前权益：$9,939.69')
     expect(hanba).not.toHaveTextContent('当前权益：$0.00')
   })
+
+  it('shows E on the decision log and live statistics from the formal book', async () => {
+    const close = '2026-10-29T00:15:00Z'
+    const formal = {
+      status: 'READY', equity: '10100.5', realized_pnl: '15', unrealized_pnl: '12.5', closed_trades: 1, win_rate: 1,
+      account: {state: 'OPEN_LONG', cash: '9900', position_json: JSON.stringify({direction: 'LONG', quantity: '0.02', entry_price: '100', stop_price: '90'})},
+      fills: [{fill_id: 'e1', agent: 'E', side: 'BUY', quantity: '0.02', price: '100', fee: '0.4', slippage: '0.1', occurred_at: '2026-10-29T00:16:00Z', position_effect: 'OPEN', decision_id: 'E-V1.1:2026-10-29T00:15:00+00:00', strategy_version: 'E-V1.1-QUANT'}],
+    }
+    const payloads: Record<string, unknown> = {
+      '/system/status': {feed_health: 'LIVE', rest: 'PASS', rest_quote: 'PASS', quote: {bid: 10, ask: 12, age_ms: 10}, candles_count: 1},
+      '/market/candles': {items: [{open_at: '2026-10-29T00:00:00Z', close_at: close, is_closed: true, open: 10, high: 12, low: 9, close: 11}]},
+      '/agents': [{agent: 'A', color: '#e2555b', status: 'RULE_DRIVEN', account: {state: 'FLAT', metrics: {equity: 10000, unrealized_pnl: 0, available_cash: 10000}}}],
+      '/fills': {items: []}, '/trades': {items: []},
+      '/strategies': {items: [{agent: 'E', runtime_mode: 'AUTO_PAPER', driving_version: 'E-V1.1-QUANT', current_version: 'E-V1.0'}]},
+      '/evolutions': {items: []},
+      '/journal': {items: [{agent: 'A', candle_close: close, action: 'WAIT', outcome: 'VALID', mode: 'RULE_DRIVEN', md_version: 'V2.5', rationale: '等待', fills: []}]},
+      '/statistics/abc': {updated_at: close, agents: {A: {equity: '10000', realized_net_pnl: '0', state: 'FLAT', shadow: {closed_since_review: 1}}}},
+      '/e/quant-observations': {status: 'SIGNAL_ONLY', items: [{close_at: close, status: 'SETUP_DETECTED', result: {strategy_version: 'E-V1.1-QUANT', candidate: {setup: 'E2', side: 'LONG'}, visual_status: 'NOT_REQUESTED'}}]},
+      '/e/observations': {status: 'NOT_STARTED', items: []},
+      '/e/accounts': {runtime: {mode: 'AUTO_PAPER'}, formal, shadow: {status: 'READY', equity: '77777.01', account: {state: 'FLAT'}}},
+    }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      const entry = Object.entries(payloads).find(([path]) => url.includes(path))
+      return {ok: true, status: 200, redirected: false, url, json: async () => entry?.[1] ?? {}}
+    }))
+    render(<App />)
+    const log = await screen.findByLabelText('交易员实时决策日志')
+    expect(log).toHaveTextContent('E · 憨巴')
+    expect(log).toHaveTextContent('LONG · 多头结构')
+    expect(log).toHaveTextContent('已开仓 BUY 0.02 @ 100')
+    expect(log).toHaveTextContent('不计入 ABC')
+    expect(log).toHaveTextContent('A · 趋势结构交易员')
+    const stats = screen.getByLabelText('憨巴正式账本统计')
+    expect(screen.getByRole('heading', {name: '实时统计'})).toBeInTheDocument()
+    expect(screen.queryByRole('heading', {name: 'ABC 实时统计'})).not.toBeInTheDocument()
+    expect(stats).toHaveTextContent('$10100.50')
+    expect(stats).toHaveTextContent('憨巴正式账本')
+    expect(stats).not.toHaveTextContent('77777.01')
+    expect(stats).not.toHaveTextContent('影子前推')
+    expect(screen.getByText(/1\/40/)).toBeInTheDocument()
+  })
 })

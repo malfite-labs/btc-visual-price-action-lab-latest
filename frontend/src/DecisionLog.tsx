@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react'
+import { eDecisionIndex, type EDecisionView } from './eDesk'
 import { epochMilliseconds, formatBeijing } from './time'
 
 type Row = { agent:string; candle_close:string; action?:string|null; outcome?:string; mode?:string; md_version?:string; rationale?:string|null; raw_response?:any; fills?:any[] }
-type Props = { items:Row[]; agents:any[]; cycleEvents:Record<string, any> }
+type Props = { items:Row[]; agents:any[]; cycleEvents:Record<string, any>; eObservations?:any; eQuantObservations?:any; eFormal?:any }
 const traders = ['A','B','C'] as const
 const names:Record<string,string> = {A:'趋势结构交易员', B:'关键位置反转交易员', C:'Tony 风格交易员'}
 const actionMap:Record<string,[string,string,string]> = {
@@ -28,8 +29,16 @@ const rejection:Record<string,string> = {
  BELOW_MINIMUM:'可执行数量不足或低于最小成交额', INVALID_CONTEXT:'行情或账户上下文无效', SOURCE_MISMATCH:'行情来源不匹配'
 }
 
-export default function DecisionLog({items, agents, cycleEvents}:Props) {
+function ECycleCard({view, known}:{view?:EDecisionView; known:boolean}) {
+  return <div className="decision-card">
+    <div className="decision-card-head"><strong>E · 憨巴</strong>{view?.badge && <span className={`decision-action ${view.badge[2]}`}>{view.badge[0]} · {view.badge[1]}</span>}</div>
+    {view ? <><small>{view.mode}</small><p className="decision-reason">{shortReason(view.reason)}</p><p className={view.warning?'decision-result warning':'decision-result'}>{view.result}</p></> : <p className="decision-missing">{known ? '本周期尚无憨巴记录' : '憨巴记录暂不可用'}</p>}
+  </div>
+}
+
+export default function DecisionLog({items, agents, cycleEvents, eObservations=null, eQuantObservations=null, eFormal=null}:Props) {
   const [limit,setLimit] = useState(10)
+  const eIndex = useMemo(() => eDecisionIndex(eObservations, eQuantObservations, eFormal), [eObservations, eQuantObservations, eFormal])
   const periods = useMemo(() => {
     const grouped:Record<string,Record<string,Row>> = {}
     for (const row of items) {
@@ -37,8 +46,9 @@ export default function DecisionLog({items, agents, cycleEvents}:Props) {
       if (key && traders.includes(row.agent as typeof traders[number])) (grouped[key] ||= {})[row.agent] = row
     }
     for (const key of Object.keys(cycleEvents)) if (keyOf(key)) grouped[keyOf(key)] ||= {}
+    for (const key of Object.keys(eIndex.cycles)) grouped[key] ||= {}
     return Object.entries(grouped).sort(([a],[b])=>b.localeCompare(a))
-  },[items,cycleEvents])
+  },[items,cycleEvents,eIndex])
   const latest = useMemo(() => Object.fromEntries(traders.map(agent => [agent, periods.find(([,rows])=>rows[agent])?.[0]])),[periods])
   const resultFor = (row:Row, key:string) => {
     const event=cycleEvents[key]?.[row.agent]
@@ -59,7 +69,7 @@ export default function DecisionLog({items, agents, cycleEvents}:Props) {
     return {text:execution?.reason ? `执行状态：${execution.reason}` : '执行结果未记录',warning:false}
   }
   return <section className="decision-log" aria-label="交易员实时决策日志">
-    <div className="decision-log-head"><div><h2>交易员实时决策日志</h2><p>真实研究记录 · 北京时间 UTC+8</p></div><span>最近周期优先</span></div>
+    <div className="decision-log-head"><div><h2>交易员实时决策日志</h2><p>真实研究记录 · 北京时间 UTC+8 · E 单独显示，不并入 ABC 日记</p></div><span>最近周期优先</span></div>
     {!periods.length ? <div className="empty">暂无决策记录</div> : periods.slice(0,limit).map(([key,rows])=><article className="decision-cycle" key={key}>
       <h3>{beijing(key)} <small>UTC+8 · 15分钟收盘</small></h3>
       <div className="decision-cards">{traders.map(agent=>{
@@ -70,7 +80,7 @@ export default function DecisionLog({items, agents, cycleEvents}:Props) {
           <div className="decision-card-head"><strong>{agent} · {names[agent]}</strong>{action && <span className={`decision-action ${action[2]}`}>{action[0]} · {action[1]}</span>}</div>
           {row ? <><small>{row.mode === 'RULE_DRIVEN' ? `RULE_DRIVEN · ${row.md_version || '—'}` : `${row.mode || '历史决策'} · ${row.md_version || '—'}`}</small><p className="decision-reason">{shortReason(row.rationale)}</p><p className={execution?.warning?'decision-result warning':'decision-result'}>{execution?.text}</p></> : <p className="decision-missing">{event?.status ? `尚无决策记录 · ${event.status}` : '尚无决策记录'}</p>}
         </div>
-      })}</div>
+      })}<ECycleCard view={eIndex.cycles[key]} known={eIndex.known} /></div>
     </article>)}
     {periods.length>limit && <button className="decision-more" onClick={()=>setLimit(limit+10)}>查看更多历史周期</button>}
   </section>

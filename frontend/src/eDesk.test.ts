@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest'
-import {eDrivingVersion, eFormalFills, ePaperAccountLines, ePositionText, mergeLedgerFills, strategyLines} from './eDesk'
+import {eDecisionIndex, eDrivingVersion, eFormalFills, ePaperAccountLines, ePositionText, eStatsView, mergeLedgerFills, strategyLines} from './eDesk'
 
 describe('E desk presentation', () => {
   it('shows a real empty position and does not invent fills', () => {
@@ -77,5 +77,62 @@ describe('E desk presentation', () => {
     expect(flat).toContain('可用资金：$10,000.00')
     expect(flat).toContain('入场/止损：—')
     expect(flat).toContain('持仓编号：—')
+  })
+
+  it('builds the E statistics card from the formal book only', () => {
+    const view = eStatsView({
+      status: 'READY', equity: '10100.5', realized_pnl: '15', unrealized_pnl: null, closed_trades: 2, win_rate: 0.5, next_review_at: 40,
+      valuation_status: 'UNVALUED_STALE_OR_UNAVAILABLE_QUOTE',
+      account: {state: 'OPEN_LONG', cash: '9900', position_json: {direction: 'LONG', quantity: '0.02', entry_price: '100', stop_price: '90'}},
+      fills: [{fill_id: 'e1', side: 'BUY', quantity: '0.02', price: '100', fee: '0.40', slippage: '0.10', occurred_at: '2026-10-29T00:16:00Z', position_effect: 'OPEN'}],
+    })
+    expect(view.availability).toBe('ready')
+    expect(view.state).toBe('OPEN_LONG')
+    expect(view.equity).toBe('$10100.50')
+    expect(view.realized).toBe('$15.00')
+    expect(view.unrealized).toBe('未估值')
+    expect(view.closedTrades).toBe('2')
+    expect(view.winRate).toBe('50.0%')
+    expect(view.position).toBe('LONG / 0.02')
+    expect(view.entryStop).toBe('100 / 90')
+    expect(view.fees).toBe('$0.40')
+    expect(view.slippage).toBe('$0.10')
+    expect(view.drawdown).toBe('接口未提供')
+    expect(view.valuationNote).toContain('报价不可用')
+    expect(eStatsView({status: 'NOT_INITIALIZED'}).availability).toBe('uninitialized')
+    expect(eStatsView(null).availability).toBe('missing')
+  })
+
+  it('maps E observations onto cycle keys and keeps formal fills off ABC', () => {
+    const close = '2026-10-27T15:15:00+00:00'
+    const index = eDecisionIndex(
+      {status: 'OBSERVE_ONLY', items: [{close_at: close, status: 'OBSERVE_ONLY', result: {decision: {action: 'SKIP', reasons: ['结构不清']}}}]},
+      {status: 'SIGNAL_ONLY', items: [{close_at: '2026-10-27T15:15:00Z', status: 'SETUP_DETECTED', result: {strategy_version: 'E-V1.1-QUANT', candidate: {setup: 'E2', side: 'LONG'}, visual_status: 'MODEL_UNCERTAIN'}}]},
+      {status: 'READY', fills: [
+        {fill_id: 'e1', decision_id: 'E-V1.1:' + close, position_effect: 'OPEN', side: 'BUY', quantity: '0.02', price: '100'},
+        {fill_id: 'other', decision_id: 'rule-open:abc', position_effect: 'OPEN', side: 'BUY', quantity: '1', price: '9'},
+      ]},
+    )
+    expect(index.known).toBe(true)
+    const card = index.cycles[new Date(close).toISOString()]
+    expect(card.mode).toContain('量化观察')
+    expect(card.reason).toContain('E2 LONG')
+    expect(card.result).toContain('已开仓 BUY 0.02 @ 100')
+    expect(card.result).not.toContain('@ 9')
+    expect(card.result).toContain('不计入 ABC')
+    const visionOnly = eDecisionIndex(
+      {status: 'OBSERVE_ONLY', items: [{close_at: close, status: 'OBSERVE_ONLY', result: {decision: {action: 'SKIP', reasons: ['结构不清']}}}]},
+      {status: 'NOT_STARTED', items: []},
+      null,
+    )
+    expect(visionOnly.cycles[new Date(close).toISOString()].reason).toBe('结构不清')
+    expect(eDecisionIndex(null, {status: 'UNAVAILABLE', items: []}, null).known).toBe(false)
+    const filled = eDecisionIndex(
+      {status: 'NOT_STARTED', items: []},
+      {status: 'NOT_STARTED', items: []},
+      {status: 'READY', fills: [{fill_id: 'e2', decision_id: 'E-V1.1:' + close, position_effect: 'OPEN', side: 'BUY', quantity: '0.01', price: '50', strategy_version: 'E-V1.1-QUANT', rationale: '{"setup":"E3"}'}]},
+    )
+    expect(filled.cycles[new Date(close).toISOString()].reason).toBe('结构 E3')
+    expect(filled.known).toBe(true)
   })
 })
