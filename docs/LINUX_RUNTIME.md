@@ -60,4 +60,4 @@ curl -fsS http://127.0.0.1:8011/api/v1/system/status
 - 状态：`scripts/linux/supervise.sh status`；`scripts/linux/status.sh`
 - 机制：每组件一个守护循环，flock(`run/<c>.lock`) 保证单实例（重复 start 会报 already supervised）；子进程退出→`logs/crash/` 落盘证据→退避 5s→300s 重启（稳定 10 分钟后复位）；日志 `logs/<c>.log` 超 50MB 轮转并 gzip，保留 14 天。
 - shadow 等待 backend health 后启动；HALTED_POSITION_GAP 为策略态，守护只重启进程，不伪造 resume。
-- 注意：重启云电脑后需手动再次执行 start（无 systemd）。
+- 注意：重启云电脑后需手动再次执行 start（无 systemd）。进程守护挡不住宿主挂起；方案对比（只读、未实施）见 [docs/ops/keepalive-heartbeat-options.md](ops/keepalive-heartbeat-options.md)。

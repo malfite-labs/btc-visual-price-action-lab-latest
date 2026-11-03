@@ -25,6 +25,7 @@ common.sh（环境；默认 BTC_LAB_OFFLINE=1）、install.sh、start.sh、stop.
 
 ## 4. 参考文档
 docs/LINUX_RUNTIME.md, LINUX_RECOVERY.md, LINUX_MIGRATION.md, LINUX_ARCHITECTURE.md, RECOVERY.md, QUICKSTART.md；云端报告 docs/reports/linux-cloud-independent/（SUMMARY.txt、supervise.log、frontend-20261102T233248.txt 等）
+- 宿主挂起与漏周期的保活方案对比（docs only，未实施）：docs/ops/keepalive-heartbeat-options.md
 - docs/reports/LINUX_AUDIT_PARTIAL.md 缺失 [运行验证]
 
 ## 5. 密钥
