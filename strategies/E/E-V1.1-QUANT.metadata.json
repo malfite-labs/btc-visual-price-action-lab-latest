@@ -1,7 +1,7 @@
 {
   "agent": "E",
   "version": "E-V1.1-QUANT",
-  "status": "CANDIDATE_NOT_ACTIVE",
+  "status": "AUTO_PAPER",
   "immutable": true,
   "md_sha256": "8fd83c6169c6e0a1d5f680abbfa1cb19cd7bea0cc9c73066a91f2b006964cf43",
   "seed_sha256": "65eab5d3a24057e37653214f70d81e8a62e05162b02187c6194ab95e1accd907",

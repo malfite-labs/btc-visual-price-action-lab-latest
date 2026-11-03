@@ -95,6 +95,19 @@ def test_shadow_baseline_uses_distinct_account(tmp_path,monkeypatch):
         assert formal.path!=shadow.path and len(formal.fills())==len(shadow.fills())==1
     asyncio.run(verify())
 
+def test_strategies_api_shows_live_auto_paper_without_dropping_candidate(tmp_path,monkeypatch):
+    from backend import app
+    root=tmp_path/'data'/'e';root.mkdir(parents=True)
+    (root/'auto-paper.json').write_text('{"mode":"AUTO_PAPER","long_enabled":true,"short_enabled":false}',encoding='utf8')
+    (root/'observe-version.json').write_text('{"version":"E-V1.1-QUANT","mode":"OBSERVE_ONLY"}',encoding='utf8')
+    monkeypatch.setattr(app,'ROOT',tmp_path)
+    monkeypatch.setattr(app,'strategies',SimpleNamespace(list=lambda:[{'agent':'A','status':'SEED_VERSION_MODEL_BLOCKED','current_version':'v1.0.0'},{'agent':'E','current_version':'E-V1.0','status':'READY_FOR_VALIDATION','candidate_version':'E-V1.1-QUANT','candidate_status':'CANDIDATE_NOT_ACTIVE'}]))
+    payload=asyncio.run(app.get_strategies())
+    echo,hanba=payload['items']
+    assert echo['status']=='SEED_VERSION_MODEL_BLOCKED'
+    assert hanba['runtime_mode']=='AUTO_PAPER' and hanba['driving_version']=='E-V1.1-QUANT'
+    assert hanba['candidate_version']=='E-V1.1-QUANT' and hanba['candidate_status']=='AUTO_PAPER'
+
 def test_short_requires_exact_authorized_margin_contract(tmp_path,monkeypatch):
     from backend import app
     root=tmp_path/'data'/'e';root.mkdir(parents=True)

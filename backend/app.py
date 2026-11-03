@@ -40,7 +40,7 @@ from backend.settings import (
     INITIAL_EQUITY,
     PAPER_CURRENCY,
 )
-from backend.strategy import StrategyRegistry
+from backend.strategy import StrategyRegistry, present_e_runtime
 from backend.vision import (
     AgentOrchestrator,
     VisionProviderConfig,
@@ -553,6 +553,20 @@ async def _e_quant_preflight(closed: list[dict], candidate: dict) -> dict:
         store=store, bars=closed, candidate=candidate, quote=quote,
         now=datetime.now(UTC), cost=COST_MODEL,
     )
+
+
+def _e_strategy_runtime():
+    """Live E mode for the strategy list. Missing files leave the registry record unchanged."""
+    data = ROOT / "data" / "e"
+    if not (data / "auto-paper.json").is_file():
+        return None
+    from backend.e_quant_observer import selected_observe_strategy
+    enabled, _short = _e_auto_settings()
+    return {
+        "present": True,
+        "mode": "AUTO_PAPER" if enabled else "NOT_AUTO",
+        "version": selected_observe_strategy(data),
+    }
 
 
 def _e_auto_settings():
@@ -1302,7 +1316,8 @@ async def get_decisions(agent: str):
 
 @app.get("/api/v1/strategies")
 async def get_strategies():
-    return {"items": strategies.list()}
+    runtime = _e_strategy_runtime()
+    return {"items": [present_e_runtime(item, runtime) for item in strategies.list()]}
 
 
 @app.get("/api/v1/strategies/{agent}/versions")
@@ -1310,7 +1325,7 @@ async def get_strategy_versions(agent: str):
     item = next((x for x in strategies.list() if x["agent"] == agent.upper()), None)
     if item is None:
         raise HTTPException(404, "AGENT_NOT_FOUND")
-    return {"agent": agent.upper(), **item}
+    return {"agent": agent.upper(), **present_e_runtime(item, _e_strategy_runtime())}
 
 
 @app.get("/api/v1/strategies/{agent}/diff")

@@ -6,6 +6,39 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+_E_V11_VISIBLE_STATUSES = {"CANDIDATE_NOT_ACTIVE", "AUTO_PAPER"}
+
+
+def present_e_runtime(item: dict, runtime: dict | None) -> dict:
+    """Copy E display fields from a live runtime snapshot.
+
+    candidate_version stays in place so the auto-cycle integrity check still sees E-V1.1-QUANT.
+    """
+    if item.get("agent") != "E" or not runtime:
+        return item
+    view = dict(item)
+    if (
+        runtime.get("mode") == "AUTO_PAPER"
+        and runtime.get("version") == "E-V1.1-QUANT"
+        and view.get("candidate_version") == "E-V1.1-QUANT"
+    ):
+        view["runtime_mode"] = "AUTO_PAPER"
+        view["driving_version"] = "E-V1.1-QUANT"
+        view["candidate_status"] = "AUTO_PAPER"
+        view["status"] = "AUTO_PAPER"
+        view["archived_version"] = view.get("archived_version") or view.get("current_version")
+        return view
+    if runtime.get("present") and (
+        view.get("status") == "AUTO_PAPER"
+        or view.get("candidate_status") == "AUTO_PAPER"
+        or view.get("runtime_mode") == "AUTO_PAPER"
+    ):
+        view["runtime_mode"] = runtime.get("mode") or "NOT_AUTO"
+        view["status"] = "REGISTERED_NOT_RUNNING"
+        view["candidate_status"] = "REGISTERED_NOT_RUNNING"
+    return view
+
+
 STRATEGIES = {
     "A": """---\nschema_version: 1\nagent_id: A\nversion: v1.0.0\nparent_version: null\nstatus: seed\ncore_lock: false\ncreated_at_utc: 2026-10-27\nmarket: Alpaca US BTC/USD spot\ntimeframe: 15m\n---\n# A Trend and Structure — initial V1.0 seed\n\n## Identity and market\nBTC/USD spot, 15-minute naked candles.\n\n## Core principle\nObserve three days of global structure, then one day of local structure. Prefer continuation only when swing structure and closes support direction.\n\n## Entry and exit\nTrade only after a completed candle; state direction, structural invalidation stop, and reasons. Close when structure invalidates or the stop is reached. WAIT when unclear.\n\n## Evolvable sections\nExamples, market-regime descriptions, and setup wording may evolve from reviewed evidence.\n\n## System constraints\nOne position; 1x notional cap; 2% planned risk; no averaging; paper only.\n""",
     "B": """---\nschema_version: 1\nagent_id: B\nversion: v1.0.0\nparent_version: null\nstatus: seed\ncore_lock: false\ncreated_at_utc: 2026-10-27\nmarket: Alpaca US BTC/USD spot\ntimeframe: 15m\n---\n# B Key-Level Reversal — initial V1.0 seed\n\n## Identity and market\nBTC/USD spot, 15-minute naked candles.\n\n## Core principle\nObserve three days of global structure, then one day of local structure. Consider reversal only at a visible prior reaction/turning area with completed-candle rejection evidence.\n\n## Entry and exit\nRequire a specific structural invalidation stop. Avoid entries in the middle of unclear ranges; WAIT when evidence is insufficient.\n\n## Evolvable sections\nExamples, setup descriptions, and context weighting may evolve from reviewed evidence.\n\n## System constraints\nOne position; 1x notional cap; 2% planned risk; no averaging; paper only.\n""",
@@ -135,30 +168,40 @@ class StrategyRegistry:
         if edir.is_dir():
             active = self.current_strategy("E")
             candidate = None
+            candidate_status = None
             candidate_file = edir / "E-V1.1-QUANT.md"
             try:
                 candidate_meta = json.loads((edir / "E-V1.1-QUANT.metadata.json").read_text(encoding="utf-8"))
                 candidate_bytes = candidate_file.read_bytes()
                 seed_bytes = (edir / "HANBA_SEED_V1.md").read_bytes()
+                meta_status = candidate_meta.get("status")
                 if (candidate_meta.get("agent") == "E" and candidate_meta.get("version") == "E-V1.1-QUANT"
-                    and candidate_meta.get("status") == "CANDIDATE_NOT_ACTIVE" and candidate_meta.get("immutable") is True
+                    and meta_status in _E_V11_VISIBLE_STATUSES and candidate_meta.get("immutable") is True
                     and candidate_meta.get("seed_sha256") == hashlib.sha256(seed_bytes).hexdigest()
                     and candidate_meta.get("md_sha256") == hashlib.sha256(candidate_bytes).hexdigest()):
                     candidate = {"version": "E-V1.1-QUANT", "sha256": hashlib.sha256(candidate_bytes).hexdigest(),
                                  "path": "strategies/E/E-V1.1-QUANT.md"}
+                    candidate_status = meta_status
             except (OSError, UnicodeError, ValueError, TypeError):
                 pass
-            out.append({
+            row = {
                 "agent": "E", "current_version": active[0] if active else None,
                 "status": "READY_FOR_VALIDATION" if active else "INTEGRITY_ERROR",
                 "candidate_version": candidate["version"] if candidate else None,
-                "candidate_status": "CANDIDATE_NOT_ACTIVE" if candidate else "NOT_AVAILABLE_OR_INTEGRITY_ERROR",
+                "candidate_status": candidate_status if candidate else "NOT_AVAILABLE_OR_INTEGRITY_ERROR",
                 "core_lock": "PROTECTED", "versions": [{
                     "version": "E-V1.0",
                     "sha256": hashlib.sha256((edir / "E-V1.0.md").read_bytes()).hexdigest(),
                     "path": "strategies/E/E-V1.0.md",
                 }] + ([candidate] if candidate else []) if (edir / "E-V1.0.md").is_file() else ([candidate] if candidate else []),
-            })
+            }
+            if candidate_status == "AUTO_PAPER":
+                row["runtime_mode"] = "AUTO_PAPER"
+                row["driving_version"] = "E-V1.1-QUANT"
+                row["archived_version"] = active[0] if active else None
+                if active:
+                    row["status"] = "AUTO_PAPER"
+            out.append(row)
         return out
 
     def current_strategy(self, agent: str) -> tuple[str, str] | None:

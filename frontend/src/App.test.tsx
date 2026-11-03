@@ -78,7 +78,7 @@ describe('workbench safeguards', () => {
     render(<App />)
     await waitFor(() => expect(screen.getByText(/BTC\/USD · 15m/)).toBeInTheDocument())
     for (const [label, heading] of [
-      ['AI账户', '三个独立模拟账户'],
+      ['AI账户', '四个独立模拟账户'],
       ['交易日记', /交易记录与 AI 日记/],
       ['策略管理', '策略 MD 管理'],
       ['策略进化', '策略进化中心'],
@@ -92,7 +92,7 @@ describe('workbench safeguards', () => {
         expect(screen.getByText(/45s · 并发：3/)).toBeInTheDocument()
         expect(screen.getByText(/调用上限：12\/UTC日 · 最大输出：512 tokens/)).toBeInTheDocument()
         expect(screen.getByText(/输入\/输出高峰费率：\$0.30 \/ \$1.20 每百万token/)).toBeInTheDocument()
-        expect(screen.getByText(/DISABLED_NOT_ARMED/)).toBeInTheDocument()
+        expect(screen.getAllByText(/DISABLED_NOT_ARMED/)).toHaveLength(2)
         expect(screen.getByText(/QUOTE_EVENT_INTERNAL_PAPER_STOP_MONITOR/)).toBeInTheDocument()
         expect(screen.getByText(/市价 taker）：5 bp/)).toBeInTheDocument()
         expect(screen.getByText(/Maker 参考费率.*0.0002/)).toBeInTheDocument()
@@ -144,5 +144,45 @@ describe('workbench safeguards', () => {
     await act(async () => { finishFirst({ feed_health: 'OLD_RESPONSE' }); await Promise.resolve(); await Promise.resolve(); await Promise.resolve() })
     await act(async () => { vi.advanceTimersByTime(5000); await Promise.resolve(); await Promise.resolve(); await Promise.resolve() })
     expect(screen.getByText('NEW_RESPONSE')).toBeInTheDocument()
+  })
+
+  it('shows Hanba E as a fourth account, legend entry and formal fill', async () => {
+    const formal = {
+      status: 'READY', equity: '10100.5', unrealized_pnl: '12.5',
+      account: {state: 'OPEN_LONG', position_json: JSON.stringify({direction: 'LONG', quantity: '0.02', entry_price: '100', stop_price: '90'})},
+      fills: [{fill_id: 'e1', agent: 'E', side: 'BUY', quantity: '0.02', price: '100', fee: '0.1', slippage: '0', occurred_at: '2026-10-29T00:16:00Z', position_effect: 'OPEN'}],
+    }
+    const payloads: Record<string, unknown> = {
+      '/system/status': {feed_health: 'LIVE', rest: 'PASS', rest_quote: 'PASS', quote: {bid: 10, ask: 12, age_ms: 10}, candles_count: 1},
+      '/market/candles': {items: [{open_at: '2026-10-29T00:00:00Z', close_at: '2026-10-29T00:15:00Z', is_closed: true, open: 10, high: 12, low: 9, close: 11}]},
+      '/agents': [{agent: 'A', color: '#e2555b', status: 'RULE_DRIVEN', account: {state: 'FLAT', metrics: {equity: 10000, unrealized_pnl: 0, available_cash: 10000}}, strategy: {current_version: 'v1.0.0'}}],
+      '/fills': {items: [{fill_id: 'a1', agent: 'A', side: 'BUY', quantity: '1', price: '10', fee: '0', slippage: '0', occurred_at: '2026-10-29T00:16:00Z'}]},
+      '/trades': {items: []},
+      '/strategies': {items: [{agent: 'E', status: 'AUTO_PAPER', current_version: 'E-V1.0', archived_version: 'E-V1.0', candidate_version: 'E-V1.1-QUANT', candidate_status: 'AUTO_PAPER', runtime_mode: 'AUTO_PAPER', driving_version: 'E-V1.1-QUANT', core_lock: 'PROTECTED', versions: []}]},
+      '/evolutions': {items: []},
+      '/journal': {items: []},
+      '/e/accounts': {runtime: {mode: 'AUTO_PAPER'}, formal, shadow: {status: 'READY', account: {state: 'FLAT'}}},
+    }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      const entry = Object.entries(payloads).find(([path]) => url.includes(path))
+      return {ok: true, status: 200, redirected: false, url, json: async () => entry?.[1] ?? {}}
+    }))
+    render(<App />)
+    await waitFor(() => expect(screen.getByText('LONG / 0.02')).toBeInTheDocument())
+    expect(screen.getByText(/● E 憨巴/)).toBeInTheDocument()
+    expect(screen.getAllByLabelText('憨巴E账户').length).toBeGreaterThan(0)
+    fireEvent.click(screen.getByRole('button', {name: '交易日记'}))
+    await waitFor(() => expect(screen.getByRole('option', {name: 'E'})).toBeInTheDocument())
+    fireEvent.change(screen.getByLabelText('交易员'), {target: {value: 'E'}})
+    expect(screen.getByText('憨巴正式')).toBeInTheDocument()
+    expect(screen.queryByText('a1')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', {name: '策略管理'}))
+    expect(await screen.findByText('E策略 · AUTO_PAPER')).toBeInTheDocument()
+    expect(screen.getByText('驱动版本：E-V1.1-QUANT')).toBeInTheDocument()
+    expect(screen.queryByText(/CANDIDATE_NOT_ACTIVE/)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', {name: 'AI账户'}))
+    expect(screen.getByRole('heading', {name: '四个独立模拟账户'})).toBeInTheDocument()
+    expect(screen.getAllByLabelText('憨巴E账户').length).toBeGreaterThan(0)
   })
 })
