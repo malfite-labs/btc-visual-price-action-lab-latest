@@ -1,7 +1,15 @@
-import {E_COLOR, eEquityText, ePositionText, eRecentFillText} from './eDesk'
+import {E_COLOR, eEquityText, ePaperAccountLines, ePositionText, eRecentFillText} from './eDesk'
 
-export default function EDeskCard({data, driving}: {data: any; driving?: string}) {
+export default function EDeskCard({data, driving, variant = 'desk'}: {data: any; driving?: string; variant?: 'desk' | 'account'}) {
   const formal = data?.formal
+  if (variant === 'account') {
+    const view = ePaperAccountLines(formal, driving)
+    return <article className="card agent" aria-label="憨巴E账户" style={{overflowWrap: 'anywhere'}}>
+      <h2 style={{color: E_COLOR}}>{view.title}</h2>
+      {view.lines.map(line => <p key={line}>{line}</p>)}
+      <p className="muted">{view.note}</p>
+    </article>
+  }
   const ready = formal?.status === 'READY'
   const position = ePositionText(formal)
   const unrealized = !ready || formal?.unrealized_pnl == null ? '未估值' : `$${Number(formal.unrealized_pnl).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`

@@ -183,6 +183,57 @@ describe('workbench safeguards', () => {
     expect(screen.queryByText(/CANDIDATE_NOT_ACTIVE/)).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', {name: 'AI账户'}))
     expect(screen.getByRole('heading', {name: '四个独立模拟账户'})).toBeInTheDocument()
-    expect(screen.getAllByLabelText('憨巴E账户').length).toBeGreaterThan(0)
+    const accounts = screen.getByLabelText('憨巴E账户')
+    expect(screen.getByRole('heading', {name: 'E账户'})).toBeInTheDocument()
+    expect(accounts).toHaveTextContent('持仓方向/数量：LONG / 0.02')
+    expect(accounts).toHaveTextContent('入场/止损：100 / 90')
+    expect(accounts).toHaveTextContent('当前权益：$10,100.50')
+    expect(accounts).toHaveTextContent('策略：E-V1.1-QUANT')
+    expect(accounts).not.toHaveTextContent('正式盘空仓')
+  })
+
+  it('shows open E position metadata on the accounts tab when formal equity is unvalued', async () => {
+    const tradeId = '8716f491-2735-41a5-87bd-d86e944f1120'
+    const formal = {
+      status: 'READY', equity: null, unrealized_pnl: null, realized_pnl: '0',
+      valuation_status: 'UNVALUED_STALE_OR_UNAVAILABLE_QUOTE',
+      account: {state: 'OPEN_LONG', cash: '9939.69', version: 6, position_json: JSON.stringify({direction: 'LONG', quantity: '0.015', entry_price: '64000', stop_price: '62000', trade_id: tradeId})},
+      fills: Array.from({length: 5}, (_, index) => ({fill_id: `e${index}`, agent: 'E', side: index ? 'SELL' : 'BUY', quantity: '0.015', price: '64000', occurred_at: '2026-11-03T07:15:00Z'})),
+    }
+    const payloads: Record<string, unknown> = {
+      '/system/status': {feed_health: 'LIVE', rest: 'PASS', rest_quote: 'PASS'},
+      '/market/candles': {items: []},
+      '/agents': [
+        {agent: 'A', color: '#e2555b', account: {state: 'FLAT', metrics: {equity: 10000, available_cash: 10000, unrealized_pnl: 0}}},
+        {agent: 'B', color: '#26b37a', account: {state: 'FLAT', metrics: {equity: 10000, available_cash: 10000, unrealized_pnl: 0}}},
+        {agent: 'C', color: '#ed992f', account: {state: 'FLAT', metrics: {equity: 10000, available_cash: 10000, unrealized_pnl: 0}}},
+      ],
+      '/fills': {items: []}, '/trades': {items: []},
+      '/strategies': {items: [{agent: 'E', runtime_mode: 'AUTO_PAPER', driving_version: 'E-V1.1-QUANT', current_version: 'E-V1.0'}]},
+      '/evolutions': {items: []}, '/journal': {items: []},
+      '/e/accounts': {runtime: {mode: 'AUTO_PAPER'}, formal},
+    }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      const entry = Object.entries(payloads).find(([path]) => url.includes(path))
+      return {ok: true, status: 200, redirected: false, url, json: async () => entry?.[1] ?? {}}
+    }))
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', {name: 'AI账户'}))
+    const card = await screen.findByRole('heading', {name: 'E账户'})
+    expect(card.closest('section')).toHaveTextContent('A账户')
+    expect(card.closest('section')).toHaveTextContent('B账户')
+    expect(card.closest('section')).toHaveTextContent('C账户')
+    const hanba = screen.getByLabelText('憨巴E账户')
+    expect(hanba).toHaveTextContent(`持仓方向/数量：LONG / 0.015`)
+    expect(hanba).toHaveTextContent('入场/止损：64000 / 62000')
+    expect(hanba).toHaveTextContent(`持仓编号：${tradeId}`)
+    expect(hanba).toHaveTextContent('当前权益：未估值')
+    expect(hanba).toHaveTextContent('账户现金：$9,939.69')
+    expect(hanba).toHaveTextContent('可用资金：未估值')
+    expect(hanba).toHaveTextContent('正式成交 5 笔')
+    expect(hanba).not.toHaveTextContent('正式盘空仓')
+    expect(hanba).not.toHaveTextContent('当前权益：$9,939.69')
+    expect(hanba).not.toHaveTextContent('当前权益：$0.00')
   })
 })
