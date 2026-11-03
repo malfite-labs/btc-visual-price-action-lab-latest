@@ -30,7 +30,13 @@ test-results/
 /knowledge/**/evidence/
 /knowledge/**/audit/
 /frontend/.remote-access-src/
-/remote-access/
+# Keep tunnel credentials, static builds, logs, and the undeployed anonymous gateway
+# off the tree. Track only the Access proxy source and its tests.
+/remote-access/*
+!/remote-access/proxy.py
+!/remote-access/tests/
+/remote-access/tests/*
+!/remote-access/tests/test_proxy.py
 !.env.example
 
 # Local UI capture noise (not secrets)
