@@ -2059,3 +2059,10 @@ ecover_backend_minimal.ps1 预检又因缺少 docs/reports/abc-forward-v26/freez
 - Checklist：读取AGENTS与codex；确认仓库可见性及远端名称；核查凭据和数据库跟踪状态；审阅将暂存文件清单；提交后核验GitHub分支和提交SHA。
 - Anti-pattern：盲目git add -A后直接推送；把私有研究系统建成公开仓库；覆盖/替换原有origin；将.runtime、SQLite账本、运行日志或临时_ops_脚本上传。
 - 复盘：首次清点时递归扫描到本机.runtime虚拟环境，输出过大；后续清单显式排除了该目录，并将其加入.gitignore。本次仅做版本发布，不表示本机8011运行状态发生变化。实际发布命令及远端提交结果将在完成后补记。
+
+### GitHub同步过程补充复盘 — 2026-11-15
+- 问题：PowerShell逐行读取Git未跟踪文件清单时，Git为中文路径输出了C风格转义，首次`git add --`未匹配到该路径；随后改用`git ls-files -z`并通过Python按UTF-8/NUL分隔传入路径，完整纳入该启动文件。该失败未改动文件内容或生产数据。
+- Rule：Windows下处理含中文/空格的Git路径，使用NUL分隔的机器输出，不依赖人类可读的转义路径。
+- Checklist：暂存后用`git diff --cached --name-only -z`核对路径数量；确认所有预期新增文件存在；CRLF仓库用`core.whitespace=cr-at-eol`检查，避免把换行差异当作代码尾随空格并批量改写源码。
+- Anti-pattern：把PowerShell显示的Git路径直接当作pathspec；因CRLF检查噪声而全仓改换行。
+- 结果：新私有仓库`https://github.com/malfite-labs/btc-visual-price-action-lab-latest`的`main`已验证与本地提交`a58988a446967bf599d105e143848a3cd670a811`一致；原`origin`保留。最终同步记录提交另行推送。
