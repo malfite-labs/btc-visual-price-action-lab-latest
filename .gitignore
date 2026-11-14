@@ -41,3 +41,6 @@ test-results/
 
 # Local UI capture noise (not secrets)
 frontend/output/
+
+# Local probe/runtime environments
+.runtime/

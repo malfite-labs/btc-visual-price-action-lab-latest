@@ -58,6 +58,7 @@ class RuleCycleRunner:
  audit_version='rule-rejection-audit-v1'
  def __init__(self,ledger,db_path,cost=CostModel(),enabled=True):
   self.ledger=ledger;self.db_path=str(db_path);self.cost=cost;self.enabled=enabled;self.profile,self.rule,self.v3=load_profile()
+  spec=importlib.util.spec_from_file_location('formal_b_v31', ROOT/'config/rule_v26'/self.profile['B']['file']);b_module=importlib.util.module_from_spec(spec);spec.loader.exec_module(b_module);self.v3.signal_b=b_module.signal_b_filtered
   with sqlite3.connect(self.db_path) as c:c.execute('''create table if not exists rule_position_meta(agent text primary key,decision_id text not null,trade_id text,target text not null,entry_close text not null,max_hold integer not null,version text not null,exit_due text)''')
  def check_profile(self):
   p=ROOT/'config/rule_v26'
@@ -105,7 +106,7 @@ class RuleCycleRunner:
    if not due and not (px>=target if side=='bid' else px<=target):continue
    reason=due or 'RULE_TARGET';qty=D(pos['quantity'])
    slip=self.cost.adverse_slippage_bps/D(10000);price=floor_step(px*(1-slip),self.cost.simulated_tick) if side=='bid' else ceil_step(px*(1+slip),self.cost.simulated_tick)
-   out=self.ledger.close_position(agent=a,price=price,fee=qty*price*self.cost.fee_rate,slippage=abs(px-price)*qty,idempotency_key='rule-exit:'+pos['trade_id'],expected_version=acc['version'],reason=reason,decision_id=meta[0],strategy_version=meta[5],rationale='RULE_DRIVEN '+reason,cost_model=self.cost)
+   out=self.ledger.close_position(agent=a,price=price,fee=qty*price*self.cost.fee_rate,slippage=abs(px-price)*qty,idempotency_key='rule-exit:'+pos['trade_id'],expected_version=acc['version'],reason=reason,decision_id=meta[0],strategy_version=meta[5],rationale='RULE_DRIVEN '+reason,cost_model=self.cost,execution_quote=quote)
    outcomes[a]=out
    if out.get('accepted'):self._reconcile(a)
   return outcomes
@@ -150,7 +151,9 @@ class RuleCycleRunner:
      maxhold=int(self.rule['max_hold']) if a=='A' else int(self.profile[a]['max_hold'])
      with sqlite3.connect(self.db_path) as c:c.execute('insert into rule_position_meta values(?,?,?,?,?,?,?,?)',(a,ident,None,str(target),key,maxhold,version,None))
      qty=D(pre['quantity']);ref=D(str(quote['ask' if direction=='LONG' else 'bid']))
-     execution=self.ledger.open_position(agent=a,direction=direction,quantity=qty,price=D(pre['fill_price']),stop=stop,fee=D(pre['fee']),slippage=abs(D(pre['fill_price'])-ref)*qty,idempotency_key='rule-open:'+ident,expected_version=acc['version'],decision_id=ident,strategy_version=version,rationale=reason,quote_id=pre.get('quote_id'),cost_model=self.cost,risk_fraction=D(self.profile[a]['risk_fraction']),research_c_5x=(a=='C'))
+     from backend.strategy_control import StrategyControl,guarded_formal_open
+     control=StrategyControl(ROOT/'data/strategy-control.sqlite3')
+     execution=guarded_formal_open(control,self.ledger,a,agent=a,direction=direction,quantity=qty,price=D(pre['fill_price']),stop=stop,fee=D(pre['fee']),slippage=abs(D(pre['fill_price'])-ref)*qty,idempotency_key='rule-open:'+ident,expected_version=acc['version'],decision_id=ident,strategy_version=version,rationale=reason,quote_id=pre.get('quote_id'),cost_model=self.cost,risk_fraction=D(self.profile[a]['risk_fraction']),research_c_5x=(a=='C'),execution_quote=quote)
      if execution.get('accepted'):self._reconcile(a)
      else:
       with sqlite3.connect(self.db_path) as c:c.execute('delete from rule_position_meta where agent=?',(a,))

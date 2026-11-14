@@ -12,7 +12,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from time import monotonic
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
@@ -49,7 +49,10 @@ from backend.vision import (
 from backend.vision_provider import ConfigurableVisionAdapter
 
 ROOT = Path(__file__).resolve().parent.parent
-DB_PATH = os.getenv("BTC_LAB_DB", str(ROOT / "data" / "paper.sqlite3"))
+DATA_ROOT = Path(os.getenv("BTC_LAB_DATA_DIR", str(ROOT / "data"))).resolve()
+if os.getenv("BTC_LAB_TEST_MODE", "false").lower() == "true" and not os.getenv("BTC_LAB_DATA_DIR"):
+    raise RuntimeError("TEST_DATA_ROOT_REQUIRED")
+DB_PATH = os.getenv("BTC_LAB_DB", str(DATA_ROOT / "paper.sqlite3"))
 
 
 def _load_project_deepseek_key() -> None:
@@ -67,7 +70,7 @@ def _load_project_deepseek_key() -> None:
 
 
 def _stored_image_capability(model: str, base_url: str, endpoint_path: str) -> bool:
-    marker = ROOT / "data" / "vision-capability.json"
+    marker = DATA_ROOT / "vision-capability.json"
     if not marker.is_file():
         return False
     try:
@@ -86,7 +89,10 @@ def _stored_image_capability(model: str, base_url: str, endpoint_path: str) -> b
 
 
 _load_project_deepseek_key()
-ledger = Ledger(DB_PATH)
+ledger = Ledger(DB_PATH, mirror_enabled=True)
+from backend.g_mirror import GMirror
+g_mirror = GMirror(DATA_ROOT / "g" / "mirror.sqlite3", cost=COST_MODEL)
+ledger.set_mirror_dispatcher(g_mirror.handle_c_fill)
 archive_path = os.getenv('BTC_LAB_CANDLE_DB', str(Path(DB_PATH).with_name('market-candles.sqlite3')))
 candle_archive = CandleArchive(archive_path)
 decision_store = AgentOrchestrator(DB_PATH)
@@ -128,14 +134,14 @@ def _paper_automation_gate(config, adapter) -> tuple[bool, str]:
     ):
         return False, "CUMULATIVE_BUDGET_NOT_SAFE"
     try:
-        Path(config.budget_db_path).resolve().relative_to((ROOT / "data").resolve())
+        Path(config.budget_db_path).resolve().relative_to((DATA_ROOT).resolve())
     except ValueError:
         return False, "BUDGET_PATH_OUTSIDE_PROJECT"
     return True, "READY"
 
 
 def _formal_mode():
-    path = ROOT / 'data' / 'formal-mode.json'
+    path = DATA_ROOT / 'formal-mode.json'
     if not path.exists():
         return 'VISUAL'
     try:
@@ -282,6 +288,8 @@ async def market_loop():
                 # E claims the same closed snapshot independently of ABC's watermark.
                 e_dispatch=globals().get('_schedule_e_market_from_loop')
                 if e_dispatch is not None:e_dispatch(candles,last_close)
+                d_dispatch=globals().get('_schedule_d_market_from_loop')
+                if d_dispatch is not None:d_dispatch(last_close)
                 dispatchable, dispatch_reason = claim_closed_bar_for_dispatch(
                     last_close, ROOT / ".run" / "market-decision-watermark.json"
                 )
@@ -316,9 +324,17 @@ async def quote_loop():
             pass
 
 
+def _fail_d_dispatch(bridge, reason):
+    try:
+        bridge.fail_dispatch(reason)
+    except Exception:
+        logging.getLogger(__name__).exception('D failure latch failed')
+
+
 async def stream_events(event: dict):
     market_status["websocket"] = market.status.get("websocket", "CONNECTED")
     if event.get("T") == "q":
+        d_dispatched = False
         try:
             event_at = datetime.fromisoformat(event["t"])
             received = datetime.now(UTC)
@@ -343,8 +359,29 @@ async def stream_events(event: dict):
             market_status["websocket_quote"] = (
                 "PASS" if timing["timestamp_valid"] else "TIMESTAMP_INVALID"
             )
+            if d_bridge is not None:
+                try:
+                    bid, ask = Decimal(str(event['bp'])), Decimal(str(event['ap']))
+                    raw_valid = (event.get('S') == 'BTC/USD'
+                                 and event.get('source') == 'ALPACA_US_BTCUSD_SPOT'
+                                 and event.get('currency') == 'USD_RESEARCH'
+                                 and event.get('timestamp_valid') is True
+                                 and timing['timestamp_valid'] is True
+                                 and bid.is_finite() and ask.is_finite() and 0 < bid <= ask)
+                    if not raw_valid:
+                        _fail_d_dispatch(d_bridge, 'D_RAW_QUOTE_INVALID')
+                    elif not d_bridge.submit_quote(quote):
+                        _fail_d_dispatch(d_bridge, 'D_QUOTE_SUBMIT_FAILED')
+                except (KeyError, TypeError, ValueError, ArithmeticError, InvalidOperation):
+                    _fail_d_dispatch(d_bridge, 'D_RAW_QUOTE_INVALID')
+                except Exception:
+                    logging.getLogger(__name__).exception('D quote dispatch failed')
+                    _fail_d_dispatch(d_bridge, 'D_QUOTE_SUBMIT_FAILED')
+                d_dispatched = True
             await process_stop_quote(quote)
         except Exception as exc:
+            if d_bridge is not None and not d_dispatched:
+                _fail_d_dispatch(d_bridge, 'D_QUOTE_PARSE_FAILED')
             market_status["websocket_quote"] = "PARSE_ERROR"
             market_status["quote_error"] = type(exc).__name__
     elif event.get("T") == "error":
@@ -356,6 +393,20 @@ async def process_stop_quote(quote: dict) -> None:
     """Run persistent stop monitoring and pending-stop recovery on quote events, without AI."""
     if quote.get("source") != market.source:
         return
+    try:
+        await asyncio.to_thread(g_mirror.monitor_quote, quote)
+        ledger.schedule_mirror_outbox()
+    except Exception:
+        # G is isolated: its emergency exit must never disrupt C's existing protection loop.
+        logging.getLogger(__name__).exception("G mirror risk monitor failed")
+    try:
+        await asyncio.to_thread(strategy_pool.monitor_quote, quote,
+                                 max_age_ms=COST_MODEL.max_quote_age_ms,
+                                 fee_rate=Decimal(str(COST_MODEL.fee_rate)),
+                                 slippage=Decimal(str(COST_MODEL.adverse_slippage_bps))/Decimal(10000))
+    except Exception:
+        # Pool failures must not block the existing ABC/E protective quote path.
+        logging.getLogger(__name__).exception('Isolated strategy-pool stop monitor failed')
     event_material = "|".join(
         str(quote.get(key, "")) for key in ("event_at", "bid", "ask", "source")
     )
@@ -365,8 +416,8 @@ async def process_stop_quote(quote: dict) -> None:
     recovery = paper_scheduler.recover_stops(quote=quote, cost=COST_MODEL)
     try:
         from backend.e_protection import protect_e_accounts
-        e_protection = protect_e_accounts({"formal": ROOT / "data" / "e" / "formal.sqlite3",
-                                           "shadow": ROOT / "data" / "e" / "shadow.sqlite3"}, quote, COST_MODEL)
+        e_protection = protect_e_accounts({"formal": DATA_ROOT / "e" / "formal.sqlite3",
+                                           "shadow": DATA_ROOT / "e" / "shadow.sqlite3"}, quote, COST_MODEL)
         for kind, outcome in e_protection.items():
             if outcome.get("reason") == "PROTECTION_ERROR":
                 logging.getLogger(__name__).error("E protection failed: %s %s", kind, outcome.get("error_class"))
@@ -437,7 +488,7 @@ def _dispatch_e_market_snapshot(rows,close,*,now,schedule=True):
     window=_closed_cycle_candles(rows,close)
     if any(not _valid_cycle_candle(row) for row in window):return 'CANDLE_SOURCE_OR_INTERVAL_MISMATCH'
     resolve_e_decision({'action':'SKIP'},window,mapping_verified=False)
-    path=ROOT/'data'/'e'/'formal.sqlite3'
+    path=DATA_ROOT/'e'/'formal.sqlite3'
     if not path.exists():return 'E_LEDGER_MISSING'
     from backend.e_paper_store import EPaperStore
     store=EPaperStore(path)
@@ -457,7 +508,7 @@ async def _dispatch_e_market_async(rows,close):
             if not _schedule_e_observation(_closed_cycle_candles(rows,close),close):
                 def mark_failed():
                     from contextlib import closing
-                    with closing(sqlite3.connect(ROOT/'data'/'e'/'formal.sqlite3',timeout=10)) as db,db:
+                    with closing(sqlite3.connect(DATA_ROOT/'e'/'formal.sqlite3',timeout=10)) as db,db:
                         db.execute("UPDATE e_market_dispatch SET status='SCHEDULING_FAILED' WHERE close_at=?",(close.astimezone(UTC).isoformat(),))
                 await asyncio.to_thread(mark_failed)
     except Exception:
@@ -472,6 +523,49 @@ def _schedule_e_market_from_loop(rows,close):
         task.add_done_callback(_e_market_tasks.discard)
     except Exception:
         logging.getLogger(__name__).exception('E market dispatch failed')
+
+
+_d_market_tasks: set[asyncio.Task] = set()
+d_bridge = None
+
+
+def _d_feed_healthy():
+    quote = market.status.get('last_quote') or {}
+    return (market.status.get('websocket_recovery_state') == 'HEALTHY'
+            and websocket_quote_health(
+                market.status.get('websocket', 'UNKNOWN'),
+                market.status.get('websocket_last_quote_received_at'), datetime.now(UTC),
+                timestamp_valid=bool(quote.get('timestamp_valid')),
+                last_quote_event_at=quote.get('event_at')) == 'FRESH')
+
+
+def _d_candles_complete():
+    return (market_status.get('feed_health') == 'LIVE'
+            and market_status.get('gap_count_288') == 0
+            and len(candles) >= 288)
+
+
+def _schedule_d_market_from_loop(close):
+    """Dispatch only current closed bars to the independent D observer."""
+    if close.astimezone(UTC) <= _e_scheduler_started_at:
+        return
+    if d_bridge is not None:
+        try:
+            if not d_bridge.submit_bar(close):
+                _fail_d_dispatch(d_bridge, 'D_BAR_SUBMIT_FAILED')
+        except Exception:
+            logging.getLogger(__name__).exception('D bar dispatch failed')
+            _fail_d_dispatch(d_bridge, 'D_BAR_SUBMIT_FAILED')
+        return
+    async def observe():
+        try:
+            from backend.d_paper import observe_cycle
+            await asyncio.to_thread(observe_cycle, DATA_ROOT/'d'/'formal.sqlite3', candle_archive, close, datetime.now(UTC))
+        except Exception:
+            logging.getLogger(__name__).exception('D market observation failed')
+    task = asyncio.create_task(observe())
+    _d_market_tasks.add(task)
+    task.add_done_callback(_d_market_tasks.discard)
 
 
 def _cycle_decision_context(account, metrics, quote, close, image_hash, candle_digest, data_mode):
@@ -548,7 +642,7 @@ async def _e_quant_preflight(closed: list[dict], candidate: dict) -> dict:
     from backend.e_quant_gate import evaluate_quant_candidate
 
     quote = await market.latest_quote()
-    store = EPaperStore(ROOT / 'data' / 'e' / 'formal.sqlite3')
+    store = EPaperStore(DATA_ROOT / 'e' / 'formal.sqlite3')
     return evaluate_quant_candidate(
         store=store, bars=closed, candidate=candidate, quote=quote,
         now=datetime.now(UTC), cost=COST_MODEL,
@@ -557,7 +651,7 @@ async def _e_quant_preflight(closed: list[dict], candidate: dict) -> dict:
 
 def _e_strategy_runtime():
     """Live E mode for the strategy list. Missing files leave the registry record unchanged."""
-    data = ROOT / "data" / "e"
+    data = DATA_ROOT / "e"
     if not (data / "auto-paper.json").is_file():
         return None
     from backend.e_quant_observer import selected_observe_strategy
@@ -571,12 +665,12 @@ def _e_strategy_runtime():
 
 def _e_auto_settings():
     try:
-        auto=json.loads((ROOT/'data'/'e'/'auto-paper.json').read_text(encoding='utf8'))
+        auto=json.loads((DATA_ROOT/'e'/'auto-paper.json').read_text(encoding='utf8'))
         if set(auto)!={'mode','long_enabled','short_enabled'} or auto['mode']!='AUTO_PAPER' or auto['long_enabled'] is not True or type(auto['short_enabled']) is not bool:return False,False
         if not auto['short_enabled']:return True,False
     except (OSError,ValueError,TypeError,KeyError):return False,False
     try:
-        risk=json.loads((ROOT/'data'/'e'/'short-risk.json').read_text(encoding='utf8'))
+        risk=json.loads((DATA_ROOT/'e'/'short-risk.json').read_text(encoding='utf8'))
         return True,risk=={'leverage':'1','maintenance_rate':'0.01','risk_fraction':'0.02','authorized':True}
     except (OSError,ValueError,TypeError):return True,False
 
@@ -587,9 +681,9 @@ async def _run_e_auto_observation(closed, close, observer, adapter,allow_short=F
     from backend.e_auto_cycle import run_e_auto_cycle
     from backend.e_paper_store import EPaperStore
     async def shadow_baseline(quote):
-        shadow_path=ROOT/'data'/'e'/'shadow.sqlite3'
+        shadow_path=DATA_ROOT/'e'/'shadow.sqlite3'
         try:
-            setting=json.loads((ROOT/'data'/'e'/'shadow-config.json').read_text(encoding='utf8'))
+            setting=json.loads((DATA_ROOT/'e'/'shadow-config.json').read_text(encoding='utf8'))
             if setting!={'mode':'BASELINE','enabled':True} or not shadow_path.exists():return
             await run_e_auto_cycle(store=EPaperStore(shadow_path),bars=closed,close=datetime.now(UTC),quote=dict(quote),cost=COST_MODEL,allow_short=allow_short)
         except Exception:
@@ -600,10 +694,10 @@ async def _run_e_auto_observation(closed, close, observer, adapter,allow_short=F
             return
         from backend.e_quant_observer import EQuantObserver
         from backend.e_observer import create_e_observe_adapter
-        target=EQuantObserver(ROOT/'data'/'e-quant-observations.sqlite3',ROOT/'data'/'snapshots'/'E-V1.1',strategies)
-        visual=create_e_observe_adapter(ROOT/'data'/'e',vision_adapter.image_capability_verified,strategy_version='E-V1.1-QUANT')
+        target=EQuantObserver(DATA_ROOT/'e-quant-observations.sqlite3',DATA_ROOT/'snapshots'/'E-V1.1',strategies)
+        visual=create_e_observe_adapter(DATA_ROOT/'e',vision_adapter.image_capability_verified,strategy_version='E-V1.1-QUANT')
         await dispatch_e_observation(target,closed,close,visual or vision_adapter)
-    path=ROOT / 'data' / 'e' / 'formal.sqlite3'
+    path=DATA_ROOT / 'e' / 'formal.sqlite3'
     if not path.exists():
         logging.getLogger(__name__).error('E auto ledger is missing')
         return
@@ -638,23 +732,23 @@ def _schedule_e_observation(closed: list[dict], close: datetime) -> None:
     from backend.e_quant_observer import EQuantObserver, selected_observe_strategy
     try:
         enabled,short_enabled=_e_auto_settings()
-        if selected_observe_strategy(ROOT/'data'/'e')=='E-V1.1-QUANT' and enabled:
+        if selected_observe_strategy(DATA_ROOT/'e')=='E-V1.1-QUANT' and enabled:
             task=asyncio.create_task(_run_e_auto_observation([dict(b) for b in closed],close,None,None,allow_short=short_enabled))
             _e_observation_tasks.add(task)
             task.add_done_callback(_e_observation_tasks.discard)
             return True
         if _e_observer is None:
-            version = selected_observe_strategy(ROOT / "data" / "e")
+            version = selected_observe_strategy(DATA_ROOT / "e")
             _e_observe_version = version
             if version == "E-V1.1-QUANT":
-                _e_observer = EQuantObserver(ROOT / "data" / "e-quant-observations.sqlite3", ROOT / "data" / "snapshots" / "E-V1.1", strategies, recover_interrupted=True, preflight=_e_quant_preflight)
+                _e_observer = EQuantObserver(DATA_ROOT / "e-quant-observations.sqlite3", DATA_ROOT / "snapshots" / "E-V1.1", strategies, recover_interrupted=True, preflight=_e_quant_preflight)
             elif version == "E-V1.0":
-                _e_observer = EObserver(ROOT / "data" / "e-observations.sqlite3", ROOT / "data" / "snapshots" / "E", strategies, recover_interrupted=True)
+                _e_observer = EObserver(DATA_ROOT / "e-observations.sqlite3", DATA_ROOT / "snapshots" / "E", strategies, recover_interrupted=True)
             else:
                 logging.getLogger(__name__).error("E observe strategy configuration is invalid")
                 return False
         if _e_observe_adapter is None:
-            _e_observe_adapter = create_e_observe_adapter(ROOT / "data" / "e", vision_adapter.image_capability_verified, strategy_version=_e_observe_version)
+            _e_observe_adapter = create_e_observe_adapter(DATA_ROOT / "e", vision_adapter.image_capability_verified, strategy_version=_e_observe_version)
         task = asyncio.create_task(dispatch_e_observation(_e_observer, closed, close, _e_observe_adapter or vision_adapter))
         _e_observation_tasks.add(task)
         task.add_done_callback(_e_observation_tasks.discard)
@@ -737,7 +831,7 @@ async def process_closed_bar(
         if recovery_blocked(ledger, paper_runner):
             return blocked('PROTECTIVE_EXIT_RECOVERY_PENDING')
         try:
-            activation_data = json.loads((ROOT / 'data' / 'formal-mode.json').read_text(encoding='utf-8-sig'))
+            activation_data = json.loads((DATA_ROOT / 'formal-mode.json').read_text(encoding='utf-8-sig'))
             activated_at = datetime.fromisoformat(activation_data['activated_at_utc'])
             if activated_at.tzinfo is None or close <= activated_at.astimezone(UTC):
                 return blocked('RULE_MODE_PRE_ACTIVATION')
@@ -757,6 +851,7 @@ async def process_closed_bar(
             candle_close=close, candle_is_closed=True, now=datetime.now(UTC),
             candles=closed, quote=quote, orderbook=book,
         )
+        await _dispatch_strategy_pool_cycle(closed, close, quote)
         await broadcast({'type': 'scheduler_cycle', 'close_at': close.isoformat(), 'result': result})
         return result
     from backend.market import Candle
@@ -764,7 +859,7 @@ async def process_closed_bar(
     path = (
         Path(snapshot_path)
         if snapshot_path
-        else ROOT / "data" / "snapshots" / f"{close:%Y%m%dT%H%M%SZ}.png"
+        else DATA_ROOT / "snapshots" / f"{close:%Y%m%dT%H%M%SZ}.png"
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     evidence = render_ai_snapshot([Candle(**row) for row in closed], path)
@@ -883,6 +978,9 @@ async def process_closed_bar(
         feed_healthy=True,
         refresh_market=refresh_market,
     )
+    # New strategies consume the same validated natural bar and shared candles.
+    # Their isolated failures cannot affect ABCDE results or ledgers.
+    await _dispatch_strategy_pool_cycle(closed, close, market_status.get('quote'))
     for agent, outcome in result.items():
         execution = outcome.get("execution") or {}
         if execution.get("accepted") is False:
@@ -898,15 +996,84 @@ async def process_closed_bar(
     return result
 
 
+async def _dispatch_strategy_pool_cycle(closed, close, quote):
+    """Run the isolated PA cycle once with the already validated close and shared quote."""
+    try:
+        pool_bars = [dict(x) for x in closed[-1000:]]
+        pool_quote = _quote_with_live_age(quote) or {}
+        outcomes = await asyncio.to_thread(
+            strategy_pool.cycle, pool_bars, close,
+            max_age_ms=COST_MODEL.max_quote_age_ms,
+            quote_age_ms=int(pool_quote.get('age_ms', 10**9)),
+            quote=pool_quote,
+            fee_rate=Decimal(str(COST_MODEL.fee_rate)),
+            slippage=Decimal(str(COST_MODEL.adverse_slippage_bps)) / Decimal(10000),
+            quantity_step=Decimal(str(COST_MODEL.quantity_step)),
+            min_quantity=Decimal(str(COST_MODEL.minimum_quantity)),
+            min_notional=Decimal(str(COST_MODEL.minimum_notional)),
+        )
+        logging.getLogger(__name__).info(
+            'Isolated strategy-pool cycle close=%s outcomes=%s',
+            close.isoformat(), json.dumps(outcomes, ensure_ascii=False, sort_keys=True),
+        )
+    except Exception:
+        logging.getLogger(__name__).exception(
+            'Isolated strategy-pool cycle failed close=%s', close.isoformat(),
+        )
+
+
+def _d_auto_paper_requested():
+    """Use explicit opt-in and the existing paper automation gate."""
+    if not paper_automation_enabled or formal_mode != 'RULE_DRIVEN':
+        return False
+    value = os.getenv('D_AUTO_PAPER_ENABLED')
+    if value is not None:
+        return value.lower() == 'true'
+    try:
+        path = DATA_ROOT / 'd' / 'auto-paper.json'
+        config = json.loads(path.read_text(encoding='utf8'))
+        return (isinstance(config, dict) and set(config) == {'mode', 'enabled'}
+                and config['mode'] == 'AUTO_PAPER' and config['enabled'] is True)
+    except (OSError, ValueError, TypeError):
+        return False
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global lifespan_active, market_task_startup
+    global lifespan_active, market_task_startup, d_bridge
     if lifespan_active:
         yield
         return
     lifespan_active = True
     stop_event.clear()
     try:
+        try:
+            await asyncio.to_thread(ledger.dispatch_mirror_outbox)
+        except Exception:
+            logging.getLogger(__name__).exception("G mirror outbox replay failed")
+        async def start_d_components():
+            global d_bridge
+            try:
+                from backend.d_paper import initialize_store
+                await asyncio.to_thread(initialize_store, DATA_ROOT/'d'/'formal.sqlite3')
+            except (OSError, sqlite3.Error, ValueError):
+                logging.getLogger(__name__).exception('D observation store unavailable')
+                return
+            if stop_event.is_set() or not _d_auto_paper_requested():
+                return
+            try:
+                from backend.d_bridge import DBridge
+                bridge = DBridge(DATA_ROOT/'d'/'formal.sqlite3', DATA_ROOT/'d'/'trading.sqlite3',
+                                 candle_archive, feed_healthy=_d_feed_healthy,
+                                 candles_complete=_d_candles_complete)
+                await bridge.start()
+                if stop_event.is_set():
+                    await bridge.close()
+                else:
+                    d_bridge = bridge
+            except Exception:
+                logging.getLogger(__name__).exception('D bridge startup failed')
+        d_start_task = asyncio.create_task(start_d_components())
         if market.credentials:
             tasks.extend(
                 [
@@ -921,18 +1088,136 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         stop_event.set()
+        if d_start_task is not None:
+            await asyncio.gather(d_start_task, return_exceptions=True)
+        if d_bridge is not None:
+            bridge, d_bridge = d_bridge, None
+            try:
+                await bridge.close()
+            except Exception:
+                logging.getLogger(__name__).exception('D bridge shutdown failed')
         for task in tasks:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         tasks.clear()
+        for task in _d_market_tasks:
+            task.cancel()
+        if _d_market_tasks:
+            await asyncio.gather(*_d_market_tasks, return_exceptions=True)
         market_task_startup = "STOPPED"
         lifespan_active = False
         if paper_scheduler_lease is not None:
             paper_scheduler_lease.release()
 
 
-app = FastAPI(title="BTC Visual Price Action Lab", version="1.0.3", lifespan=lifespan)
+app = FastAPI(title="BTC Visual Price Action Lab", version="1.0.4", lifespan=lifespan)
+
+# User supplied strategies are stored in their own database. They are never
+# initialized from ABCDE's paper database and remain disabled after upload.
+from backend.strategy_pool import StrategyPool, StrategyValidationError
+strategy_pool = StrategyPool(os.getenv('BTC_LAB_STRATEGY_POOL_DB', str(DATA_ROOT / 'strategy-pool.sqlite3')))
+
+@app.get('/api/v1/g-mirror/status')
+async def g_mirror_status():
+    quote = _quote_with_live_age(market_status.get('quote')) or {}
+    status = g_mirror.status(quote)
+    c_account = ledger.account('C')
+    c_position = json.loads(c_account['position_json']) if c_account.get('position_json') else None
+    status['c_position'] = c_position
+    pairs = g_mirror.pairs()
+    status['latest_pair'] = pairs[-1] if pairs else None
+    if status['latest_pair']:
+        pair = status['latest_pair']
+        gfill = next((fill for fill in reversed(g_mirror.fills()) if fill['c_trade_id'] == pair['c_trade_id']), None)
+        cfill = next((fill for fill in reversed(ledger.fills('C')) if fill['fill_id'] == (gfill or {}).get('source_fill_id')), None)
+        status['latest_g_fill'] = gfill
+        status['latest_c_fill'] = cfill
+        if cfill and gfill:
+            try:
+                c_at = datetime.fromisoformat(cfill['occurred_at'].replace('Z', '+00:00'))
+                g_at = datetime.fromisoformat(gfill['occurred_at'].replace('Z', '+00:00'))
+                status['last_fill_delay_ms'] = int(abs((g_at-c_at).total_seconds())*1000)
+            except (TypeError, ValueError):
+                status['last_fill_delay_ms'] = None
+    return status
+
+@app.get('/api/v1/g-mirror/fills')
+async def g_mirror_fills(limit: int = 500):
+    if not 1 <= limit <= 2000:
+        raise HTTPException(400, 'LIMIT_INVALID')
+    rows = g_mirror.fills()
+    return {'items': rows[-limit:]}
+
+@app.get('/api/v1/strategy-pool')
+async def strategy_pool_list():
+    return {'items': strategy_pool.list()}
+
+@app.get('/api/v1/strategy-pool/{strategy_id}/versions')
+async def strategy_pool_versions(strategy_id: str):
+    return {'items': strategy_pool.versions(strategy_id)}
+
+@app.post('/api/v1/strategy-pool/upload')
+async def strategy_pool_upload(request: Request):
+    try:
+        raw = await request.body()
+        if len(raw) > 64000: raise StrategyValidationError('文件超过 64KB')
+        result = strategy_pool.upload(raw)
+        history = strategy_pool.versions(result['strategy_id'])
+        result['previous_version'] = history[-2]['version'] if len(history) > 1 else None
+        result['change_summary'] = '首个版本' if len(history) == 1 else '新版本已保存；旧版本及其持仓归属不变'
+        result['version_diff'] = strategy_pool.diff(result['strategy_id'],history[-2]['version'],result['version']) if len(history)>1 else {'from':None,'to':result['version'],'changes':[]}
+        return {'validation': {'valid': True, 'checks': ['结构与字段', '受限规则', '市场与周期', '固定风险配置'], 'errors': []}, **result}
+    except StrategyValidationError as exc:
+        raise HTTPException(status_code=422, detail={'valid':False,'errors':[str(exc)]}) from exc
+
+@app.post('/api/v1/strategy-pool/{strategy_id}/enable')
+async def strategy_pool_enable(strategy_id: str, request: Request):
+    body=await request.json()
+    try: result=strategy_pool.enable(strategy_id,body.get('version'),body.get('enabled') is True)
+    except StrategyValidationError as exc: raise HTTPException(status_code=409,detail=str(exc)) from exc
+    return {'ok':True,**result,'items':strategy_pool.list()}
+
+@app.post('/api/v1/strategy-pool/{strategy_id}/archive')
+async def strategy_pool_archive(strategy_id: str):
+    try: result=strategy_pool.archive(strategy_id)
+    except StrategyValidationError as exc: raise HTTPException(status_code=409,detail=str(exc)) from exc
+    return {'ok':True,**result}
+
+@app.post('/api/v1/strategy-pool/{strategy_id}/restore')
+async def strategy_pool_restore(strategy_id: str, request: Request):
+    body=await request.json()
+    try: result=strategy_pool.restore(strategy_id,body.get('version'))
+    except StrategyValidationError as exc: raise HTTPException(status_code=409,detail=str(exc)) from exc
+    return {'ok':True,**result,'items':strategy_pool.list()}
+
+@app.get('/api/v1/strategy-pool/{strategy_id}/lifecycle-events')
+async def strategy_pool_lifecycle_events(strategy_id: str):
+    return {'items':strategy_pool.lifecycle_events(strategy_id)}
+
+@app.get('/api/v1/strategy-pool/{strategy_id}/diff')
+async def strategy_pool_diff(strategy_id: str, old: str, new: str):
+    try: return strategy_pool.diff(strategy_id,old,new)
+    except StrategyValidationError as exc: raise HTTPException(status_code=404,detail=str(exc)) from exc
+
+@app.get('/api/v1/strategy-pool/{strategy_id}/fills')
+async def strategy_pool_fills(strategy_id: str, limit: int = 500):
+    if not 1 <= limit <= 2000: raise HTTPException(400,'LIMIT_INVALID')
+    return {'items':strategy_pool.fills(strategy_id,limit)}
+
+@app.post('/api/v1/strategy-pool/{strategy_id}/backtest')
+async def strategy_pool_backtest(strategy_id: str, request: Request):
+    body=await request.json();version=body.get('version');start=body.get('start');end=body.get('end')
+    try:
+        begin=archive_utc(start);finish=archive_utc(end);now=datetime.now(UTC)
+        if not version or begin>=finish or finish-begin>timedelta(days=30) or begin.minute%15 or begin.second or begin.microsecond or finish.minute%15 or finish.second or finish.microsecond or finish>now:
+            raise ValueError('INVALID_RANGE')
+        rows=candle_archive.read(begin,finish)
+        expected=int((finish-begin).total_seconds()//900)
+        if len(rows)!=expected: raise StrategyValidationError(f'历史数据不完整：需要 {expected} 根，当前 {len(rows)} 根；未请求补取数据')
+        return strategy_pool.backtest(strategy_id,version,rows,start=begin.isoformat(),end=finish.isoformat(),fee_rate=Decimal(str(COST_MODEL.fee_rate)),slippage=Decimal(str(COST_MODEL.adverse_slippage_bps))/Decimal(10000),quantity_step=Decimal(str(COST_MODEL.quantity_step)),min_quantity=Decimal(str(COST_MODEL.minimum_quantity)),min_notional=Decimal(str(COST_MODEL.minimum_notional)))
+    except StrategyValidationError as exc: raise HTTPException(422,detail=str(exc)) from exc
+    except (ValueError,TypeError) as exc: raise HTTPException(400,'INVALID_BACKTEST_RANGE_OR_DATA') from exc
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -953,6 +1238,74 @@ class CImport(BaseModel):
 @app.get("/api/v1/health")
 async def health():
     return {"status": "ok", "version": app.version, "live_trading_disabled": True}
+
+
+def _strategy_control():
+    from backend.strategy_control import StrategyControl
+    return StrategyControl(DATA_ROOT / 'strategy-control.sqlite3')
+
+
+def _strategy_stores(agent):
+    if agent == 'E':
+        from backend.e_paper_store import EPaperStore
+        paths = {'formal': DATA_ROOT / 'e/formal.sqlite3', 'shadow': DATA_ROOT / 'e/shadow.sqlite3'}
+        result = {}
+        for name, path in paths.items():
+            try: result[name] = EPaperStore(path) if path.is_file() else None
+            except Exception: result[name] = None
+        return result
+    path = ROOT / 'docs/reports/abc-forward-v26/shadow-ledger.sqlite3'
+    shadow = None
+    if path.is_file():
+        try:
+            with sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True) as db:
+                if db.execute('pragma quick_check').fetchone()[0] != 'ok': raise ValueError('BAD_SHADOW')
+                required = {'accounts', 'fills', 'forward_cycles', 'forward_positions'}
+                existing = {r[0] for r in db.execute("select name from sqlite_master where type='table'")}
+                if not required <= existing: raise ValueError('INVALID_SHADOW_IDENTITY')
+            shadow = Ledger(path)
+        except Exception:
+            shadow = None
+    return {'formal': ledger, 'shadow': shadow}
+
+
+def _strategy_formal_store(agent):
+    if agent != 'E': return ledger
+    from backend.e_paper_store import EPaperStore
+    path = DATA_ROOT / 'e/formal.sqlite3'
+    return EPaperStore(path) if path.is_file() else None
+
+
+@app.get('/api/v1/strategy-control')
+async def strategy_control_status():
+    control = _strategy_control()
+    return {agent: control.status(agent) for agent in 'ABCE'}
+
+
+@app.post('/api/v1/strategy-control/{agent}/{action}')
+async def strategy_control_action(agent: str, action: str, request: Request):
+    if request.client is None or request.client.host not in ('127.0.0.1', '::1'):
+        raise HTTPException(status_code=403, detail='LOCAL_ONLY')
+    origin = request.headers.get('origin')
+    if origin and origin not in ('http://127.0.0.1:5174', 'http://localhost:5174'):
+        raise HTTPException(status_code=403, detail='ORIGIN_DENIED')
+    if formal_mode != 'RULE_DRIVEN':
+        raise HTTPException(status_code=409, detail='RULE_DRIVEN_REQUIRED')
+    agent = agent.upper()
+    if agent not in 'ABCE' or len(agent) != 1 or action not in ('pause', 'resume'):
+        raise HTTPException(status_code=400, detail='INVALID_ACTION')
+    control = _strategy_control()
+    if action == 'resume':
+        if not await asyncio.to_thread(control.resume, agent):
+            raise HTTPException(status_code=409, detail='PAUSE_NOT_COMPLETE')
+        return control.status(agent)
+    await asyncio.to_thread(control.request_pause, agent)
+    try:
+        store = await asyncio.to_thread(_strategy_formal_store, agent)
+    except Exception:
+        store = None
+    quote = _quote_with_live_age(market_status.get('quote')) or {}
+    return await asyncio.to_thread(control.pause_formal, agent, store, quote, COST_MODEL, datetime.now(UTC))
 
 
 def _shadow_evolution_status():
@@ -1174,25 +1527,37 @@ async def get_e_accounts():
     from backend.e_quant_observer import selected_observe_strategy
     quote = _quote_with_live_age(market_status.get("quote"))
     auto_enabled,short_enabled=_e_auto_settings()
-    enabled=selected_observe_strategy(ROOT/'data'/'e')=='E-V1.1-QUANT' and auto_enabled
+    enabled=selected_observe_strategy(DATA_ROOT/'e')=='E-V1.1-QUANT' and auto_enabled
     try:
-        shadow=json.loads((ROOT/'data'/'e'/'shadow-config.json').read_text(encoding='utf8'))
+        shadow=json.loads((DATA_ROOT/'e'/'shadow-config.json').read_text(encoding='utf8'))
     except (OSError,ValueError,TypeError):shadow=None
-    return {"formal": read_e_store(ROOT / "data" / "e" / "formal.sqlite3", quote=quote),
-            "shadow": read_e_store(ROOT / "data" / "e" / "shadow.sqlite3", quote=quote),
+    return {"formal": read_e_store(DATA_ROOT / "e" / "formal.sqlite3", quote=quote),
+            "shadow": read_e_store(DATA_ROOT / "e" / "shadow.sqlite3", quote=quote),
             "runtime":{"mode":"AUTO_PAPER" if enabled else "OBSERVE_ONLY","setups":{"E1":enabled,"E2":enabled,"E3":enabled,"E4":enabled and short_enabled},"shadow_execution":"BASELINE" if enabled and shadow=={'mode':'BASELINE','enabled':True} else "NOT_CONNECTED"}}
+
+
+@app.get('/api/v1/d/status')
+async def get_d_status():
+    if d_bridge is not None:
+        try:
+            return await d_bridge.status(market_status.get('quote'))
+        except Exception:
+            logging.getLogger(__name__).exception('D bridge status failed')
+            return {'status':'UNAVAILABLE', 'reason':'D_BRIDGE_STATUS_ERROR', 'execution_ready':False}
+    from backend.d_paper import read_status
+    return read_status(DATA_ROOT/'d'/'formal.sqlite3')
 
 
 @app.get("/api/v1/e/quant-observations")
 async def get_e_quant_observations():
     from backend.e_quant_observer import read_quant_observations
-    return read_quant_observations(ROOT / "data" / "e-quant-observations.sqlite3")
+    return read_quant_observations(DATA_ROOT / "e-quant-observations.sqlite3")
 
 
 @app.get("/api/v1/e/observations")
 async def get_e_observations():
     from backend.e_observer import read_observations
-    return read_observations(ROOT / "data" / "e-observations.sqlite3")
+    return read_observations(DATA_ROOT / "e-observations.sqlite3")
 
 
 @app.get("/api/v1/agents")
@@ -1396,7 +1761,7 @@ async def create_snapshot():
         raise HTTPException(
             409, detail={"error": "INSUFFICIENT_GLOBAL_CANDLES", "available": len(candles)}
         )
-    path = ROOT / "data" / "latest_ai_snapshot.png"
+    path = DATA_ROOT / "latest_ai_snapshot.png"
     evidence = render_ai_snapshot(
         [__import__("backend.market", fromlist=["Candle"]).Candle(**x) for x in candles], path
     )
@@ -1405,7 +1770,7 @@ async def create_snapshot():
 
 @app.get("/api/v1/market/snapshot/image")
 async def snapshot_image():
-    path = ROOT / "data" / "latest_ai_snapshot.png"
+    path = DATA_ROOT / "latest_ai_snapshot.png"
     if not path.exists():
         raise HTTPException(404, "SNAPSHOT_NOT_GENERATED")
     return FileResponse(path, media_type="image/png")

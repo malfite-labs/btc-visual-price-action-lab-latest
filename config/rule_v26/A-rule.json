@@ -9,7 +9,7 @@
       "right": {
         "kind": "rolling_high",
         "offset": 2,
-        "period": 12
+        "period": 8
       }
     },
     {
@@ -21,7 +21,7 @@
       "right": {
         "kind": "rolling_high",
         "offset": 2,
-        "period": 12
+        "period": 8
       }
     },
     {
@@ -33,7 +33,7 @@
       "right": {
         "kind": "rolling_high",
         "offset": 2,
-        "period": 12
+        "period": 8
       }
     },
     {
@@ -53,16 +53,7 @@
         "offset": 0
       },
       "op": ">",
-      "right": 0.4
-    },
-    {
-      "left": {
-        "kind": "trend_pct",
-        "offset": 0,
-        "period": 24
-      },
-      "op": ">",
-      "right": 0.1
+      "right": 0.2
     }
   ],
   "short": [
@@ -75,7 +66,7 @@
       "right": {
         "kind": "rolling_low",
         "offset": 2,
-        "period": 12
+        "period": 8
       }
     },
     {
@@ -87,7 +78,7 @@
       "right": {
         "kind": "rolling_low",
         "offset": 2,
-        "period": 12
+        "period": 8
       }
     },
     {
@@ -99,7 +90,7 @@
       "right": {
         "kind": "rolling_low",
         "offset": 2,
-        "period": 12
+        "period": 8
       }
     },
     {
@@ -119,16 +110,7 @@
         "offset": 0
       },
       "op": ">",
-      "right": 0.4
-    },
-    {
-      "left": {
-        "kind": "trend_pct",
-        "offset": 0,
-        "period": 24
-      },
-      "op": "<",
-      "right": -0.1
+      "right": 0.2
     }
   ],
   "stop_bars": 6,

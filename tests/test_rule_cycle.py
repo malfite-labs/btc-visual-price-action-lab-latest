@@ -27,6 +27,26 @@ def test_real_rule_cycle_opens_targets_and_deduplicates(tmp_path,monkeypatch):
   assert c.execute("select count(*) from decisions where agent='A'").fetchone()[0]==1
   assert c.execute("select mode from decisions where agent='A'").fetchone()[0]=='RULE_DRIVEN'
 
+def test_actual_rule_cycle_rejects_entry_when_paused(tmp_path, monkeypatch):
+ import asyncio,types
+ from pathlib import Path
+ from backend.ledger import Ledger
+ from backend.vision import AgentOrchestrator
+ from backend.rule_cycle import RuleCycleRunner
+ from backend.strategy_control import StrategyControl
+ import backend.rule_cycle as module
+ db=tmp_path/'paper.sqlite3';ledger=Ledger(db);AgentOrchestrator(str(db));runner=RuleCycleRunner(ledger,db)
+ runner.v3=types.SimpleNamespace(signal_b=lambda bars,i:None,signal_c=lambda bars,i:None)
+ monkeypatch.setattr(module,'ROOT',tmp_path)
+ monkeypatch.setattr(runner,'check_profile',lambda:None)
+ monkeypatch.setattr(module,'json_signal',lambda rule,bars,i:{'direction':'LONG','stop':'90','target':None,'setup':'TEST_BREAK'})
+ control=StrategyControl(tmp_path/'data/strategy-control.sqlite3');control.request_pause('A')
+ quote={'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','timestamp_valid':True,'age_ms':0,'event_at':'2026-10-28T09:30:01+00:00','bid':'100','ask':'100.1','bid_qty':'1','ask_qty':'1','event_id':'q'}
+ close=datetime(2026,10,28,9,30,tzinfo=timezone.utc)
+ result=asyncio.run(runner.run_cycle(candles=[{'open':'100','high':'101','low':'99','close':'100'}]*288,candle_close=close,quote=quote,orderbook={}))
+ assert result['A']['execution']['reason']=='STRATEGY_PAUSED'
+ assert ledger.account('A')['state']=='FLAT'
+ assert runner._meta('A') is None
 def test_existing_visual_decision_blocks_rule_duplicate(tmp_path,monkeypatch):
  import asyncio,types,sqlite3
  from backend.ledger import Ledger
@@ -125,7 +145,7 @@ def test_specific_target_rejections_persist_snapshot(tmp_path,monkeypatch):
  from backend.vision import AgentOrchestrator
  from backend.rule_cycle import RuleCycleRunner
  import backend.rule_cycle as module
- for idx,(stop,obstacle,expected) in enumerate([('160',None,'INVALID_TARGET_PRICE')]):
+ for idx,(stop,obstacle,expected) in enumerate([('180',None,'INVALID_TARGET_PRICE')]):
   db=tmp_path/f'case{idx}.sqlite3';l=Ledger(db);AgentOrchestrator(str(db));runner=RuleCycleRunner(l,db);runner.v3=types.SimpleNamespace(signal_b=lambda b,i:None,signal_c=lambda b,i:{'direction':'SHORT','stop':stop,'setup':'T2','obstacle':obstacle});monkeypatch.setattr(module,'json_signal',lambda *a:None)
   q={'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','timestamp_valid':True,'age_ms':0,'event_at':'2026-10-28T09:30:01+00:00','bid':'100','ask':'100.1','bid_qty':'1000','ask_qty':'1000'};book={'source':q['source'],'timestamp_valid':True,'age_ms':0,'bids':[{'p':'100','s':'1000'}],'asks':[{'p':'100.1','s':'1000'}]}
   result=asyncio.run(runner.run_cycle(candles=[{'open':'100','high':'101','low':'99','close':'100'}]*288,candle_close=datetime(2026,10,28,9,30,tzinfo=timezone.utc),quote=q,orderbook=book))
@@ -190,3 +210,4 @@ def test_b_pending_allows_consistent_c_short_to_hold(tmp_path,monkeypatch):
  assert not recovery_blocked(l,r);r.v3=types.SimpleNamespace(signal_b=lambda b,i:None,signal_c=lambda b,i:None);monkeypatch.setattr(module,'json_signal',lambda *a:None)
  bars=[{'open':'100','high':'101','low':'99','close':'100'}]*288
  out=asyncio.run(r.run_cycle(candles=bars,candle_close=datetime(2026,10,28,9,30,tzinfo=timezone.utc),quote=None,orderbook=None));assert out['A']['action']=='WAIT' and out['B']['action']=='HOLD' and out['C']['action']=='HOLD';assert json.loads(l.account('C')['position_json'])['trade_id']==pos['trade_id'] and l.account('B')['state']=='STOP_EXIT_PENDING'
+

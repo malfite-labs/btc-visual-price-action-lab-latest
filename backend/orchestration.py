@@ -288,6 +288,7 @@ class TestOnlyPaperCycleRunner:
                 quote_id=preflight.get("quote_id"),
                 cost_model=self.cost,
                 research_c_5x=agent == "C" and self.enable_c_5x,
+                execution_quote=quote,
             )
         if action in {Action.CLOSE_LONG, Action.CLOSE_SHORT}:
             if agent == "C" and self.enable_c_5x:
@@ -341,6 +342,7 @@ class TestOnlyPaperCycleRunner:
                 quote_id=quote.get("event_id"),
                 rationale=rationale,
                 cost_model=self.cost,
+                execution_quote=quote,
             )
         return {"accepted": False, "reason": "ACTION_NOT_EXECUTABLE"}
 

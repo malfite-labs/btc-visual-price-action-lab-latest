@@ -51,6 +51,7 @@ def test_image_capability_marker_is_bound_to_model_and_exact_endpoint(tmp_path, 
     from backend import app
 
     monkeypatch.setattr(app, "ROOT", tmp_path)
+    monkeypatch.setattr(app, "DATA_ROOT", tmp_path / "data")
     marker = tmp_path / "data" / "vision-capability.json"
     marker.parent.mkdir()
     marker.write_text(
@@ -135,7 +136,8 @@ def test_live_closed_bar_dispatch_uses_one_image_and_current_market_evidence(tmp
     monkeypatch.setattr(app, "vision_adapter", adapter)
     monkeypatch.setattr(app, "candles", candles)
     monkeypatch.setattr(app, "market_status", {"feed_health": "LIVE", "gap_count_288": 0})
-    monkeypatch.setattr(app.market, "status", {"websocket": "CONNECTED"})
+    monkeypatch.setattr(app.market, "status", {"websocket": "CONNECTED", "websocket_recovery_state": "HEALTHY"})
+    monkeypatch.setattr(app, "websocket_quote_health", lambda *args, **kwargs: "FRESH")
     monkeypatch.setattr(app.market, "latest_quote", quote)
     monkeypatch.setattr(app.market, "orderbook", orderbook)
     monkeypatch.setattr(
@@ -240,7 +242,7 @@ def test_startup_position_gate_waits_for_fresh_monitored_quote(tmp_path, monkeyp
     assert ledger.account('B')['state']=='OPEN_LONG' and len(ledger.fills())==1
     import json
     (tmp_path/'data').mkdir();(tmp_path/'data'/'formal-mode.json').write_text(json.dumps({'activated_at_utc':(close-timedelta(minutes=15)).isoformat()}))
-    monkeypatch.setattr(app,'ROOT',tmp_path)
+    monkeypatch.setattr(app,'ROOT',tmp_path);monkeypatch.setattr(app,'DATA_ROOT',tmp_path/'data')
     async def get_quote():return dict(q)
     async def get_book():return {'age_ms':0}
     calls=[]
@@ -251,3 +253,133 @@ def test_startup_position_gate_waits_for_fresh_monitored_quote(tmp_path, monkeyp
     monkeypatch.setattr(scheduler,'run_closed_cycle',run)
     result=asyncio.run(app.process_closed_bar(close,now=close+timedelta(seconds=2)))
     assert result['A']['status']=='VALID' and calls==[True]
+
+
+def test_rule_driven_closed_bar_dispatches_strategy_pool_and_isolates_duplicates(tmp_path, monkeypatch):
+    import json
+    from backend import app
+    from backend.rule_cycle import RuleCycleRunner
+    from backend.strategy_pool import StrategyPool
+
+    now = datetime.now(UTC)
+    close = now.replace(minute=(now.minute // 15) * 15, second=0, microsecond=0)
+    ledger = Ledger(tmp_path / 'formal.sqlite3')
+    AgentOrchestrator(str(tmp_path / 'formal.sqlite3'))
+    runner = RuleCycleRunner(ledger, tmp_path / 'formal.sqlite3')
+    paper_calls = []
+    async def run_closed_cycle(**kwargs):
+        paper_calls.append(kwargs['candle_close'])
+        return {agent: {'status': 'VALID', 'action': 'WAIT'} for agent in 'ABC'}
+
+    pool = StrategyPool(tmp_path / 'pool.sqlite3')
+    document = {
+        'format': 'btc-lab-declarative-strategy/v2', 'strategy_id': 'pa-dispatch-test',
+        'version': '1.0.0', 'name': 'PA dispatch integration', 'market': 'BTC/USD',
+        'timeframe': '15m', 'description': 'RULE_DRIVEN natural-cycle integration fixture',
+        'parameters': {},
+        'risk': {'initial_equity': '10000', 'currency': 'USD_RESEARCH', 'max_leverage': 5, 'risk_fraction': '0.02'},
+        'entry': {'long': {'op': 'gt', 'args': [1, 2]}, 'short': {'op': 'gt', 'args': [1, 2]}},
+        'position': {
+            'direction': 'both', 'entry_timing': 'next_open',
+            'stop': {'kind': 'swing_atr', 'lookback': 3, 'atr_period': 14, 'buffer_atr': 0.1,
+                     'min_distance_atr': 0.6, 'max_distance_atr': 2.5},
+            'target_r': 2, 'max_hold_bars': 96, 'same_bar_priority': 'stop',
+        },
+    }
+    strategy_ids = [
+        'pa-trend-40-breakout', 'pa-sma20-pullback-confirm', 'pa-full-engulfing-reversal',
+        'pa-gapless-three-bar-reversal', 'pa-trend-false-break-reclaim', 'pa-inside-bar-break',
+        'pa-big-candle-continuation', 'pa-three-bar-hhhl',
+    ]
+    for strategy_id in strategy_ids:
+        candidate = {**document, 'strategy_id': strategy_id, 'name': strategy_id}
+        pool.upload(candidate)
+        pool.enable(strategy_id, '1.0.0')
+
+    rows = []
+    for index in range(288):
+        opened = close - timedelta(minutes=15 * (288 - index))
+        ended = opened + timedelta(minutes=15)
+        rows.append(Candle('BTC/USD', '15Min', opened.isoformat(), ended.isoformat(),
+                           '100', '101', '99', '100', '1', 1, '100', True).__dict__)
+    quote_time = now
+    quote = {
+        'symbol': 'BTC/USD', 'bid': '100', 'ask': '100.1', 'bid_qty': '2', 'ask_qty': '2',
+        'event_at': quote_time.isoformat(), 'received_at': quote_time.isoformat(), 'age_ms': 0,
+        'timestamp_valid': True, 'source': 'ALPACA_US_BTCUSD_SPOT', 'currency': 'USD_RESEARCH',
+    }
+    async def latest_quote():
+        return dict(quote)
+    async def no_broadcast(_):
+        return None
+    (tmp_path / 'data').mkdir()
+    (tmp_path / 'data' / 'formal-mode.json').write_text(
+        json.dumps({'activated_at_utc': (close - timedelta(hours=1)).isoformat()}), encoding='utf-8'
+    )
+    monkeypatch.setenv('BTC_REQUIRE_STARTUP_MONITOR', 'false')
+    monkeypatch.setattr(app, 'ROOT', tmp_path)
+    monkeypatch.setattr(app, 'DATA_ROOT', tmp_path / 'data')
+    monkeypatch.setattr(app, 'formal_mode', 'RULE_DRIVEN')
+    monkeypatch.setattr(app, 'ledger', ledger)
+    monkeypatch.setattr(app, 'paper_runner', runner)
+    monkeypatch.setattr(app, 'paper_scheduler', type('Scheduler', (), {
+        'enabled': True, 'run_closed_cycle': staticmethod(run_closed_cycle),
+    })())
+    monkeypatch.setattr(app, 'strategy_pool', pool)
+    monkeypatch.setattr(app, 'candles', rows)
+    monkeypatch.setattr(app, 'market_status', {
+        'feed_health': 'LIVE', 'gap_count_288': 0, 'startup_position_monitor_checked': True,
+        'quote': quote,
+    })
+    monkeypatch.setattr(app.market, 'status', {
+        'websocket': 'CONNECTED', 'websocket_recovery_state': 'HEALTHY',
+        'last_quote': quote, 'websocket_last_quote_received_at': quote_time.isoformat(),
+    })
+    monkeypatch.setattr(app.market, 'latest_quote', latest_quote)
+    monkeypatch.setattr(app, 'websocket_quote_health', lambda *args, **kwargs: 'FRESH')
+    monkeypatch.setattr(app, 'market_open_gate_reason', lambda **kwargs: None)
+    monkeypatch.setattr(app, 'broadcast', no_broadcast)
+
+    result = asyncio.run(app.process_closed_bar(close, now=now, snapshot_path=tmp_path / 'unused.png'))
+    accounts = pool.list()
+    assert result['A']['status'] == result['B']['status'] == result['C']['status'] == 'VALID'
+    assert paper_calls == [close]
+    assert {account['id'] for account in accounts} == set(strategy_ids)
+    assert all(account['last_cycle'] == close.isoformat() for account in accounts)
+    assert all(account['last_status'] == 'OK' and account['last_action'] == 'WAIT' for account in accounts), [
+        (account['id'], account['last_status'], account['last_action']) for account in accounts
+    ]
+    assert all(account['position_direction'] == 'FLAT' and account['equity'] == '10000.00' for account in accounts)
+
+    duplicate = asyncio.run(app.process_closed_bar(close, now=now, snapshot_path=tmp_path / 'unused.png'))
+    assert duplicate['A']['status'] == 'VALID'
+    assert paper_calls == [close, close]
+    assert all(account['last_cycle'] == close.isoformat() for account in pool.list())
+    assert all(pool.fills(strategy_id) == [] for strategy_id in strategy_ids)
+
+    next_close = close + timedelta(minutes=15)
+    rows.append(Candle('BTC/USD', '15Min', close.isoformat(), next_close.isoformat(),
+                       '100', '101', '99', '100', '1', 1, '100', True).__dict__)
+    def fail_cycle(*args, **kwargs):
+        raise RuntimeError('isolated PA failure fixture')
+    monkeypatch.setattr(pool, 'cycle', fail_cycle)
+    isolated = asyncio.run(app.process_closed_bar(next_close, now=next_close + timedelta(seconds=2)))
+    assert isolated['A']['status'] == isolated['B']['status'] == isolated['C']['status'] == 'VALID'
+    assert paper_calls == [close, close, next_close]
+
+    blocked_close = next_close + timedelta(minutes=15)
+    rows.append(Candle('BTC/USD', '15Min', next_close.isoformat(), blocked_close.isoformat(),
+                       '100', '101', '99', '100', '1', 1, '100', True).__dict__)
+    monkeypatch.setattr(app, 'market_open_gate_reason', lambda **kwargs: 'MARKET_STREAM_DISCONNECTED')
+    blocked = asyncio.run(app.process_closed_bar(blocked_close, now=blocked_close + timedelta(seconds=2)))
+    assert all(item['status'] == 'MARKET_STREAM_DISCONNECTED' for item in blocked.values())
+    assert paper_calls == [close, close, next_close]
+
+    incomplete_close = blocked_close + timedelta(minutes=15)
+    rows.append(Candle('BTC/USD', '15Min', blocked_close.isoformat(), incomplete_close.isoformat(),
+                       '100', '101', '99', '100', '1', 1, '100', True).__dict__)
+    monkeypatch.setattr(app, 'market_open_gate_reason', lambda **kwargs: None)
+    monkeypatch.setattr(app, '_closed_cycle_candles', lambda *args: (_ for _ in ()).throw(ValueError('CLOSED_WINDOW_INCOMPLETE')))
+    incomplete = asyncio.run(app.process_closed_bar(incomplete_close, now=incomplete_close + timedelta(seconds=2)))
+    assert all(item['status'] == 'CLOSED_WINDOW_INCOMPLETE' for item in incomplete.values())
+    assert paper_calls == [close, close, next_close]

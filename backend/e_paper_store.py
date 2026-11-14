@@ -41,6 +41,10 @@ class EPaperStore:
 
     def open_position(self, *, agent, **kwargs):
         self._check(agent)
+        if self.path == (Path(__file__).resolve().parent.parent / 'data/e/formal.sqlite3').resolve():
+            from backend.strategy_control import StrategyControl, guarded_formal_open
+            control = StrategyControl(Path(__file__).resolve().parent.parent / 'data/strategy-control.sqlite3')
+            return guarded_formal_open(control, self._ledger, 'E', agent='A', **kwargs)
         return self._ledger.open_position(agent='A', **kwargs)
 
     def close_position(self, *, agent, **kwargs):

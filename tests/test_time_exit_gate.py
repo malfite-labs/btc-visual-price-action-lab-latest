@@ -129,6 +129,7 @@ def test_rest_market_loop_dispatches_without_websocket(tmp_path):
     assert calls == [close]
     assert env['market_status']['feed_health'] == 'LIVE'
     assert market.status['websocket_recovery_state'] == 'LONG_PROTECTION'
+    assert claim_closed_bar_for_dispatch(close, path) == (False, 'CYCLE_ALREADY_SEEN')
 
 
 def test_worker_exit_does_not_require_parent_exit(tmp_path):

@@ -21,7 +21,7 @@ def test_current_open_fee_not_added_to_closed_realized(tmp_path):
 def test_formal_mode_accepts_powershell_utf8_bom(tmp_path,monkeypatch):
  import json
  import backend.app as app
- (tmp_path/'data').mkdir();(tmp_path/'data'/'formal-mode.json').write_text(json.dumps({'mode':'RULE_DRIVEN','activated_at_utc':'2026-10-28T14:00:00+00:00'}),encoding='utf-8-sig');monkeypatch.setattr(app,'ROOT',tmp_path)
+ (tmp_path/'data').mkdir();(tmp_path/'data'/'formal-mode.json').write_text(json.dumps({'mode':'RULE_DRIVEN','activated_at_utc':'2026-10-28T14:00:00+00:00'}),encoding='utf-8-sig');monkeypatch.setattr(app,'ROOT',tmp_path);monkeypatch.setattr(app,'DATA_ROOT',tmp_path/'data')
  assert app._formal_mode()=='RULE_DRIVEN'
 
 def test_shadow_status_requires_fresh_heartbeat_and_held_worker_lock(tmp_path):

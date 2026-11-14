@@ -9,8 +9,8 @@ def test_strategy_profile_retains_existing_limits_and_versions():
     profile, _, _ = load_profile()
     assert [profile[a]['risk_fraction'] for a in 'ABC'] == ['0.02'] * 3
     assert [profile[a]['max_leverage'] for a in 'ABC'] == ['1', '1', '5']
-    assert [profile[a]['version'] for a in 'ABC'] == ['V2.5', 'V3.0', 'V3.1']
-    assert profile['C']['target_r'] == '2' and profile['C']['max_hold'] == 12
+    assert [profile[a]['version'] for a in 'ABC'] == ['V2.6', 'V3.1', 'V3.1']
+    assert profile['C']['target_r'] == '1.3' and profile['C']['max_hold'] == 12
 
 
 def test_independent_risk_fraction_survives_depth_and_fee_revalidation():

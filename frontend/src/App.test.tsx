@@ -78,7 +78,7 @@ describe('workbench safeguards', () => {
     render(<App />)
     await waitFor(() => expect(screen.getByText(/BTC\/USD · 15m/)).toBeInTheDocument())
     for (const [label, heading] of [
-      ['AI账户', '四个独立模拟账户'],
+      ['AI账户', '策略模拟账户与观察状态'],
       ['交易日记', /交易记录与 AI 日记/],
       ['策略管理', '策略 MD 管理'],
       ['策略进化', '策略进化中心'],
@@ -182,7 +182,7 @@ describe('workbench safeguards', () => {
     expect(screen.getByText('驱动版本：E-V1.1-QUANT')).toBeInTheDocument()
     expect(screen.queryByText(/CANDIDATE_NOT_ACTIVE/)).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', {name: 'AI账户'}))
-    expect(screen.getByRole('heading', {name: '四个独立模拟账户'})).toBeInTheDocument()
+    expect(screen.getByRole('heading', {name: '策略模拟账户与观察状态'})).toBeInTheDocument()
     const accounts = screen.getByLabelText('憨巴E账户')
     expect(screen.getByRole('heading', {name: 'E账户'})).toBeInTheDocument()
     expect(accounts).toHaveTextContent('持仓方向/数量：LONG / 0.02')

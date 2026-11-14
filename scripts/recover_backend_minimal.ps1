@@ -21,6 +21,12 @@ $freeze = Get-Content -LiteralPath $freezePath -Raw | ConvertFrom-Json
 $marketHash = (Get-FileHash -LiteralPath $marketPath -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($freeze.risk_execution_hashes.'backend/market.py' -ne $marketHash) { throw 'ACTIVE_FREEZE_MARKET_HASH_MISMATCH' }
 
+# Full pre-change checkpoint across discovered SQLite ledgers.  Failure is
+# fail-closed before the service or its quote monitor is stopped.
+$backupResult = (& $py (Join-Path $root 'scripts\ledger_backup.py') --once | Out-String)
+if ($LASTEXITCODE -ne 0) { throw 'GLOBAL_LEDGER_CHECKPOINT_FAILED' }
+$backupResult | Set-Content -LiteralPath (Join-Path $evidence 'ledger-backup-checkpoint.json') -Encoding utf8
+
 if ($RearmAfterWebsocket) {
   $before = Invoke-RestMethod -Uri $statusUri -TimeoutSec 4
   if ($before.websocket -ne 'CONNECTED' -or $before.websocket_recovery_state -ne 'LONG_PROTECTION' -or $before.websocket_quote_health -ne 'FRESH' -or $before.feed_health -ne 'LIVE' -or [int]$before.gap_count_288 -ne 0) { throw 'FRESH_CONNECTED_WS_AND_COMPLETE_MARKET_REQUIRED_BEFORE_REARM' }

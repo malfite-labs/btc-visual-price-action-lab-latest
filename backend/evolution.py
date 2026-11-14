@@ -81,8 +81,11 @@ def recovery_allowed(attempts_at_checkpoint: int) -> bool:
 class ReviewCoordinator:
     """Durable 50-complete-trade counter and single-candidate/queued-review control."""
 
-    def __init__(self, db_path: str | Path):
+    def __init__(self, db_path: str | Path, *, batch_size: int = EVOLUTION_BATCH_SIZE):
+        if isinstance(batch_size, bool) or not isinstance(batch_size, int) or batch_size < 1:
+            raise ValueError("batch_size must be a positive integer")
         self.path = Path(db_path)
+        self.batch_size = batch_size
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(self.path) as db:
             db.executescript("""
@@ -134,7 +137,7 @@ class ReviewCoordinator:
                         (str(uuid.uuid4()), agent, next_batch, status, now),
                     )
                     queued = True
-                next_batch += EVOLUTION_BATCH_SIZE
+                next_batch += self.batch_size
             db.execute(
                 "UPDATE evo_counts SET closed_count=?,next_batch=? WHERE agent=?",
                 (count, next_batch, agent),

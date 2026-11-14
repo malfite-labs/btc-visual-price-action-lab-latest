@@ -1,0 +1,59 @@
+{
+  "format": "btc-lab-declarative-strategy/v2",
+  "strategy_id": "f-trend-breakout",
+  "version": "1.0.0",
+  "name": "F 顺势突破 BTC/USD 15m",
+  "market": "BTC/USD",
+  "timeframe": "15m",
+  "description": "回顾研究用 F round1 顺势突破候选。趋势条件：SMA20>SMA60 且 SMA20 高于 5 根前；空头镜像。突破条件：收盘价越过此前 40 根最高/最低价，K线方向与交易方向一致，实体/全幅至少 0.40。信号收盘后下一根开盘入场。止损取信号及前两根极值外加/减 0.1 ATR14，信号收盘止损距离须为 0.6–2.5 ATR；目标 2R，最多持有 192 根 15m K线，止损优先处理同根止损止盈。研究候选，上传后保持暂停。",
+  "parameters": {
+    "trend_fast_period": 20,
+    "trend_slow_period": 60,
+    "trend_slope_bars": 5,
+    "breakout_lookback": 40,
+    "minimum_body_fraction": 0.4,
+    "atr_period": 14,
+    "swing_lookback": 3,
+    "stop_buffer_atr": 0.1,
+    "minimum_stop_atr": 0.6,
+    "maximum_stop_atr": 2.5,
+    "target_r": 2,
+    "max_hold_bars": 192
+  },
+  "risk": {
+    "initial_equity": "10000",
+    "currency": "USD_RESEARCH",
+    "max_leverage": 5,
+    "risk_fraction": "0.02"
+  },
+  "entry": {
+    "long": {
+      "op": "and",
+      "args": [
+        {"op": "gt", "args": [{"op": "sma", "args": [20, 0]}, {"op": "sma", "args": [60, 0]}]},
+        {"op": "gt", "args": [{"op": "sma", "args": [20, 0]}, {"op": "sma", "args": [20, 5]}]},
+        {"op": "gt", "args": [{"op": "close", "args": [0]}, {"op": "highest_high", "args": [40, 1]}]},
+        {"op": "gt", "args": [{"op": "close", "args": [0]}, {"op": "open", "args": [0]}]},
+        {"op": "gte", "args": [{"op": "body_fraction", "args": [0]}, {"op": "param", "args": ["minimum_body_fraction"]}]}
+      ]
+    },
+    "short": {
+      "op": "and",
+      "args": [
+        {"op": "lt", "args": [{"op": "sma", "args": [20, 0]}, {"op": "sma", "args": [60, 0]}]},
+        {"op": "lt", "args": [{"op": "sma", "args": [20, 0]}, {"op": "sma", "args": [20, 5]}]},
+        {"op": "lt", "args": [{"op": "close", "args": [0]}, {"op": "lowest_low", "args": [40, 1]}]},
+        {"op": "lt", "args": [{"op": "close", "args": [0]}, {"op": "open", "args": [0]}]},
+        {"op": "gte", "args": [{"op": "body_fraction", "args": [0]}, {"op": "param", "args": ["minimum_body_fraction"]}]}
+      ]
+    }
+  },
+  "position": {
+    "direction": "both",
+    "entry_timing": "next_open",
+    "stop": {"kind": "swing_atr", "lookback": 3, "atr_period": 14, "buffer_atr": 0.1, "min_distance_atr": 0.6, "max_distance_atr": 2.5},
+    "target_r": 2,
+    "max_hold_bars": 192,
+    "same_bar_priority": "stop"
+  }
+}

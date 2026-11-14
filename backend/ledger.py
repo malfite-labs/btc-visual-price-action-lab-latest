@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from contextlib import contextmanager
 from datetime import UTC
 from decimal import ROUND_HALF_UP, ROUND_UP, Decimal
 from pathlib import Path
 from threading import RLock
+from threading import Thread
 from uuid import uuid4
 
 from backend.domain import CostModel, PositionState, planned_loss_for_fill
@@ -23,10 +25,14 @@ def _money(value: Decimal, *, conservative_fee: bool = False) -> Decimal:
 class Ledger:
     """Small append-only SQLite paper ledger; every account mutation is one BEGIN IMMEDIATE tx."""
 
-    def __init__(self, path: str | Path = "data/paper.sqlite3") -> None:
+    def __init__(self, path: str | Path = "data/paper.sqlite3", *, mirror_enabled: bool = False) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._mirror_enabled = mirror_enabled
         self._lock = RLock()
+        self._mirror_dispatcher = None
+        self._mirror_dispatch_thread = None
+        self._mirror_dispatch_lock = RLock()
         with self._session() as db:
             db.executescript(
                 """
@@ -77,6 +83,8 @@ class Ledger:
                     (agent, PAPER_CURRENCY, INITIAL_EQUITY),
                 )
                 db.execute("INSERT OR IGNORE INTO evo_counts(agent) VALUES(?)", (agent,))
+            if self._mirror_enabled:
+                db.execute("CREATE TABLE IF NOT EXISTS mirror_outbox(source_fill_id TEXT PRIMARY KEY, payload TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'PENDING', attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, created_at TEXT NOT NULL, dispatched_at TEXT)")
 
     def _connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.path, timeout=10, isolation_level=None)
@@ -98,6 +106,66 @@ class Ledger:
         from datetime import datetime
 
         return datetime.now(UTC).isoformat()
+
+    def set_mirror_dispatcher(self, dispatcher) -> None:
+        self._mirror_dispatcher = dispatcher
+
+    def _queue_mirror_fill(self, db, *, agent, fill_id, trade_id, effect, direction, quantity, reason, quote, decision_id, occurred_at):
+        if not self._mirror_enabled or agent != "C":
+            return
+        payload = {"source_fill_id": fill_id, "c_trade_id": trade_id, "effect": effect,
+                   "direction": direction, "quantity": str(quantity), "reason": reason, "quote": quote or None,
+                   "decision_id": decision_id, "c_fill_at": occurred_at}
+        db.execute("INSERT OR IGNORE INTO mirror_outbox(source_fill_id,payload,status,created_at) VALUES(?,?,'PENDING',?)",
+                   (fill_id, json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str), self._iso_now()))
+
+    def dispatch_mirror_outbox(self, *, limit=100) -> int:
+        dispatcher = self._mirror_dispatcher
+        if dispatcher is None or not self._mirror_enabled:
+            return 0
+        with self._lock, self._connect() as db:
+            rows = [dict(r) for r in db.execute("SELECT * FROM mirror_outbox WHERE status='PENDING' ORDER BY created_at LIMIT ?", (limit,))]
+        completed = 0
+        for row in rows:
+            try:
+                result = dispatcher(json.loads(row["payload"]))
+                with self._lock, self._connect() as db:
+                    db.execute("UPDATE mirror_outbox SET status='DONE',attempts=attempts+1,last_error=NULL,dispatched_at=? WHERE source_fill_id=? AND status='PENDING'",
+                               (self._iso_now(), row["source_fill_id"]))
+                completed += 1
+                if isinstance(result, dict) and not result.get("accepted"):
+                    logging.getLogger(__name__).warning("G mirror rejected committed C fill %s: %s", row["source_fill_id"], result.get("reason"))
+            except Exception as exc:
+                logging.getLogger(__name__).exception("G mirror dispatch failed for committed C fill %s", row["source_fill_id"])
+                with self._lock, self._connect() as db:
+                    db.execute("UPDATE mirror_outbox SET attempts=attempts+1,last_error=? WHERE source_fill_id=? AND status='PENDING'",
+                               (type(exc).__name__, row["source_fill_id"]))
+        return completed
+
+    def schedule_mirror_outbox(self) -> None:
+        """Dispatch after commit on one isolated worker so mirror latency cannot stall C."""
+        if self._mirror_dispatcher is None or not self._mirror_enabled:
+            return
+        with self._mirror_dispatch_lock:
+            if self._mirror_dispatch_thread is not None and self._mirror_dispatch_thread.is_alive():
+                return
+            worker = Thread(target=self._drain_mirror_outbox, name="g-mirror-outbox", daemon=True)
+            self._mirror_dispatch_thread = worker
+            worker.start()
+
+    def _drain_mirror_outbox(self) -> None:
+        while self.dispatch_mirror_outbox() > 0:
+            continue
+        # Close the enqueue/worker-exit race: either this worker adopts new work,
+        # or a concurrent scheduler observes the cleared worker and starts one.
+        with self._mirror_dispatch_lock:
+            self._mirror_dispatch_thread = None
+            with self._connect() as db:
+                pending = db.execute("SELECT 1 FROM mirror_outbox WHERE status='PENDING' LIMIT 1").fetchone()
+            if pending and self._mirror_dispatcher is not None:
+                worker = Thread(target=self._drain_mirror_outbox, name="g-mirror-outbox", daemon=True)
+                self._mirror_dispatch_thread = worker
+                worker.start()
 
     def account(self, agent: str) -> dict:
         with self._session() as db:
@@ -143,6 +211,7 @@ class Ledger:
         cost_model: CostModel = CostModel(),
         risk_fraction: Decimal = D("0.02"),
         research_c_5x: bool = False,
+        execution_quote: dict | None = None,
     ) -> dict:
         if agent not in {"A", "B", "C"} or direction not in {"LONG", "SHORT"}:
             raise ValueError("invalid agent or direction")
@@ -252,14 +321,19 @@ class Ledger:
                 "INSERT INTO audit_events VALUES(?,?,?,?,?)",
                 (str(uuid4()), agent, "POSITION_OPENED", json.dumps(position), now),
             )
+            self._queue_mirror_fill(db, agent=agent, fill_id=fill_id, trade_id=trade_id, effect="OPEN",
+                                    direction=direction, quantity=quantity, reason=rationale or "C_OPEN", quote=execution_quote,
+                                    decision_id=decision_id, occurred_at=now)
             db.commit()
-            return {
+            result = {
                 "accepted": True,
                 "duplicate": False,
                 "fill_id": fill_id,
                 "trade_id": trade_id,
                 "account_version": expected_version + 1,
             }
+            self.schedule_mirror_outbox()
+            return result
 
     @staticmethod
     def _ledger_insert(db, agent, kind, amount, cash_after, key, reference, now):
@@ -358,6 +432,7 @@ class Ledger:
         quote_id: str | None = None,
         rationale: str | None = None,
         cost_model: CostModel = CostModel(),
+        execution_quote: dict | None = None,
     ) -> dict:
         with self._lock, self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -466,14 +541,19 @@ class Ledger:
                     "UPDATE evo_counts SET closed_count=?,next_batch=? WHERE agent=?",
                     (count, next_batch, agent),
                 )
+            self._queue_mirror_fill(db, agent=agent, fill_id=fill_id, trade_id=trade_id, effect="CLOSE",
+                                    direction=direction, quantity=qty, reason=reason, quote=execution_quote,
+                                    decision_id=decision_id, occurred_at=now)
             db.commit()
-            return {
+            result = {
                 "accepted": True,
                 "fill_id": fill_id,
                 "trade_id": trade_id,
                 "net_pnl": str(net),
                 "account_version": expected_version + 1,
             }
+            self.schedule_mirror_outbox()
+            return result
 
     def fills(self, agent: str | None = None) -> list[dict]:
         with self._session() as db:

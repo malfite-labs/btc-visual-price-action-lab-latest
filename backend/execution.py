@@ -170,6 +170,7 @@ def handle_confirmed_stop(
         expected_version=acct["version"],
         reason="STOP_TRIGGER",
         cost_model=cost,
+        execution_quote=quote,
     )
 
 
@@ -225,6 +226,7 @@ def recover_pending_stop(
         expected_version=account["version"],
         reason=reason,
         cost_model=cost,
+        execution_quote=quote,
     )
 
 
