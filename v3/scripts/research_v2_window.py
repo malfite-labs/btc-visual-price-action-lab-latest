@@ -47,7 +47,7 @@ def open_research_center(parent):
         if not item:return
         metrics=item['metrics']; details={k:item.get(k) for k in ('id','strategy_id','version','registered','description','state','initial_equity','equity','realized','unrealized','net_return','fees','funding','position','last_cycle','last_trade','source','as_of','completeness','issues')}
         text.insert('end',json.dumps(details,ensure_ascii=False,indent=2,default=str)+'\n\n已验证闭合样本统计\n'+json.dumps(metrics,ensure_ascii=False,indent=2)+'\n\n原始成交记录\n'+json.dumps(item['fills'],ensure_ascii=False,indent=2,default=str))
-        ea=equity_analysis(item['equity_points']);graph.create_text(15,20,anchor='nw',text='权益观测：'+str(ea['points'])+' 点；最大回撤：'+str(ea['max_drawdown'] or '样本不足')+'；'+ea['basis'],font=('Microsoft YaHei UI',11))
+        ea=equity_analysis(item['equity_points']);graph.create_text(15,20,anchor='nw',text='权益观测：'+str(ea['points'])+' 点；观察回撤：'+str(ea['max_drawdown'] if ea['max_drawdown'] is not None else '样本不足')+'；范围：'+str(ea['start'] or '—')+' 至 '+str(ea['end'] or '—')+'；覆盖率未知（事件采样）',font=('Microsoft YaHei UI',11))
         if not item['equity_points']: graph.create_text(15,65,anchor='nw',text='没有持久化权益点；不合成历史曲线。',fill='#9a3412')
         else:
             from scripts.research_v2 import curve_coordinates
@@ -57,19 +57,20 @@ def open_research_center(parent):
                 if last is not None:
                     elapsed=(datetime.fromisoformat(point['time'])-datetime.fromisoformat(last['time'])).total_seconds()
                     if 0 < elapsed <= 900:graph.create_line(last['x'],last['y'],point['x'],point['y'],fill='#2563eb',width=2)
-                graph.create_oval(point['x']-3,point['y']-3,point['x']+3,point['y']+3,fill='#2563eb',outline='');last=point
+                matched=any(e.get('time')==point['time'] for e in item.get('realized_events',[]))
+                color='#dc2626' if matched else '#2563eb'
+                graph.create_oval(point['x']-3,point['y']-3,point['x']+3,point['y']+3,fill=color,outline='')
+                if matched:graph.create_text(point['x'],point['y']-12,text='平仓',fill=color)
+                last=point
         for t in item['trades']:
             tradegrid.insert('', 'end',values=tuple(t.get(k) or '—' for k in ('opened_at','closed_at','direction','quantity','entry_price','exit_price','fees','net_pnl','stop','target','exit_reason')))
         days={}
-        for t in item['trades']:
-            try:
-                from datetime import timezone,timedelta
-                day=datetime.fromisoformat(t['closed_at'].replace('Z','+00:00')).astimezone(timezone(timedelta(hours=8))).date().isoformat()
-                if day.startswith(month.get()):days.setdefault(day,[]).append(t)
-            except (ValueError,TypeError):pass
-        caltext.insert('end','北京时间；仅有证据的完整闭合交易。未平仓及无法配对不计入。\n\n')
+        for event in item.get('realized_events',[]):
+            day=event.get('date') or ''
+            if day.startswith(month.get()):days.setdefault(day,[]).append(event)
+        caltext.insert('end','北京时间（UTC+08:00）；仅已验证且可归属的实际退出净盈亏。\n\n')
         from decimal import Decimal
-        for day,trades in sorted(days.items()):caltext.insert('end',f"{day}   {sum((Decimal(t['net_pnl']) for t in trades),Decimal(0))}   {len(trades)} 笔\n")
+        for day,events in sorted(days.items()):caltext.insert('end',f"{day}   {sum((Decimal(e['net_pnl']) for e in events),Decimal(0))}   {len(events)} 次退出\n")
         if not days:caltext.insert('end','本月无可验证闭合交易，或样本不足。')
     table.bind('<<TreeviewSelect>>',lambda e:(state.update(selected=table.selection()[0]) if table.selection() else None,show_selected()))
     ttk.Button(cbar,text='查看月份',command=show_selected).pack(side='left')
@@ -80,7 +81,7 @@ def open_research_center(parent):
             if item['equity'] is not None:
                 points=state['observations'].setdefault(item['id'],[])
                 points.append({'time':s['as_of'],'equity':item['equity']})
-                item['equity_points']=list(points)
+                item['equity_points']=item.get('equity_points',[])+[dict(p,kind='CURRENT_SNAPSHOT',source='窗口手动刷新快照') for p in points]
         state['rows']={x['id']:x for x in s['strategies']}
         for iid in table.get_children():table.delete(iid)
         for row in s['strategies']:

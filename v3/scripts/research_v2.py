@@ -37,14 +37,16 @@ def closed_trades(fills, strategy):
         opens=[f for k,f in rows if k=='OPEN']; closes=[f for k,f in rows if k=='CLOSE']
         def valid(f):
             return all(dec(f.get(x)) is not None for x in ('quantity','price','fee')) and dec(f['quantity'])>0 and dec(f['price'])>0 and dec(f['fee'])>=0
-        if not opens or not closes or not all(valid(f) and f.get('occurred_at') for _,f in rows):
+        if not opens or not closes or not all(valid(f) and _aware_utc(f.get('occurred_at')) is not None for _,f in rows):
             issues.append(key+': 缺少完整开平仓或价格费用'); continue
+        if max(_aware_utc(f['occurred_at']) for f in opens) >= min(_aware_utc(f['occurred_at']) for f in closes):
+            issues.append(key+': 开平仓时间冲突'); continue
         oq=sum((dec(f['quantity']) for f in opens),Decimal(0)); cq=sum((dec(f['quantity']) for f in closes),Decimal(0))
         directions={str(f.get('position_direction') or f.get('direction') or '').upper() for _,f in rows}
         if oq != cq or len(directions)!=1 or not directions <= {'LONG','SHORT'}:
             issues.append(key+': 数量或方向不一致'); continue
         direction=next(iter(directions)); buy=sum((dec(f['price'])*dec(f['quantity']) for f in opens),Decimal(0)); sell=sum((dec(f['price'])*dec(f['quantity']) for f in closes),Decimal(0)); fees=sum((dec(f['fee']) for _,f in rows),Decimal(0))
-        if strategy=='G':
+        if strategy in ('D','G'):
             pnls=[dec(f.get('pnl')) for f in closes]
             if any(p is None for p in pnls): issues.append(key+': 镜像净盈亏缺失'); continue
             net=sum(pnls,Decimal(0))
@@ -64,11 +66,14 @@ def equity_analysis(points):
         try: dt=datetime.fromisoformat(str(at).replace('Z','+00:00'))
         except (TypeError,ValueError): continue
         if v is not None and v>0 and dt.tzinfo is not None: valid.append((dt,v,str(at)))
-    valid.sort(); peak=None; worst=None; at=None
+    valid.sort(); counts=defaultdict(int)
+    for dt,_,_ in valid:counts[dt]+=1
+    valid=[x for x in valid if counts[x[0]]==1]
+    peak=None; worst=None; at=None
     for _,v,t in valid:
         peak=max(peak or v,v); drop=(peak-v)/peak*100
         if worst is None or drop>worst: worst=drop; at=t
-    return {'points':len(valid),'max_drawdown':str(worst) if len(valid)>=2 else None,'at':at if len(valid)>=2 else None,'basis':'仅本窗口真实采样点，非完整历史'}
+    return {'points':len(valid),'max_drawdown':str(worst) if len(valid)>=2 else None,'at':at if len(valid)>=2 else None,'start':valid[0][2] if valid else None,'end':valid[-1][2] if valid else None,'coverage':None,'coverage_reason':'事件与手动快照并非连续采样，无法计算15分钟覆盖率','basis':'仅真实观测点；非完整历史或全时段最大回撤'}
 
 class ReadOnlyClient:
     def __init__(self): self.opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -77,27 +82,61 @@ class ReadOnlyClient:
         req=urllib.request.Request('http://127.0.0.1:8012'+path,method='GET')
         with self.opener.open(req,timeout=8) as res: return json.load(res)
 
-def load_snapshot(client=None):
-    client=client or ReadOnlyClient(); errors=[]
+def load_snapshot(client=None, store=None):
+    use_live = client is None
+    client = client or ReadOnlyClient()
+    store = store or (ReadOnlyStore(Path(__file__).resolve().parents[1]) if use_live else EmptyStore())
+    errors=[]
     def get(path,default):
         try: return client.get('/api/v1'+path)
         except Exception as e: errors.append(path+': '+type(e).__name__); return default
-    asof=datetime.now(timezone.utc).isoformat(); pool={i['id']:i for i in get('/strategy-pool',{}).get('items',[]) if i.get('id')}; agents={i['agent']:i for i in get('/agents',[]) if i.get('agent')}; stats=get('/statistics/abc',{}).get('agents',{}); d=get('/d/status',{}); e=get('/e/accounts',{}); g=get('/g-mirror/status',{}); registry=get('/strategies',{}).get('items',[]); versions={i.get('agent'):i for i in registry}; allfills=get('/fills',{}).get('items',[]); gfill=get('/g-mirror/fills',{}).get('items',[]); rows=[]
+    asof=datetime.now(timezone.utc).isoformat(); pool=store.pool()
+    agents={i['agent']:i for i in get('/agents',[]) if i.get('agent')}; stats=get('/statistics/abc',{}).get('agents',{})
+    d=store.d_status();e=get('/e/accounts',{});g=get('/g-mirror/status',{});registry=get('/strategies',{}).get('items',[])
+    versions={i.get('agent'):i for i in registry};allfills=get('/fills',{}).get('items',[]);gfill=get('/g-mirror/fills?limit=2000',{}).get('items',[]);rows=[]
     for short,sid in IDS:
-        state={}; fills=[]; version=None; source='GET /api/v1/'; description=None; registered=False; name=short
-        if short in 'ABC' and len(short)==1:
-            a=agents.get(short,{}); state=stats.get(short,{}); fills=[f for f in allfills if f.get('agent')==short]; version=(a.get('active_rule') or {}).get('version'); source+='statistics/abc, fills, agents/account'; initial=get('/agents/'+short+'/account',{}).get('initial_equity'); registered=short in agents; description=(a.get('active_rule') or {}).get('label'); name=description or short
+        state={};fills=[];version=None;source='GET /api/v1/';description=None;registered=False;name=short;initial=None
+        if short in ('A','B','C'):
+            a=agents.get(short,{});state=stats.get(short,{});fills=[f for f in allfills if f.get('agent')==short];version=(a.get('active_rule') or {}).get('version')
+            source+='statistics/abc, fills, agents/account';initial=get('/agents/'+short+'/account',{}).get('initial_equity');registered=short in agents
+            description=(a.get('active_rule') or {}).get('label');name=description or short
         elif short=='D':
-            state={'equity':d.get('equity'),'realized_net_pnl':d.get('realized_pnl'),'unrealized_pnl':d.get('unrealized_pnl'),'state':d.get('status'),'fees':None,'position':(d.get('account') or {}).get('position'),'last_cycle':(d.get('decision') or {}).get('candle_close')}; fills=d.get('fills') or [];version=d.get('rule_version');source+='d/status';initial=None; registered=bool(d.get('rule_version')); description='D 15分钟信号与1小时背景；执行版本以D状态为准'; name='D 急跌反转'
+            state={'equity':d.get('equity'),'realized_net_pnl':d.get('realized_pnl'),'unrealized_pnl':d.get('unrealized_pnl'),'state':d.get('status'),'position':(d.get('account') or {}).get('position'),'last_cycle':(d.get('decision') or {}).get('candle_close')}
+            fills=d.get('fills') or [];version=d.get('rule_version');source='SQLite mode=ro/query_only: d/trading.sqlite3, d/formal.sqlite3；规则版本为本地文件';registered=bool(version);name='D 急跌反转';description='D 15分钟信号与1小时背景；执行版本以D状态为准'
         elif short=='E':
-            formal=e.get('formal') or {};state={'equity':formal.get('equity'),'realized_net_pnl':formal.get('realized_pnl'),'unrealized_pnl':formal.get('unrealized_pnl'),'state':(e.get('runtime') or {}).get('mode'),'position':(formal.get('account') or {}).get('position_json')};fills=formal.get('fills') or [];version=(versions.get('E') or {}).get('driving_version');source+='e/accounts, strategies';initial=None; registered=bool(e.get('formal')); description='E V1.1量化策略；实际执行版本以driving_version为准'; name='E V1.1量化'
+            formal=e.get('formal') or {};state={'equity':formal.get('equity'),'realized_net_pnl':formal.get('realized_pnl'),'unrealized_pnl':formal.get('unrealized_pnl'),'state':(e.get('runtime') or {}).get('mode'),'position':(formal.get('account') or {}).get('position_json')}
+            fills=formal.get('fills') or [];version=(versions.get('E') or {}).get('driving_version');source+='e/accounts, strategies';registered=bool(e.get('formal'));name='E V1.1量化';description='E V1.1量化策略，执行版本以driving_version为准'
         elif short=='G':
-            state={'equity':g.get('equity'),'realized_net_pnl':g.get('realized'),'unrealized_pnl':g.get('unrealized'),'state':g.get('follow_state'),'fees':g.get('fees'),'position':g.get('position'),'last_cycle':g.get('last_cycle')};fills=gfill;version=g.get('version');source+='g-mirror/status, g-mirror/fills';initial=None; registered=g.get('registered') is True; description='G由C成交事件驱动镜像，不是独立15分钟信号'; name='G C事件镜像'
+            state={'equity':g.get('equity'),'realized_net_pnl':g.get('realized'),'unrealized_pnl':g.get('unrealized'),'state':g.get('follow_state'),'fees':g.get('fees'),'position':g.get('position'),'last_cycle':g.get('last_cycle')}
+            fills=gfill;version=g.get('version');source+='g-mirror/status, g-mirror/fills';registered=g.get('registered') is True;name='G C事件镜像';description='G由C成交事件驱动镜像，不是独立15分钟信号'
         else:
-            a=pool.get(sid,{});state={'equity':a.get('equity'),'realized_net_pnl':a.get('realized'),'unrealized_pnl':a.get('unrealized'),'state':a.get('status'),'fees':a.get('fees'),'last_cycle':a.get('last_cycle'),'position':a.get('position')};version=a.get('active_version');fills=get('/strategy-pool/'+urllib.parse.quote(sid,safe='')+'/fills?limit=2000',{}).get('items',[]);source+='strategy-pool';initial=None; version_rows=get('/strategy-pool/'+urllib.parse.quote(sid,safe='')+'/versions',{}).get('items',[]); active=next((v for v in version_rows if v.get('version')==version),{}); doc=active.get('document') or {}; doc=json.loads(doc) if isinstance(doc,str) else doc; initial=(doc.get('risk') or {}).get('initial_equity'); registered=sid in pool; description=doc.get('description') or ('自定义执行器；规则细节以活动来源为准' if short in ('PA-09','PA-10') else None); name=doc.get('name') or sid
-        trades,issues=closed_trades(fills,short); metrics=performance(trades); metrics['sample']='部分成交无法验证' if issues else metrics['sample']; metrics['closed']=None if not registered else metrics['closed']; vals=[str(f.get('occurred_at') or '') for f in fills]; initial_n=dec(initial); equity_n=dec(state.get('equity')); net_return=str((equity_n-initial_n)*100/initial_n) if initial_n is not None and initial_n>0 and equity_n is not None else None;
-        rows.append({'id':short,'name':name,'strategy_id':sid,'version':version,'registered':registered,'description':description,'state':state.get('state'),'initial_equity':initial,'equity':state.get('equity'),'realized':state.get('realized_net_pnl'),'unrealized':state.get('unrealized_pnl'),'net_return':net_return,'fees':state.get('fees'),'funding':None,'position':state.get('position'),'last_cycle':state.get('last_cycle'),'last_trade':max(vals) if vals else None,'source':source,'as_of':asof,'metrics':metrics,'trades':trades,'fills':fills,'issues':issues,'equity_points':[], 'completeness':'样本不足或来源不完整' if issues or len(trades)<30 else '需人工核查'})
-    return {'as_of':asof,'kind':'本地模拟运行快照；各接口非原子','strategies':rows,'errors':errors,'comparison':'不同资金模型及时间窗口不可排名'}
+            account=pool.get(sid,{});doc=account.get('document') or {};fills=account.get('fills') or [];version=account.get('active_version')
+            state={'equity':account.get('equity'),'realized_net_pnl':account.get('realized'),'unrealized_pnl':account.get('unrealized'),'state':account.get('status'),'fees':account.get('fees'),'last_cycle':account.get('last_cycle'),'position':account.get('position')}
+            initial=(doc.get('risk') or {}).get('initial_equity');registered=sid in pool;description=doc.get('description') or ('自定义执行器；规则来源需核验' if short in ('PA-09','PA-10') else None);name=doc.get('name') or sid
+            source='SQLite mode=ro/query_only: '+('pa-v1-extensions/'+sid+'.sqlite3' if short in ('PA-09','PA-10') else 'strategy-pool.sqlite3')
+        if short in {x[0] for x in PA[:8]}:trades,issues=pair_pool_fills(fills,sid)
+        else:trades,issues=closed_trades(fills,short)
+        metrics=performance(trades);metrics['sample']='部分成交无法验证' if issues else metrics['sample'];metrics['closed']=None if not registered else metrics['closed']
+        events=[];points=[]
+        if short in ('D','G'):
+            events,calendar_issues=realized_calendar_events(fills,short);issues.extend(calendar_issues)
+            if short=='G' and len(fills)>=2000:issues.append('UNVERIFIED: G接口达到2000条上限，历史可能截断')
+        elif short in ('A','B','C','E'):
+            ledger,audit=store.paper_evidence(short);events=audited_calendar_events(trades,fills,audit)
+            by_id={str(x['trade_id']):x for x in events};validated=[]
+            for trade in trades:
+                event=by_id.get(str(trade['trade_id']))
+                if event is None:issues.append('UNVERIFIED: 缺少对应平仓审计净盈亏');continue
+                trade['net_pnl']=event['net_pnl'];trade['verification']='AUDITED';validated.append(trade)
+            trades=validated;points=flat_equity_points(trades,fills,ledger,audit)
+        elif short in {x[0] for x in PA[:8]}:events=pool_calendar_events(trades)
+        metrics=performance(trades);metrics['sample']='部分成交无法验证' if issues else metrics['sample'];metrics['closed']=None if not registered else metrics['closed']
+        vals=[str(f.get('occurred_at') or f.get('created_at') or f.get('at') or '') for f in fills]
+        initial_n=dec(initial);equity_n=dec(state.get('equity'));net_return=str((equity_n-initial_n)*100/initial_n) if initial_n is not None and initial_n>0 and equity_n is not None else None
+        rows.append({'id':short,'name':name,'strategy_id':sid,'version':version,'registered':registered,'description':description,'state':state.get('state'),'initial_equity':initial,'equity':state.get('equity'),'realized':state.get('realized_net_pnl'),'unrealized':state.get('unrealized_pnl'),'net_return':net_return,'fees':state.get('fees'),'funding':None,'position':state.get('position'),'last_cycle':state.get('last_cycle'),'last_trade':max(vals) if vals else None,'source':source,'as_of':asof,'metrics':metrics,'trades':trades,'fills':fills,'issues':issues,'realized_events':events,'equity_points':points,'completeness':'UNVERIFIED: 部分事件缺失或冲突' if issues else '样本不足' if len(trades)<30 else '需人工核查'})
+    errors.extend(store.errors)
+    return {'as_of':asof,'kind':'正式本地模拟快照；各接口/数据库非原子','strategies':rows,'errors':errors,'comparison':'不同资金模型及时间窗口不可排名'}
+
 
 def export_snapshot(snapshot, output):
     out=validate_export_dir(output);out.mkdir(parents=True,exist_ok=True)
@@ -190,7 +229,207 @@ def curve_coordinates(points, width, height):
     for item in points:
         t=_aware_utc(item.get('time')); value=dec(item.get('equity'))
         if t is not None and value is not None and value>0: observed.append((t,value,item['time']))
-    observed.sort();
+    observed.sort();counts=defaultdict(int)
+    for t,_,_ in observed:counts[t]+=1
+    observed=[x for x in observed if counts[x[0]]==1]
     if not observed:return []
     start=observed[0][0].timestamp(); duration=max(1.0,observed[-1][0].timestamp()-start); low=min(x[1] for x in observed);span=max(Decimal('0.01'),max(x[1] for x in observed)-low)
     return [{'time':raw,'x':50+(float(t.timestamp()-start)/duration)*max(1,width-80),'y':height-45-float((value-low)/span)*max(1,height-100)} for t,value,raw in observed]
+
+
+def pair_pool_fills(fills, strategy_id):
+    """Pair a full PA-01..08 single-position lifecycle; ambiguity stays unverified."""
+    rows=[]; issues=[]; keys=set()
+    for f in fills:
+        key=f.get('idempotency_key'); at=_aware_utc(f.get('created_at')); cycle=_aware_utc(f.get('cycle'))
+        if not isinstance(key,str) or not key.startswith(strategy_id+':') or key in keys or at is None or cycle is None:
+            return [],['UNVERIFIED: 缺少或重复事件键/时间']
+        keys.add(key); rows.append((at,cycle,f))
+    rows.sort(key=lambda x:x[0]); results=[]; active=None; previous=None
+    for at,cycle,f in rows:
+        if previous is not None and at<=previous: return [],['UNVERIFIED: 成交时间相同或乱序']
+        previous=at; reason=f.get('reason');key=f['idempotency_key'];side=f.get('side');qty=dec(f.get('qty'));price=dec(f.get('price'));fee=dec(f.get('fee'))
+        if side not in ('BUY','SELL') or qty is None or price is None or fee is None or qty<=0 or price<=0 or fee<0 or not f.get('version'):
+            issues.append('UNVERIFIED: 成交字段缺失');active=None;continue
+        if reason in ('ENTRY','ENTRY_NEXT_OPEN') and key.startswith(strategy_id+':open:'):
+            if active is not None:return [],['UNVERIFIED: 多个开仓缺少退出，生命周期存在歧义']
+            active=(at,cycle,f);continue
+        if reason not in ('STOP','TARGET','TIME','STOP_QUOTE','TARGET_QUOTE') or not (key.startswith(strategy_id+':close:') or key.startswith(strategy_id+':quote-')):
+            issues.append('UNVERIFIED: 非已知退出事件');active=None;continue
+        if active is None:issues.append('UNVERIFIED: 缺少开仓');continue
+        otime,ocycle,entry=active;active=None
+        if f['version']!=entry['version'] or cycle<ocycle or side==entry['side'] or qty!=dec(entry['qty']):
+            issues.append('UNVERIFIED: 版本/数量/方向/周期不匹配');continue
+        direction='LONG' if entry['side']=='BUY' else 'SHORT'; sign=1 if direction=='LONG' else -1
+        net=(price-dec(entry['price']))*qty*sign-fee-dec(entry['fee'])
+        results.append({'trade_id':'pool-lifecycle:'+entry['idempotency_key'],'opened_at':entry['created_at'],'closed_at':f['created_at'],'direction':direction,'quantity':str(qty),'entry_price':str(dec(entry['price'])),'exit_price':str(price),'fees':str(fee+dec(entry['fee'])),'net_pnl':str(net),'exit_reason':reason,'stop':None,'target':None,'evidence':'单持仓生命周期：唯一事件键、时间、版本、方向及全部数量匹配','verification':'VERIFIED_LIFECYCLE'})
+    if active is not None:issues.append('UNVERIFIED: 未闭合或缺少退出')
+    return results,issues
+
+
+def realized_calendar_events(fills,strategy):
+    """G mirror stores per-exit net including its allocated entry fee."""
+    if strategy not in ('D','G'):return [],['UNVERIFIED: 此来源没有逐次退出的已核实净盈亏']
+    groups=defaultdict(list);issues=[];events=[]
+    for f in fills:
+        key=f.get('g_trade_id') if strategy=='G' else f.get('trade_id')
+        if not key:issues.append('UNVERIFIED: 缺少交易编号');continue
+        groups[str(key)].append(f)
+    from datetime import timedelta
+    tz=timezone(timedelta(hours=8))
+    for key,rows in groups.items():
+        ids=[str(f.get('fill_id')) for f in rows if f.get('fill_id') is not None]
+        if len(ids)!=len(rows) or len(ids)!=len(set(ids)) or any(_aware_utc(f.get('occurred_at')) is None for f in rows):issues.append('UNVERIFIED: 镜像事件编号重复/缺失或时间缺失');continue
+        rows=sorted(rows,key=lambda f:_aware_utc(f['occurred_at']));remaining=Decimal(0); direction=None; pending=[]; valid=True; previous=None
+        for f in rows:
+            at=_aware_utc(f['occurred_at']);q=dec(f.get('quantity'));effect=f.get('effect');direct=f.get('direction') or f.get('position_direction')
+            if previous is not None and at<=previous:valid=False;break
+            previous=at
+            if q is None or q<=0 or direct not in ('LONG','SHORT') or (direction and direct!=direction):valid=False;break
+            if effect=='OPEN':direction=direct;remaining+=q
+            elif effect in ('CLOSE','PARTIAL_CLOSE') and direction and q<=remaining:
+                pnl=dec(f.get('pnl'))
+                if pnl is None:valid=False;break
+                remaining-=q
+                pending.append({'date':at.astimezone(tz).date().isoformat(),'time':f['occurred_at'],'net_pnl':str(pnl),'trade_id':key,'source':strategy+'已记录逐笔退出净盈亏'})
+            else:valid=False;break
+        if valid:events.extend(pending)
+        else:issues.append('UNVERIFIED: 镜像生命周期不完整或冲突')
+    return sorted(events,key=lambda x:x['time']),issues
+
+
+def flat_equity_points(trades,fills,ledger,audit):
+    """Only cash after an audited full close is observed flat account equity."""
+    closes={str(f.get('fill_id')):f for f in fills if f.get('position_effect')=='CLOSE' and f.get('fill_id')}
+    by_trade={str(t.get('trade_id')):t for t in trades}; points=[]
+    for row in audit:
+        if row.get('kind')!='POSITION_CLOSED':continue
+        try:payload=json.loads(row.get('payload') or '{}')
+        except (TypeError,ValueError):continue
+        trade=by_trade.get(str(payload.get('trade_id'))); fid=str(payload.get('exit_fill_id') or ''); fill=closes.get(fid)
+        matches=[e for e in ledger if str(e.get('reference'))==fid and e.get('kind')=='CLOSE_PNL']
+        if not trade or not fill or str(fill.get('trade_id'))!=str(payload.get('trade_id')) or len(matches)!=1:continue
+        event=matches[0];at=_aware_utc(event.get('occurred_at'));cash=dec(event.get('cash_after'))
+        if at is None or cash is None or cash<=0 or event.get('occurred_at')!=fill.get('occurred_at'):continue
+        points.append({'time':event['occurred_at'],'equity':str(cash),'source':'已审计完整平仓时账本现金（空仓权益）','kind':'FORMAL_NATURAL_FLAT_CLOSE','trade_id':payload['trade_id']})
+    return sorted(points,key=lambda x:x['time'])
+
+
+class ReadOnlyStore:
+    """Local ledger snapshots with SQLite read-only URI, never a transaction lock for writing."""
+    def __init__(self, root): self.data=Path(root).resolve()/'data';self.errors=[]
+    def _connect(self,relative):
+        import sqlite3
+        p=(self.data/relative).resolve()
+        if self.data not in p.parents or not p.is_file():return None
+        db=sqlite3.connect(p.as_uri()+'?mode=ro',uri=True,timeout=3)
+        db.row_factory=sqlite3.Row;db.execute('PRAGMA query_only=ON');db.execute('BEGIN');return db
+    def paper_evidence(self,agent):
+        path='e/formal.sqlite3' if agent=='E' else 'paper.sqlite3';slot='A' if agent=='E' else agent
+        db=None
+        try:
+            db=self._connect(path)
+            if db is None:return [],[]
+            events=[dict(r) for r in db.execute('SELECT kind,reference,cash_after,occurred_at FROM ledger_events WHERE agent=?',(slot,))]
+            audit=[dict(r) for r in db.execute('SELECT kind,payload,occurred_at FROM audit_events WHERE agent=? AND kind=?',(slot,'POSITION_CLOSED'))]
+            return events,audit
+        except Exception as exc:self.errors.append(path+': '+type(exc).__name__);return [],[]
+        finally:
+            if db is not None:db.close()
+    def d_status(self):
+        out={};db=None
+        try:
+            db=self._connect('d/trading.sqlite3')
+            if db is not None:
+                r=db.execute('SELECT cash,position_json,realized_pnl FROM d_account WHERE id=1').fetchone()
+                if r:
+                    pos=json.loads(r['position_json']) if r['position_json'] else None
+                    out.update(account={'position':pos},equity=r['cash'] if pos is None else None,realized_pnl=r['realized_pnl'],unrealized_pnl='0' if pos is None else None)
+                fills=[]
+                for row in db.execute('SELECT f.*,o.operation,o.response_json FROM d_fills f LEFT JOIN d_operations o ON o.idempotency_key=f.idempotency_key ORDER BY f.occurred_at,f.fill_id'):
+                    item=dict(row)
+                    try:response=json.loads(item.pop('response_json') or '{}')
+                    except ValueError:response={}
+                    if response.get('accepted') is True and response.get('fill_id')==item.get('fill_id') and response.get('trade_id')==item.get('trade_id') and item.get('operation')==item.get('effect'):
+                        item['position_direction']='LONG'
+                        if item['effect']=='CLOSE':item['pnl']=response.get('net_pnl')
+                    fills.append(item)
+                out['fills']=fills
+        except Exception as exc:self.errors.append('d/trading.sqlite3: '+type(exc).__name__)
+        finally:
+            if db is not None:db.close()
+        db=None
+        try:
+            db=self._connect('d/formal.sqlite3')
+            if db is not None:
+                r=db.execute('SELECT protection,reason FROM d_runtime_status WHERE id=1').fetchone()
+                if r:out['status']=r['protection'];out['reason']=r['reason']
+                r=db.execute('SELECT close_at,status,reason FROM d_cycles ORDER BY close_at DESC LIMIT 1').fetchone()
+                if r:out['decision']={'candle_close':r['close_at'],'action':r['status'],'reason':r['reason']}
+            cfg=self.data.parent/'config'/'strategy_d'/'D_source_recovered_2026-11-21.json'
+            if cfg.is_file():out['rule_version']=json.loads(cfg.read_text(encoding='utf-8-sig')).get('version')
+        except Exception as exc:self.errors.append('d/formal.sqlite3: '+type(exc).__name__)
+        finally:
+            if db is not None:db.close()
+        return out
+    def pool(self):
+        out={};db=None
+        try:
+            db=self._connect('strategy-pool.sqlite3')
+            if db is not None:
+                q='SELECT s.id,s.active_version,s.enabled,s.paused_at,s.archived_at,a.cash,a.position,a.realized,a.last_cycle,a.last_status,a.last_action,v.document FROM strategies s LEFT JOIN accounts a ON a.strategy_id=s.id LEFT JOIN versions v ON v.strategy_id=s.id AND v.version=s.active_version'
+                for row in db.execute(q):
+                    a=dict(row);sid=a['id'];doc=json.loads(a.get('document') or '{}');pos=json.loads(a['position']) if a.get('position') else None
+                    fills=[dict(x) for x in db.execute('SELECT version,cycle,side,qty,price,fee,slippage,reason,idempotency_key,created_at FROM fills WHERE strategy_id=? ORDER BY id',(sid,))]
+                    fees=[dec(f.get('fee')) for f in fills]; cash=dec(a.get('cash'))
+                    out[sid]={'id':sid,'active_version':a['active_version'],'enabled':bool(a['enabled']),'status':a.get('last_status'),'equity':str(cash) if cash is not None and pos is None else None,'cash':a.get('cash'),'realized':a.get('realized'),'unrealized':'0' if pos is None else None,'last_cycle':a.get('last_cycle'),'position':pos,'fees':str(sum(fees,Decimal(0))) if all(v is not None for v in fees) else None,'fills':fills,'document':doc}
+        except Exception as exc:self.errors.append('strategy-pool.sqlite3: '+type(exc).__name__)
+        finally:
+            if db is not None:db.close()
+        for sid in ('PA-09','PA-10'):
+            db=None
+            try:
+                db=self._connect('pa-v1-extensions/'+sid+'.sqlite3')
+                if db is None:continue
+                row=db.execute('SELECT value FROM snapshot').fetchone()
+                if row is None:continue
+                s=json.loads(row['value']);fills=[json.loads(r['value']) for r in db.execute('SELECT value FROM fills ORDER BY rowid')];pos=s.get('position');cash=dec(s.get('cash'))
+                out[sid]={'id':sid,'active_version':s.get('version'),'enabled':s.get('enabled'),'status':s.get('last_status'),'equity':str(cash) if cash is not None and not pos else None,'cash':s.get('cash'),'realized':None,'unrealized':'0' if not pos else None,'last_cycle':s.get('last'),'position':pos,'fees':None,'fills':fills,'document':{}}
+            except Exception as exc:self.errors.append(sid+'.sqlite3: '+type(exc).__name__)
+            finally:
+                if db is not None:db.close()
+        return out
+
+class EmptyStore:
+    errors=()
+    def pool(self):return {}
+    def d_status(self):return {}
+    def paper_evidence(self,agent):return [],[]
+
+
+def audited_calendar_events(trades,fills,audit):
+    """Calendar uses the ledger's persisted net, never a reconstructed mark."""
+    from datetime import timedelta
+    zone=timezone(timedelta(hours=8));by_trade={str(t.get('trade_id')):t for t in trades};events=[];seen=set()
+    for row in audit:
+        if row.get('kind')!='POSITION_CLOSED':continue
+        try:payload=json.loads(row.get('payload') or '{}')
+        except (TypeError,ValueError):continue
+        tid=str(payload.get('trade_id') or '');fid=str(payload.get('exit_fill_id') or '');net=dec(payload.get('net_pnl'))
+        matching=[f for f in fills if str(f.get('fill_id'))==fid and str(f.get('trade_id'))==tid and f.get('position_effect')=='CLOSE']
+        if tid not in by_trade or len(matching)!=1 or net is None or fid in seen:continue
+        at=_aware_utc(matching[0].get('occurred_at'))
+        if at is None:continue
+        seen.add(fid);events.append({'date':at.astimezone(zone).date().isoformat(),'time':matching[0]['occurred_at'],'net_pnl':str(net),'trade_id':tid,'source':'POSITION_CLOSED审计净盈亏'})
+    return sorted(events,key=lambda x:x['time'])
+
+
+def pool_calendar_events(trades):
+    from datetime import timedelta
+    zone=timezone(timedelta(hours=8));events=[]
+    for trade in trades:
+        if trade.get('verification')!='VERIFIED_LIFECYCLE':continue
+        at=_aware_utc(trade.get('closed_at'));net=dec(trade.get('net_pnl'))
+        if at is None or net is None:continue
+        events.append({'date':at.astimezone(zone).date().isoformat(),'time':trade['closed_at'],'net_pnl':str(net),'trade_id':trade['trade_id'],'source':'已核验单持仓生命周期'})
+    return sorted(events,key=lambda x:x['time'])
