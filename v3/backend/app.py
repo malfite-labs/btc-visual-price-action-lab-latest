@@ -1515,6 +1515,25 @@ async def system_status():
     }
 
 
+# Observation APIs are display-only: no strategy dispatch or ledger writes.
+from backend.kline_observation import CandleReader, EventReader
+observation_candles = CandleReader()
+observation_events = EventReader(ROOT, data_root=DATA_ROOT)
+
+@app.get("/api/v1/observation/candles")
+async def observation_candle_route(interval: str = "15m", limit: int = 500, end_time: int | None = None):
+    try:
+        return await observation_candles.get(interval, limit, end_time)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(503, "PUBLIC_CANDLES_UNAVAILABLE") from exc
+
+@app.get("/api/v1/observation/events")
+async def observation_events_route():
+    items = await asyncio.to_thread(observation_events.read)
+    return {"source":"FORMAL_PAPER_LEDGERS", "items":items, "errors":list(observation_events.errors)}
+
 @app.get("/api/v1/market/candles")
 async def get_candles(limit: int = 672):
     if not 1 <= limit <= 1000:

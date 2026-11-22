@@ -2605,7 +2605,7 @@ def main():
     make_canvas_button(button_group, '策略池', lambda: open_strategy_pool(root), 112, 'outline', 'pool').pack(side='left', padx=5)
     make_canvas_button(button_group, '策略研究', lambda: __import__('scripts.research_v2_window', fromlist=['open_research_center']).open_research_center(root), 116, 'outline', 'pool').pack(side='left', padx=5)
     make_canvas_button(button_group, '刷新状态', refresh, 126, 'outline', 'refresh').pack(side='left', padx=5)
-    make_canvas_button(button_group, '打开前端', lambda: os.startfile('http://127.0.0.1:5175/'), 124, 'outline', 'external').pack(side='left', padx=5)
+    make_canvas_button(button_group, '打开K线', lambda: __import__('scripts.kline_window',fromlist=['open_kline']).open_kline(root), 124, 'outline', 'external').pack(side='left', padx=5)
     def refresh_node_buttons():
         selected = node_label()
         for number, button in node_buttons.items():
