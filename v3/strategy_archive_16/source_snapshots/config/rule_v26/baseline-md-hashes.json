@@ -1,0 +1,20 @@
+{
+  "preserved_utc": "2026-10-28T09:47:26.476621+00:00",
+  "strategies": {
+    "A": {
+      "source": "C:\\Users\\admin\\Documents\\BTC-Visual-Price-Lab\\strategies\\A\\v1.0.0.md",
+      "backup": "C:\\Users\\admin\\Documents\\BTC-Visual-Price-Lab\\config\\rule_v26\\baseline-md\\A\\v1.0.0.md",
+      "sha256": "9d5272f3eac221566a769287f81bd452fcf6d324d61774934f059efbfac1e0b1"
+    },
+    "B": {
+      "source": "C:\\Users\\admin\\Documents\\BTC-Visual-Price-Lab\\strategies\\B\\v1.0.0.md",
+      "backup": "C:\\Users\\admin\\Documents\\BTC-Visual-Price-Lab\\config\\rule_v26\\baseline-md\\B\\v1.0.0.md",
+      "sha256": "7d8f411e8b664a4ef5ebefe8282225c80520288bde3c7dda4a51e7fe41bdde7b"
+    },
+    "C": {
+      "source": "C:\\Users\\admin\\Documents\\BTC-Visual-Price-Lab\\strategies\\C\\v1.0.0.md",
+      "backup": "C:\\Users\\admin\\Documents\\BTC-Visual-Price-Lab\\config\\rule_v26\\baseline-md\\C\\v1.0.0.md",
+      "sha256": "672451cfc52201fd4a216dd2578c52c14ec5a1e866d5cc5ff4d94bdf1b766d20"
+    }
+  }
+}

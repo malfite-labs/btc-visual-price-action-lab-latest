@@ -1,0 +1,119 @@
+{
+  "fixture_kind": "synthetic_blinded_visual_evaluation",
+  "market_data": false,
+  "prompt_must_not_include_ground_truth": true,
+  "bars_per_image": {
+    "global_3d": 288,
+    "local_1d": 96
+  },
+  "cases": {
+    "case_01": {
+      "pattern": "trend_up",
+      "global_bias": "rising",
+      "local_bias": "rising",
+      "assessment": "trend_structure",
+      "image": "case_01.png",
+      "sha256": "923c0c0c04af535a7e5fe0a997193475b85a6501c22f7227d747f40163a015c6",
+      "global_count": 288,
+      "local_count": 96,
+      "price_axes": {
+        "global": [
+          "52742.00",
+          "51800.00",
+          "50858.00",
+          "49916.00",
+          "48974.00"
+        ],
+        "local": [
+          "52742.00",
+          "52386.00",
+          "52030.00",
+          "51674.00",
+          "51318.00"
+        ]
+      },
+      "synthetic": true
+    },
+    "case_02": {
+      "pattern": "trend_down",
+      "global_bias": "falling",
+      "local_bias": "falling",
+      "assessment": "trend_structure",
+      "image": "case_02.png",
+      "sha256": "252f8469a94b65497e803a1c8d68a0bf0bf49f692e6fa72f037dcde4b0a5d9af",
+      "global_count": 288,
+      "local_count": 96,
+      "price_axes": {
+        "global": [
+          "60990.00",
+          "60053.50",
+          "59117.00",
+          "58180.50",
+          "57244.00"
+        ],
+        "local": [
+          "58710.00",
+          "58343.50",
+          "57977.00",
+          "57610.50",
+          "57244.00"
+        ]
+      },
+      "synthetic": true
+    },
+    "case_03": {
+      "pattern": "range",
+      "global_bias": "sideways",
+      "local_bias": "sideways",
+      "assessment": "range_or_wait",
+      "image": "case_03.png",
+      "sha256": "5f42eca43bde8b233ba375796c027d78cdcf2f84496b1b37cb8c35dd030e1999",
+      "global_count": 288,
+      "local_count": 96,
+      "price_axes": {
+        "global": [
+          "52610.00",
+          "52300.25",
+          "51990.50",
+          "51680.75",
+          "51371.00"
+        ],
+        "local": [
+          "52610.00",
+          "52300.25",
+          "51990.50",
+          "51680.75",
+          "51371.00"
+        ]
+      },
+      "synthetic": true
+    },
+    "case_04": {
+      "pattern": "downtrend_then_reversal",
+      "global_bias": "falling",
+      "local_bias": "rising_reversal",
+      "assessment": "reversal_structure",
+      "image": "case_04.png",
+      "sha256": "b1f33fd06751c3b54f24ca5f3c8e1106f6a9ee1c0a62e037888dc7cea3af7748",
+      "global_count": 288,
+      "local_count": 96,
+      "price_axes": {
+        "global": [
+          "60972.00",
+          "59909.50",
+          "58847.00",
+          "57784.50",
+          "56722.00"
+        ],
+        "local": [
+          "60972.00",
+          "59917.50",
+          "58863.00",
+          "57808.50",
+          "56754.00"
+        ]
+      },
+      "synthetic": true
+    }
+  }
+}

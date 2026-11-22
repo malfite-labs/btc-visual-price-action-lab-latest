@@ -1,0 +1,34 @@
+{
+  "name": "RULE_DRIVEN_V26",
+  "A": {
+    "version": "V2.6",
+    "label": "突破回踩",
+    "file": "A-rule.json",
+    "sha256": "4dd9ff07b4d5806d92b788606b687d65a021887e1227b92c19f04c747231c2fb",
+    "risk_fraction": "0.02",
+    "max_leverage": "1",
+    "require_target_cover_costs": true
+  },
+  "B": {
+    "version": "V3.1",
+    "label": "反转（趋势过滤）",
+    "file": "b-v31-signals.py",
+    "sha256": "b8506be4e67ba40ec9234966371d42cd85aa750f4bdf00ca48ae3864388bc7a6",
+    "risk_fraction": "0.02",
+    "max_leverage": "1",
+    "require_target_cover_costs": true,
+    "target_r": "1.5",
+    "max_hold": 12
+  },
+  "C": {
+    "version": "V3.1",
+    "label": "Tony裸K研究近似（无结构障碍否决）",
+    "file": "v3-signals.py",
+    "sha256": "3190328f53fdcd6b55f2e3bae1f13cda540a128dc93551049b834c761a1fdca1",
+    "risk_fraction": "0.02",
+    "max_leverage": "5",
+    "require_target_cover_costs": false,
+    "target_r": "1.3",
+    "max_hold": 12
+  }
+}

@@ -1,0 +1,25 @@
+# TEMPLATE ONLY — this Grok Bot cloud host does not run systemd as PID1.
+# On a future Ubuntu/Debian host with systemd, copy to /etc/systemd/system/ and adjust User=/paths.
+[Unit]
+Description=BTC Visual Price Action Lab API (8011)
+After=network.target
+# Ensure single instance; do not clear LONG_PROTECTION on start.
+
+[Service]
+Type=simple
+User=box
+WorkingDirectory=/home/box/btc-visual-price-lab/runtime/app
+Environment=BTC_LAB_OFFLINE=1
+Environment=PAPER_AUTOMATION_ENABLED=false
+Environment=VISION_ENABLED=false
+Environment=VISION_CALLS_AUTHORIZED=false
+Environment=ALPACA_CREDENTIALS_FILE=/home/box/btc-visual-price-lab/secrets/alpaca-offline-empty.env
+ExecStart=/home/box/btc-visual-price-lab/runtime/app/.venv/bin/python -m uvicorn backend.app:app --host 127.0.0.1 --port 8011
+Restart=on-failure
+RestartSec=5
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

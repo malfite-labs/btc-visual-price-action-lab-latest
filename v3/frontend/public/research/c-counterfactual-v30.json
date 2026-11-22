@@ -1,0 +1,62 @@
+{
+  "type": "COUNTERFACTUAL_REPLAY",
+  "not_formal_history": true,
+  "strategy": "C V3.0",
+  "initial_equity_usd": "10000.00",
+  "as_of_utc": "2026-10-28T12:15:12.108324+00:00",
+  "quote_time_utc": "2026-10-28T12:00:59.442664+00:00",
+  "limitations": "Historical formal quote and full order book were not persisted. This isolated scenario uses the independently recorded shadow execution quote/preflight and shadow exit, not a reconstruction of the formal fill. Shadow L1 stream was sampled; historical decision-time equity curve marks between events are unavailable.",
+  "original_formal_equity_at_scenario_end": "10000.00",
+  "counterfactual_equity_at_scenario_end": "10000.25",
+  "realized_pnl": "0.25",
+  "open_position": null,
+  "decisions": [
+    {
+      "id": "c4148bf65c941d6ee385745dcf3f8788f3bb86cbac0d3456b899020a18d7b577",
+      "close_utc": "2026-10-28T12:00:00+00:00",
+      "status": "COUNTERFACTUAL_CLOSED",
+      "direction": "SHORT",
+      "entry_time_utc": "2026-10-28T12:01:00.738665+00:00",
+      "entry_price": "81183.91",
+      "quantity": "0.00099290",
+      "stop": "81374.177",
+      "target": "80803.376",
+      "entry_fee": "0.05",
+      "entry_slippage": "0.0161346250",
+      "exit_time_utc": "2026-10-28T12:15:12.108324+00:00",
+      "exit_price": "80832.34",
+      "exit_fee": "0.05",
+      "exit_slippage": "0.0160551930",
+      "exit_reason": "TARGET",
+      "planned_loss": "0.321196889216460",
+      "net_pnl": "0.25"
+    },
+    {
+      "id": "51f811343186b1fae858fc26a47919b14c6cfe27042d2cd00cf7bbd0c60be07c",
+      "close_utc": "2026-10-28T12:15:00+00:00",
+      "status": "NOT_OPENED_SINGLE_POSITION",
+      "reason": "第一笔在该信号K线收盘时仍持仓；未追加或再次开仓。"
+    }
+  ],
+  "equity_events": [
+    {
+      "time": "2026-10-28T12:00:00+00:00",
+      "formal": "10000.00",
+      "scenario": "10000.00",
+      "description": "信号前"
+    },
+    {
+      "time": "2026-10-28T12:01:00.738665+00:00",
+      "formal": "10000.00",
+      "scenario": "9999.95",
+      "description": "模拟开仓后现金；浮动权益缺少同期完整报价"
+    },
+    {
+      "time": "2026-10-28T12:15:12.108324+00:00",
+      "formal": "10000.00",
+      "scenario": "10000.25",
+      "description": "模拟平仓后已实现权益"
+    }
+  ],
+  "shadow_source_trade_id": "37bc4b53-a0ad-4b2f-ab28-6284b51f2140"
+}

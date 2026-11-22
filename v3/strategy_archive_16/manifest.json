@@ -1,0 +1,1185 @@
+{
+  "schema": "btc-strategy-archive/1",
+  "exported_at": "2026-11-20T15:28:13.868086+08:00",
+  "git_head": "82ce4a0bf89e54e066dda63fd97be1e3324a0204",
+  "working_tree_has_changes": true,
+  "observed_listener_pid": 6320,
+  "runtime_environment": {
+    "environment": "DEMO",
+    "source": "BINANCE_FUTURES_DEMO",
+    "currency": "USDT"
+  },
+  "runtime_version": "V2",
+  "runtime_status_source": "GET http://127.0.0.1:8011/api/v1/system/status",
+  "strategy_count": 16,
+  "strategies": [
+    {
+      "id": "A",
+      "strategy_id": "A",
+      "version": "V2.6",
+      "production": {
+        "version": "V2.6",
+        "enabled": true,
+        "entry_permitted": true,
+        "research_initial_equity": "10000"
+      },
+      "library": {
+        "kind": "frozen_active_profile_and_separate_visual_library",
+        "active_profile_version": "V2.6",
+        "visual_library_metadata": {
+          "agent": "A",
+          "version": "v1.0.0",
+          "parent": null,
+          "status": "SEED",
+          "created_at_utc": "2026-10-27",
+          "source": "V1.0 frozen principles",
+          "evolvable_sections": [
+            "Examples",
+            "Evolvable sections"
+          ],
+          "immutable": true
+        },
+        "visual_library_metadata_path": "strategies/A/v1.0.0.metadata.json",
+        "visual_library_active_api": {
+          "http": 200,
+          "path": "/strategies/A/versions",
+          "version": "v1.0.0",
+          "sha256": "9d5272f3eac221566a769287f81bd452fcf6d324d61774934f059efbfac1e0b1",
+          "archived_file_byte_hash_matches": true
+        }
+      },
+      "version_match": "PARTIAL",
+      "archive_paths": [
+        "A/strategy.json",
+        "A/strategy.md"
+      ],
+      "rule_verification": {
+        "method": "frozen_profile_matches_file",
+        "sha256": "af9ca1ffc97aefc021b2e8f4d041596fca4fa963b6a76dc605dfd2aa644af691",
+        "verified": true
+      },
+      "source_gaps": [
+        "8011 状态接口提供策略 ID、版本和启用状态，但未发布整个进程的部署源码摘要。共享执行入口来自工作区源码静态追踪。"
+      ],
+      "source": {
+        "project": "C:/Users/admin/Documents/btc-visual-price-action-lab",
+        "source_type": "read-only current local project snapshot",
+        "additional_evidence": "strategy archive exported 2026-11-20 15:28 Asia/Shanghai; its runtime observation is historical and environment=DEMO"
+      },
+      "status": "ACTIVE",
+      "source_hash": "af9ca1ffc97aefc021b2e8f4d041596fca4fa963b6a76dc605dfd2aa644af691",
+      "source_hash_verified": true,
+      "completeness": null,
+      "source_snapshot": [
+        "backend/rule_cycle.py",
+        "config/rule_v26/A-rule.json",
+        "config/rule_v26/profile.json",
+        "scripts/rule_evolution_v2.py"
+      ],
+      "execution_entry": [
+        "config/rule_v26/A-rule.json",
+        "config/rule_v26/profile.json",
+        "backend/rule_cycle.py",
+        "scripts/rule_evolution_v2.py"
+      ],
+      "rule_conflicts": [
+        "当前无 8011 监听，运行进程内版本无法读取；静态规则文件 SHA 与 profile 一致。"
+      ],
+      "runtime_state": "UNVERIFIED_NO_8011_LISTENER_AT_THIS_AUDIT",
+      "unverified_fields": [
+        "current in-memory strategy version",
+        "current live enable/entry gate",
+        "runtime cycle after last persisted evidence"
+      ],
+      "current_audit_date": "2026-11-20"
+    },
+    {
+      "id": "B",
+      "strategy_id": "B",
+      "version": "V3.1",
+      "production": {
+        "version": "V3.1",
+        "enabled": true,
+        "entry_permitted": true,
+        "research_initial_equity": "10000"
+      },
+      "library": {
+        "kind": "frozen_active_profile_and_separate_visual_library",
+        "active_profile_version": "V3.1",
+        "visual_library_metadata": {
+          "agent": "B",
+          "version": "v1.0.0",
+          "parent": null,
+          "status": "SEED",
+          "created_at_utc": "2026-10-27",
+          "source": "V1.0 frozen principles",
+          "evolvable_sections": [
+            "Examples",
+            "Evolvable sections"
+          ],
+          "immutable": true
+        },
+        "visual_library_metadata_path": "strategies/B/v1.0.0.metadata.json",
+        "visual_library_active_api": {
+          "http": 200,
+          "path": "/strategies/B/versions",
+          "version": "v1.0.0",
+          "sha256": "7d8f411e8b664a4ef5ebefe8282225c80520288bde3c7dda4a51e7fe41bdde7b",
+          "archived_file_byte_hash_matches": true
+        }
+      },
+      "version_match": "PARTIAL",
+      "archive_paths": [
+        "B/strategy.json",
+        "B/strategy.md"
+      ],
+      "rule_verification": {
+        "method": "frozen_profile_matches_file",
+        "sha256": "b8506be4e67ba40ec9234966371d42cd85aa750f4bdf00ca48ae3864388bc7a6",
+        "verified": true
+      },
+      "source_gaps": [
+        "8011 状态接口提供策略 ID、版本和启用状态，但未发布整个进程的部署源码摘要。共享执行入口来自工作区源码静态追踪。"
+      ],
+      "source": {
+        "project": "C:/Users/admin/Documents/btc-visual-price-action-lab",
+        "source_type": "read-only current local project snapshot",
+        "additional_evidence": "strategy archive exported 2026-11-20 15:28 Asia/Shanghai; its runtime observation is historical and environment=DEMO"
+      },
+      "status": "ACTIVE",
+      "source_hash": "b8506be4e67ba40ec9234966371d42cd85aa750f4bdf00ca48ae3864388bc7a6",
+      "source_hash_verified": true,
+      "completeness": null,
+      "source_snapshot": [
+        "backend/rule_cycle.py",
+        "config/rule_v26/b-v31-signals.py",
+        "config/rule_v26/profile.json"
+      ],
+      "execution_entry": [
+        "config/rule_v26/b-v31-signals.py",
+        "config/rule_v26/profile.json",
+        "backend/rule_cycle.py"
+      ],
+      "rule_conflicts": [
+        "当前无 8011 监听，运行进程内版本无法读取；静态规则文件 SHA 与 profile 一致。"
+      ],
+      "runtime_state": "UNVERIFIED_NO_8011_LISTENER_AT_THIS_AUDIT",
+      "unverified_fields": [
+        "current in-memory strategy version",
+        "current live enable/entry gate",
+        "runtime cycle after last persisted evidence"
+      ],
+      "current_audit_date": "2026-11-20"
+    },
+    {
+      "id": "C",
+      "strategy_id": "C",
+      "version": "V3.1",
+      "production": {
+        "version": "V3.1",
+        "enabled": true,
+        "entry_permitted": true,
+        "research_initial_equity": "10000"
+      },
+      "library": {
+        "kind": "frozen_active_profile_and_separate_visual_library",
+        "active_profile_version": "V3.1",
+        "visual_library_metadata": {
+          "agent": "C",
+          "version": "v1.0.0",
+          "parent": null,
+          "status": "ACTIVE",
+          "md_sha256": "672451cfc52201fd4a216dd2578c52c14ec5a1e866d5cc5ff4d94bdf1b766d20",
+          "core_lock_sha256": "ae0a9a5f072c553d2aca1c198330a29a3d2c5a2fc8696fe1cd82deac7e4f858e",
+          "core_scope": "Section 1 and Section 2 protected; full boundaries require validation before activation",
+          "evolvable_sections": "awaiting user-designated sections",
+          "immutable": true,
+          "research_leverage": "5",
+          "maintenance_rate": "0.01",
+          "margin_model": "C_SPOT_RESEARCH_MARGIN_V1_1PCT",
+          "activation_source": "user_authorized_internal_paper"
+        },
+        "visual_library_metadata_path": "strategies/C/v1.0.0.metadata.json",
+        "visual_library_active_api": {
+          "http": 200,
+          "path": "/strategies/C/versions",
+          "version": "v1.0.0",
+          "sha256": "672451cfc52201fd4a216dd2578c52c14ec5a1e866d5cc5ff4d94bdf1b766d20",
+          "archived_file_byte_hash_matches": true
+        }
+      },
+      "version_match": "PARTIAL",
+      "archive_paths": [
+        "C/strategy.json",
+        "C/strategy.md"
+      ],
+      "rule_verification": {
+        "method": "frozen_profile_matches_file",
+        "sha256": "c27eef69cc256444ed7ad0d501cc695adbdeb06867c8ed063db2c6c01a9a69e5",
+        "verified": true
+      },
+      "source_gaps": [
+        "8011 状态接口提供策略 ID、版本和启用状态，但未发布整个进程的部署源码摘要。共享执行入口来自工作区源码静态追踪。"
+      ],
+      "source": {
+        "project": "C:/Users/admin/Documents/btc-visual-price-action-lab",
+        "source_type": "read-only current local project snapshot",
+        "additional_evidence": "strategy archive exported 2026-11-20 15:28 Asia/Shanghai; its runtime observation is historical and environment=DEMO"
+      },
+      "status": "ACTIVE",
+      "source_hash": "c27eef69cc256444ed7ad0d501cc695adbdeb06867c8ed063db2c6c01a9a69e5",
+      "source_hash_verified": true,
+      "completeness": null,
+      "source_snapshot": [
+        "backend/rule_cycle.py",
+        "config/rule_v26/profile.json",
+        "config/rule_v26/v3-signals.py"
+      ],
+      "execution_entry": [
+        "config/rule_v26/v3-signals.py",
+        "config/rule_v26/profile.json",
+        "backend/rule_cycle.py"
+      ],
+      "rule_conflicts": [
+        "当前无 8011 监听，运行进程内版本无法读取；静态规则文件 SHA 与 profile 一致。"
+      ],
+      "runtime_state": "UNVERIFIED_NO_8011_LISTENER_AT_THIS_AUDIT",
+      "unverified_fields": [
+        "current in-memory strategy version",
+        "current live enable/entry gate",
+        "runtime cycle after last persisted evidence"
+      ],
+      "current_audit_date": "2026-11-20"
+    },
+    {
+      "id": "D",
+      "strategy_id": "D",
+      "version": "D-REBOUND-EMA-RSI-V1",
+      "production": {
+        "version": "D-REBOUND-EMA-RSI-V1",
+        "enabled": false,
+        "entry_permitted": false,
+        "research_initial_equity": "10000"
+      },
+      "library": {
+        "kind": "standalone_research_specification",
+        "version": "schema 1.0.0",
+        "file": "config/strategy_d/D_strategy_15m.json",
+        "runtime_diff": "研究规格还列 ETHUSDT、2×逐仓、退出冷却8根。当前 Demo 为 BTCUSDT，原执行接线的预检用5×模型，退出冷却见 DemoDPolicy.close。"
+      },
+      "version_match": "PARTIAL",
+      "archive_paths": [
+        "D/strategy.json",
+        "D/strategy.md"
+      ],
+      "rule_verification": {
+        "method": "sha256_of_workspace_sources",
+        "verified_local_copy": true
+      },
+      "source_gaps": [
+        "8011 状态接口提供策略 ID、版本和启用状态，但未发布整个进程的部署源码摘要。共享执行入口来自工作区源码静态追踪。"
+      ],
+      "source": {
+        "project": "C:/Users/admin/Documents/btc-visual-price-action-lab",
+        "source_type": "read-only current local project snapshot",
+        "additional_evidence": "strategy archive exported 2026-11-20 15:28 Asia/Shanghai; its runtime observation is historical and environment=DEMO"
+      },
+      "status": "ACTIVE",
+      "source_hash": null,
+      "source_hash_verified": false,
+      "completeness": null,
+      "source_snapshot": [
+        "backend/d_paper.py",
+        "backend/d_runtime.py",
+        "backend/d_signal.py",
+        "config/strategy_d/D_strategy_15m.json"
+      ],
+      "execution_entry": [
+        "config/strategy_d/D_strategy_15m.json",
+        "backend/d_signal.py",
+        "backend/d_paper.py",
+        "backend/d_runtime.py"
+      ],
+      "rule_conflicts": [
+        "D_strategy_15m.json 标注 research_specification_unbacktested 且 live_enabled=false；auto-paper.json 为 enabled=true，但 D 持久状态为 UNCERTAIN / D_DISPATCH_OperationalError，执行资格冲突。"
+      ],
+      "runtime_state": "UNVERIFIED_NO_8011_LISTENER_AT_THIS_AUDIT",
+      "unverified_fields": [
+        "current in-memory strategy version",
+        "current live enable/entry gate",
+        "runtime cycle after last persisted evidence"
+      ],
+      "current_audit_date": "2026-11-20"
+    },
+    {
+      "id": "E",
+      "strategy_id": "E",
+      "version": "E-V1.1-QUANT",
+      "production": {
+        "version": "E-V1.1-QUANT",
+        "enabled": true,
+        "entry_permitted": true,
+        "research_initial_equity": "10000"
+      },
+      "library": {
+        "kind": "versioned_research_documents",
+        "version": "E-V1.1-QUANT",
+        "previous_version": "E-V1.0",
+        "file": "strategies/E/E-V1.1-QUANT.metadata.json"
+      },
+      "version_match": "PARTIAL",
+      "archive_paths": [
+        "E/strategy.json",
+        "E/strategy.md"
+      ],
+      "rule_verification": {
+        "method": "sha256_of_workspace_sources",
+        "verified_local_copy": true
+      },
+      "source_gaps": [
+        "8011 状态接口提供策略 ID、版本和启用状态，但未发布整个进程的部署源码摘要。共享执行入口来自工作区源码静态追踪。"
+      ],
+      "source": {
+        "project": "C:/Users/admin/Documents/btc-visual-price-action-lab",
+        "source_type": "read-only current local project snapshot",
+        "additional_evidence": "strategy archive exported 2026-11-20 15:28 Asia/Shanghai; its runtime observation is historical and environment=DEMO"
+      },
+      "status": "ACTIVE",
+      "source_hash": null,
+      "source_hash_verified": false,
+      "completeness": null,
+      "source_snapshot": [
+        "backend/e_quant_execution.py",
+        "backend/e_quant_v11.py",
+        "strategies/E/E-V1.1-QUANT.md"
+      ],
+      "execution_entry": [
+        "strategies/E/E-V1.1-QUANT.md",
+        "backend/e_quant_v11.py",
+        "backend/e_quant_execution.py"
+      ],
+      "rule_conflicts": [
+        "observe-version.json 为 OBSERVE_ONLY / E-V1.1-QUANT；auto-paper.json 的 long_enabled 与 short_enabled 均为 true，strategy_control 显示 RUNNING。执行模式存在冲突，不能据此认定自动开仓。"
+      ],
+      "runtime_state": "UNVERIFIED_NO_8011_LISTENER_AT_THIS_AUDIT",
+      "unverified_fields": [
+        "current in-memory strategy version",
+        "current live enable/entry gate",
+        "runtime cycle after last persisted evidence"
+      ],
+      "current_audit_date": "2026-11-20"
+    },
+    {
+      "id": "G",
+      "strategy_id": "G",
+      "version": "1.0.0",
+      "production": {
+        "version": "1.0.0",
+        "enabled": true,
+        "entry_permitted": true,
+        "research_initial_equity": "10000"
+      },
+      "library": {
+        "kind": "built_in_code",
+        "version": "1.0.0",
+        "independent_json": null
+      },
+      "version_match": "PARTIAL",
+      "archive_paths": [
+        "G/strategy.json",
+        "G/strategy.md"
+      ],
+      "rule_verification": {
+        "method": "sha256_of_workspace_sources",
+        "verified_local_copy": true
+      },
+      "source_gaps": [
+        "8011 状态接口提供策略 ID、版本和启用状态，但未发布整个进程的部署源码摘要。共享执行入口来自工作区源码静态追踪。"
+      ],
+      "source": {
+        "project": "C:/Users/admin/Documents/btc-visual-price-action-lab",
+        "source_type": "read-only current local project snapshot",
+        "additional_evidence": "strategy archive exported 2026-11-20 15:28 Asia/Shanghai; its runtime observation is historical and environment=DEMO"
+      },
+      "status": "ACTIVE",
+      "source_hash": null,
+      "source_hash_verified": false,
+      "completeness": null,
+      "source_snapshot": [
+        "backend/g_mirror.py",
+        "config/research/strategy-source-map-v1.json"
+      ],
+      "execution_entry": [
+        "backend/g_mirror.py",
+        "config/research/strategy-source-map-v1.json"
+      ],
+      "rule_conflicts": [
+        "策略源映射为 C 成交事件镜像；当前 g 镜像账本状态未读到，本次无 8011 运行态。Demo 配置中的启用状态不能证明本地纸盘当前运行。"
+      ],
+      "runtime_state": "UNVERIFIED_NO_8011_LISTENER_AT_THIS_AUDIT",
+      "unverified_fields": [
+        "current in-memory strategy version",
+        "current live enable/entry gate",
+        "runtime cycle after last persisted evidence"
+      ],
+      "current_audit_date": "2026-11-20"
+    },
+    {
+      "id": "PA-01",
+      "strategy_id": "pa-trend-40-breakout",
+      "version": "1.0.0",
+      "production": {
+        "version": "1.0.0",
+        "enabled": true,
+        "entry_permitted": true,
+        "research_initial_equity": "10000"
+      },
+      "library": {
+        "id": "pa-trend-40-breakout",
+        "active_version": "1.0.0",
+        "enabled": 1,
+        "archived_at": null,
+        "sha256": "19641ecb4332463e0e18b1a90408a9fb5d4d7fd5dbad0c421b194eadaca928ec",
+        "uploaded_at": "2026-11-19T14:56:29.483374+00:00",
+        "path": "data-binance-demo/strategy-pool.sqlite3",
+        "source": "strategies.active_version → versions.document",
+        "canonical_sha256_verified": true
+      },
+      "version_match": "PASS",
+      "archive_paths": [
+        "PA-01/strategy.json",
+        "PA-01/strategy.md"
+      ],
+      "rule_verification": {
+        "method": "sqlite_canonical_json",
+        "sha256": "19641ecb4332463e0e18b1a90408a9fb5d4d7fd5dbad0c421b194eadaca928ec",
+        "verified": true
+      },
+      "source_gaps": [
+        "8011 状态接口提供策略 ID、版本和启用状态，但未发布整个进程的部署源码摘要。共享执行入口来自工作区源码静态追踪。"
+      ],
+      "source": {
+        "project": "C:/Users/admin/Documents/btc-visual-price-action-lab",
+        "source_type": "read-only current local project snapshot",
+        "additional_evidence": "strategy archive exported 2026-11-20 15:28 Asia/Shanghai; its runtime observation is historical and environment=DEMO"
+      },
+      "status": "ACTIVE",
+      "source_hash": "19641ecb4332463e0e18b1a90408a9fb5d4d7fd5dbad0c421b194eadaca928ec",
+      "source_hash_verified": true,
+      "completeness": null,
+      "source_snapshot": [
+        "backend/strategy.py",
+        "backend/strategy_pool.py",
+        "registry/pa-trend-40-breakout/1.0.0.json"
+      ],
+      "execution_entry": [
+        "registry/pa-trend-40-breakout/1.0.0.json",
+        "backend/strategy_pool.py",
+        "backend/strategy.py"
+      ],
+      "rule_conflicts": [
+        "策略库 enabled=1、版本 SHA 已核对；最近保存周期为 2026-11-19 15:15 UTC，当前无 8011，不能称正在运行。"
+      ],
+      "runtime_state": "UNVERIFIED_NO_8011_LISTENER_AT_THIS_AUDIT",
+      "unverified_fields": [
+        "current in-memory strategy version",
+        "current live enable/entry gate",
+        "runtime cycle after last persisted evidence"
+      ],
+      "current_audit_date": "2026-11-20"
+    },
+    {
+      "id": "PA-02",
+      "strategy_id": "pa-sma20-pullback-confirm",
+      "version": "1.0.0",
+      "production": {
+        "version": "1.0.0",
+        "enabled": true,
+        "entry_permitted": true,
+        "research_initial_equity": "10000"
+      },
+      "library": {
+        "id": "pa-sma20-pullback-confirm",
+        "active_version": "1.0.0",
+        "enabled": 1,
+        "archived_at": null,
+        "sha256": "56872adae426f773af4b96918ea577d8f5b97923389d3b38333631911993ed98",
+        "uploaded_at": "2026-11-19T14:56:29.441850+00:00",
+        "path": "data-binance-demo/strategy-pool.sqlite3",
+        "source": "strategies.active_version → versions.document",
+        "canonical_sha256_verified": true
+      },
+      "version_match": "PASS",
+      "archive_paths": [
+        "PA-02/strategy.json",
+        "PA-02/strategy.md"
+      ],
+      "rule_verification": {
+        "method": "sqlite_canonical_json",
+        "sha256": "56872adae426f773af4b96918ea577d8f5b97923389d3b38333631911993ed98",
+        "verified": true
+      },
+      "source_gaps": [
+        "8011 状态接口提供策略 ID、版本和启用状态，但未发布整个进程的部署源码摘要。共享执行入口来自工作区源码静态追踪。"
+      ],
+      "source": {
+        "project": "C:/Users/admin/Documents/btc-visual-price-action-lab",
+        "source_type": "read-only current local project snapshot",
+        "additional_evidence": "strategy archive exported 2026-11-20 15:28 Asia/Shanghai; its runtime observation is historical and environment=DEMO"
+      },
+      "status": "ACTIVE",
+      "source_hash": "56872adae426f773af4b96918ea577d8f5b97923389d3b38333631911993ed98",
+      "source_hash_verified": true,
+      "completeness": null,
+      "source_snapshot": [
+        "backend/strategy.py",
+        "backend/strategy_pool.py",
+        "registry/pa-sma20-pullback-confirm/1.0.0.json"
+      ],
+      "execution_entry": [
+        "registry/pa-sma20-pullback-confirm/1.0.0.json",
+        "backend/strategy_pool.py",
+        "backend/strategy.py"
+      ],
+      "rule_conflicts": [
+        "策略库 enabled=1、版本 SHA 已核对；最近保存周期为 2026-11-19 15:15 UTC，当前无 8011，不能称正在运行。"
+      ],
+      "runtime_state": "UNVERIFIED_NO_8011_LISTENER_AT_THIS_AUDIT",
+      "unverified_fields": [
+        "current in-memory strategy version",
+        "current live enable/entry gate",
+        "runtime cycle after last persisted evidence"
+      ],
+      "current_audit_date": "2026-11-20"
+    },
+    {
+      "id": "PA-03",
+      "strategy_id": "pa-full-engulfing-reversal",
+      "version": "1.0.0",
+      "production": {
+        "version": "1.0.0",
+        "enabled": true,
+        "entry_permitted": true,
+        "research_initial_equity": "10000"
+      },
+      "library": {
+        "id": "pa-full-engulfing-reversal",
+        "active_version": "1.0.0",
+        "enabled": 1,
+        "archived_at": null,
+        "sha256": "ea9140d3162f072934abfc8a79a888146d3cc6f7031761045bd054885d3cc4b0",
+        "uploaded_at": "2026-11-19T14:56:29.381319+00:00",
+        "path": "data-binance-demo/strategy-pool.sqlite3",
+        "source": "strategies.active_version → versions.document",
+        "canonical_sha256_verified": true
+      },
+      "version_match": "PASS",
+      "archive_paths": [
+        "PA-03/strategy.json",
+        "PA-03/strategy.md"
+      ],
+      "rule_verification": {
+        "method": "sqlite_canonical_json",
+        "sha256": "ea9140d3162f072934abfc8a79a888146d3cc6f7031761045bd054885d3cc4b0",
+        "verified": true
+      },
+      "source_gaps": [
+        "8011 状态接口提供策略 ID、版本和启用状态，但未发布整个进程的部署源码摘要。共享执行入口来自工作区源码静态追踪。"
+      ],
+      "source": {
+        "project": "C:/Users/admin/Documents/btc-visual-price-action-lab",
+        "source_type": "read-only current local project snapshot",
+        "additional_evidence": "strategy archive exported 2026-11-20 15:28 Asia/Shanghai; its runtime observation is historical and environment=DEMO"
+      },
+      "status": "ACTIVE",
+      "source_hash": "ea9140d3162f072934abfc8a79a888146d3cc6f7031761045bd054885d3cc4b0",
+      "source_hash_verified": true,
+      "completeness": null,
+      "source_snapshot": [
+        "backend/strategy.py",
+        "backend/strategy_pool.py",
+        "registry/pa-full-engulfing-reversal/1.0.0.json"
+      ],
+      "execution_entry": [
+        "registry/pa-full-engulfing-reversal/1.0.0.json",
+        "backend/strategy_pool.py",
+        "backend/strategy.py"
+      ],
+      "rule_conflicts": [
+        "策略库 enabled=1、版本 SHA 已核对；最近保存周期为 2026-11-19 15:15 UTC，当前无 8011，不能称正在运行。"
+      ],
+      "runtime_state": "UNVERIFIED_NO_8011_LISTENER_AT_THIS_AUDIT",
+      "unverified_fields": [
+        "current in-memory strategy version",
+        "current live enable/entry gate",
+        "runtime cycle after last persisted evidence"
+      ],
+      "current_audit_date": "2026-11-20"
+    },
+    {
+      "id": "PA-04",
+      "strategy_id": "pa-gapless-three-bar-reversal",
+      "version": "1.0.0",
+      "production": {
+        "version": "1.0.0",
+        "enabled": true,
+        "entry_permitted": true,
+        "research_initial_equity": "10000"
+      },
+      "library": {
+        "id": "pa-gapless-three-bar-reversal",
+        "active_version": "1.0.0",
+        "enabled": 1,
+        "archived_at": null,
+        "sha256": "da1b870fbe7e378d56427451872bd0cbcb06a7e1063c09deb6a5e23e320b14cd",
+        "uploaded_at": "2026-11-19T14:56:29.399851+00:00",
+        "path": "data-binance-demo/strategy-pool.sqlite3",
+        "source": "strategies.active_version → versions.document",
+        "canonical_sha256_verified": true
+      },
+      "version_match": "PASS",
+      "archive_paths": [
+        "PA-04/strategy.json",
+        "PA-04/strategy.md"
+      ],
+      "rule_verification": {
+        "method": "sqlite_canonical_json",
+        "sha256": "da1b870fbe7e378d56427451872bd0cbcb06a7e1063c09deb6a5e23e320b14cd",
+        "verified": true
+      },
+      "source_gaps": [
+        "8011 状态接口提供策略 ID、版本和启用状态，但未发布整个进程的部署源码摘要。共享执行入口来自工作区源码静态追踪。"
+      ],
+      "source": {
+        "project": "C:/Users/admin/Documents/btc-visual-price-action-lab",
+        "source_type": "read-only current local project snapshot",
+        "additional_evidence": "strategy archive exported 2026-11-20 15:28 Asia/Shanghai; its runtime observation is historical and environment=DEMO"
+      },
+      "status": "ACTIVE",
+      "source_hash": "da1b870fbe7e378d56427451872bd0cbcb06a7e1063c09deb6a5e23e320b14cd",
+      "source_hash_verified": true,
+      "completeness": null,
+      "source_snapshot": [
+        "backend/strategy.py",
+        "backend/strategy_pool.py",
+        "registry/pa-gapless-three-bar-reversal/1.0.0.json"
+      ],
+      "execution_entry": [
+        "registry/pa-gapless-three-bar-reversal/1.0.0.json",
+        "backend/strategy_pool.py",
+        "backend/strategy.py"
+      ],
+      "rule_conflicts": [
+        "策略库 enabled=1、版本 SHA 已核对；最近保存周期为 2026-11-19 15:15 UTC，当前无 8011，不能称正在运行。"
+      ],
+      "runtime_state": "UNVERIFIED_NO_8011_LISTENER_AT_THIS_AUDIT",
+      "unverified_fields": [
+        "current in-memory strategy version",
+        "current live enable/entry gate",
+        "runtime cycle after last persisted evidence"
+      ],
+      "current_audit_date": "2026-11-20"
+    },
+    {
+      "id": "PA-05",
+      "strategy_id": "pa-trend-false-break-reclaim",
+      "version": "1.0.0",
+      "production": {
+        "version": "1.0.0",
+        "enabled": true,
+        "entry_permitted": true,
+        "research_initial_equity": "10000"
+      },
+      "library": {
+        "id": "pa-trend-false-break-reclaim",
+        "active_version": "1.0.0",
+        "enabled": 1,
+        "archived_at": null,
+        "sha256": "61c5107e6fd47627e8a3e29cda0e39d8eee4e439b59bc28f1e5f0f1d6b928101",
+        "uploaded_at": "2026-11-19T14:56:29.503375+00:00",
+        "path": "data-binance-demo/strategy-pool.sqlite3",
+        "source": "strategies.active_version → versions.document",
+        "canonical_sha256_verified": true
+      },
+      "version_match": "PASS",
+      "archive_paths": [
+        "PA-05/strategy.json",
+        "PA-05/strategy.md"
+      ],
+      "rule_verification": {
+        "method": "sqlite_canonical_json",
+        "sha256": "61c5107e6fd47627e8a3e29cda0e39d8eee4e439b59bc28f1e5f0f1d6b928101",
+        "verified": true
+      },
+      "source_gaps": [
+        "8011 状态接口提供策略 ID、版本和启用状态，但未发布整个进程的部署源码摘要。共享执行入口来自工作区源码静态追踪。"
+      ],
+      "source": {
+        "project": "C:/Users/admin/Documents/btc-visual-price-action-lab",
+        "source_type": "read-only current local project snapshot",
+        "additional_evidence": "strategy archive exported 2026-11-20 15:28 Asia/Shanghai; its runtime observation is historical and environment=DEMO"
+      },
+      "status": "ACTIVE",
+      "source_hash": "61c5107e6fd47627e8a3e29cda0e39d8eee4e439b59bc28f1e5f0f1d6b928101",
+      "source_hash_verified": true,
+      "completeness": null,
+      "source_snapshot": [
+        "backend/strategy.py",
+        "backend/strategy_pool.py",
+        "registry/pa-trend-false-break-reclaim/1.0.0.json"
+      ],
+      "execution_entry": [
+        "registry/pa-trend-false-break-reclaim/1.0.0.json",
+        "backend/strategy_pool.py",
+        "backend/strategy.py"
+      ],
+      "rule_conflicts": [
+        "策略库 enabled=1、版本 SHA 已核对；最近保存周期为 2026-11-19 15:15 UTC，当前无 8011，不能称正在运行。"
+      ],
+      "runtime_state": "UNVERIFIED_NO_8011_LISTENER_AT_THIS_AUDIT",
+      "unverified_fields": [
+        "current in-memory strategy version",
+        "current live enable/entry gate",
+        "runtime cycle after last persisted evidence"
+      ],
+      "current_audit_date": "2026-11-20"
+    },
+    {
+      "id": "PA-06",
+      "strategy_id": "pa-inside-bar-break",
+      "version": "1.0.0",
+      "production": {
+        "version": "1.0.0",
+        "enabled": true,
+        "entry_permitted": true,
+        "research_initial_equity": "10000"
+      },
+      "library": {
+        "id": "pa-inside-bar-break",
+        "active_version": "1.0.0",
+        "enabled": 1,
+        "archived_at": null,
+        "sha256": "9cfa53a1e7235654f51ef7fa795060e52742f50081a03025c9a6a5e9e6223c2c",
+        "uploaded_at": "2026-11-19T14:56:29.420851+00:00",
+        "path": "data-binance-demo/strategy-pool.sqlite3",
+        "source": "strategies.active_version → versions.document",
+        "canonical_sha256_verified": true
+      },
+      "version_match": "PASS",
+      "archive_paths": [
+        "PA-06/strategy.json",
+        "PA-06/strategy.md"
+      ],
+      "rule_verification": {
+        "method": "sqlite_canonical_json",
+        "sha256": "9cfa53a1e7235654f51ef7fa795060e52742f50081a03025c9a6a5e9e6223c2c",
+        "verified": true
+      },
+      "source_gaps": [
+        "8011 状态接口提供策略 ID、版本和启用状态，但未发布整个进程的部署源码摘要。共享执行入口来自工作区源码静态追踪。"
+      ],
+      "source": {
+        "project": "C:/Users/admin/Documents/btc-visual-price-action-lab",
+        "source_type": "read-only current local project snapshot",
+        "additional_evidence": "strategy archive exported 2026-11-20 15:28 Asia/Shanghai; its runtime observation is historical and environment=DEMO"
+      },
+      "status": "ACTIVE",
+      "source_hash": "9cfa53a1e7235654f51ef7fa795060e52742f50081a03025c9a6a5e9e6223c2c",
+      "source_hash_verified": true,
+      "completeness": null,
+      "source_snapshot": [
+        "backend/strategy.py",
+        "backend/strategy_pool.py",
+        "registry/pa-inside-bar-break/1.0.0.json"
+      ],
+      "execution_entry": [
+        "registry/pa-inside-bar-break/1.0.0.json",
+        "backend/strategy_pool.py",
+        "backend/strategy.py"
+      ],
+      "rule_conflicts": [
+        "策略库 enabled=1、版本 SHA 已核对；最近保存周期为 2026-11-19 15:15 UTC，当前无 8011，不能称正在运行。"
+      ],
+      "runtime_state": "UNVERIFIED_NO_8011_LISTENER_AT_THIS_AUDIT",
+      "unverified_fields": [
+        "current in-memory strategy version",
+        "current live enable/entry gate",
+        "runtime cycle after last persisted evidence"
+      ],
+      "current_audit_date": "2026-11-20"
+    },
+    {
+      "id": "PA-07",
+      "strategy_id": "pa-big-candle-continuation",
+      "version": "1.0.0",
+      "production": {
+        "version": "1.0.0",
+        "enabled": true,
+        "entry_permitted": true,
+        "research_initial_equity": "10000"
+      },
+      "library": {
+        "id": "pa-big-candle-continuation",
+        "active_version": "1.0.0",
+        "enabled": 1,
+        "archived_at": null,
+        "sha256": "4168d67c15471151a7c0ef85c2a71c5d9f5552267d34af8d84670ef30674eacc",
+        "uploaded_at": "2026-11-19T14:56:29.363856+00:00",
+        "path": "data-binance-demo/strategy-pool.sqlite3",
+        "source": "strategies.active_version → versions.document",
+        "canonical_sha256_verified": true
+      },
+      "version_match": "PASS",
+      "archive_paths": [
+        "PA-07/strategy.json",
+        "PA-07/strategy.md"
+      ],
+      "rule_verification": {
+        "method": "sqlite_canonical_json",
+        "sha256": "4168d67c15471151a7c0ef85c2a71c5d9f5552267d34af8d84670ef30674eacc",
+        "verified": true
+      },
+      "source_gaps": [
+        "8011 状态接口提供策略 ID、版本和启用状态，但未发布整个进程的部署源码摘要。共享执行入口来自工作区源码静态追踪。"
+      ],
+      "source": {
+        "project": "C:/Users/admin/Documents/btc-visual-price-action-lab",
+        "source_type": "read-only current local project snapshot",
+        "additional_evidence": "strategy archive exported 2026-11-20 15:28 Asia/Shanghai; its runtime observation is historical and environment=DEMO"
+      },
+      "status": "ACTIVE",
+      "source_hash": "4168d67c15471151a7c0ef85c2a71c5d9f5552267d34af8d84670ef30674eacc",
+      "source_hash_verified": true,
+      "completeness": null,
+      "source_snapshot": [
+        "backend/strategy.py",
+        "backend/strategy_pool.py",
+        "registry/pa-big-candle-continuation/1.0.0.json"
+      ],
+      "execution_entry": [
+        "registry/pa-big-candle-continuation/1.0.0.json",
+        "backend/strategy_pool.py",
+        "backend/strategy.py"
+      ],
+      "rule_conflicts": [
+        "策略库 enabled=1、版本 SHA 已核对；最近保存周期为 2026-11-19 15:15 UTC，当前无 8011，不能称正在运行。"
+      ],
+      "runtime_state": "UNVERIFIED_NO_8011_LISTENER_AT_THIS_AUDIT",
+      "unverified_fields": [
+        "current in-memory strategy version",
+        "current live enable/entry gate",
+        "runtime cycle after last persisted evidence"
+      ],
+      "current_audit_date": "2026-11-20"
+    },
+    {
+      "id": "PA-08",
+      "strategy_id": "pa-three-bar-hhhl",
+      "version": "1.0.0",
+      "production": {
+        "version": "1.0.0",
+        "enabled": true,
+        "entry_permitted": true,
+        "research_initial_equity": "10000"
+      },
+      "library": {
+        "id": "pa-three-bar-hhhl",
+        "active_version": "1.0.0",
+        "enabled": 1,
+        "archived_at": null,
+        "sha256": "d4287384edfe9d24a40598ad0461f733554babdf0f7532a18ce5643f76df6ee1",
+        "uploaded_at": "2026-11-19T14:56:29.461852+00:00",
+        "path": "data-binance-demo/strategy-pool.sqlite3",
+        "source": "strategies.active_version → versions.document",
+        "canonical_sha256_verified": true
+      },
+      "version_match": "PASS",
+      "archive_paths": [
+        "PA-08/strategy.json",
+        "PA-08/strategy.md"
+      ],
+      "rule_verification": {
+        "method": "sqlite_canonical_json",
+        "sha256": "d4287384edfe9d24a40598ad0461f733554babdf0f7532a18ce5643f76df6ee1",
+        "verified": true
+      },
+      "source_gaps": [
+        "8011 状态接口提供策略 ID、版本和启用状态，但未发布整个进程的部署源码摘要。共享执行入口来自工作区源码静态追踪。"
+      ],
+      "source": {
+        "project": "C:/Users/admin/Documents/btc-visual-price-action-lab",
+        "source_type": "read-only current local project snapshot",
+        "additional_evidence": "strategy archive exported 2026-11-20 15:28 Asia/Shanghai; its runtime observation is historical and environment=DEMO"
+      },
+      "status": "ACTIVE",
+      "source_hash": "d4287384edfe9d24a40598ad0461f733554babdf0f7532a18ce5643f76df6ee1",
+      "source_hash_verified": true,
+      "completeness": null,
+      "source_snapshot": [
+        "backend/strategy.py",
+        "backend/strategy_pool.py",
+        "registry/pa-three-bar-hhhl/1.0.0.json"
+      ],
+      "execution_entry": [
+        "registry/pa-three-bar-hhhl/1.0.0.json",
+        "backend/strategy_pool.py",
+        "backend/strategy.py"
+      ],
+      "rule_conflicts": [
+        "策略库 enabled=1、版本 SHA 已核对；最近保存周期为 2026-11-19 15:15 UTC，当前无 8011，不能称正在运行。",
+        "历史验收记录要求保留缺口锁与现有保护状态；没有读取或复制旧账本。"
+      ],
+      "runtime_state": "UNVERIFIED_NO_8011_LISTENER_AT_THIS_AUDIT",
+      "unverified_fields": [
+        "current in-memory strategy version",
+        "current live enable/entry gate",
+        "runtime cycle after last persisted evidence"
+      ],
+      "current_audit_date": "2026-11-20"
+    },
+    {
+      "id": "PA-09",
+      "strategy_id": "PA-09",
+      "version": "1.0.0",
+      "production": {
+        "version": "1.0.0",
+        "enabled": true,
+        "entry_permitted": true,
+        "research_initial_equity": "10000"
+      },
+      "library": {
+        "kind": "built_in_extension",
+        "implementation": "backend/pa_extension.py:PaperLedger._bind",
+        "version": "1.0.0",
+        "legacy_extension_ledger": "data-binance-demo/pa-v1-extensions/PA-09.sqlite3",
+        "observed_table_names": [
+          "fills",
+          "snapshot"
+        ],
+        "legacy_api": {
+          "http": 200,
+          "market": "BTC/USD",
+          "version": "1.0.0",
+          "sha256": "f270836e0e02723ff221b328558b95d2689ea423b4bbb282d707a9b26d31841f",
+          "archive_path": "source_snapshots/legacy-active-api/PA-09.json"
+        }
+      },
+      "version_match": "PARTIAL",
+      "archive_paths": [
+        "PA-09/strategy.json",
+        "PA-09/strategy.md"
+      ],
+      "rule_verification": {
+        "method": "historical_api_rule_hash",
+        "sha256": "c3cd72d4dcb8a8a9865a3a206feccc8ec5fd2d4b78e4d846596386e338457be6",
+        "verified_for_current_export": false,
+        "observed_current_http": null
+      },
+      "source_gaps": [
+        "8011 状态接口提供策略 ID、版本和启用状态，但未发布整个进程的部署源码摘要。共享执行入口来自工作区源码静态追踪。",
+        "现网活动规则 GET 返回 HTTP None。保留此前 HTTP 200 的 SHA-256 验证记录及当前规则源码，未经当前接口确认的 JSON 原文未取得。"
+      ],
+      "source": {
+        "project": "C:/Users/admin/Documents/btc-visual-price-action-lab",
+        "source_type": "read-only current local project snapshot",
+        "additional_evidence": "strategy archive exported 2026-11-20 15:28 Asia/Shanghai; its runtime observation is historical and environment=DEMO"
+      },
+      "status": "INACTIVE",
+      "source_hash": "c3cd72d4dcb8a8a9865a3a206feccc8ec5fd2d4b78e4d846596386e338457be6",
+      "source_hash_verified": false,
+      "completeness": null,
+      "source_snapshot": [
+        "backend/pa_active_rules.py",
+        "backend/pa_extension.py",
+        "scripts/pa09_pa10_candidates.py"
+      ],
+      "execution_entry": [
+        "backend/pa_active_rules.py",
+        "backend/pa_extension.py",
+        "scripts/pa09_pa10_candidates.py"
+      ],
+      "rule_conflicts": [
+        "策略扩展源码与历史规则导出存在，但当前活动 GET 未成功核验；PA09/10 生产切换记录仍为待批准。Demo enabled 列表属于独立 BINANCE_USDM_DEMO 环境。"
+      ],
+      "runtime_state": "UNVERIFIED_NO_8011_LISTENER_AT_THIS_AUDIT",
+      "unverified_fields": [
+        "current in-memory strategy version",
+        "current live enable/entry gate",
+        "runtime cycle after last persisted evidence"
+      ],
+      "current_audit_date": "2026-11-20"
+    },
+    {
+      "id": "PA-10",
+      "strategy_id": "PA-10",
+      "version": "1.0.0",
+      "production": {
+        "version": "1.0.0",
+        "enabled": true,
+        "entry_permitted": true,
+        "research_initial_equity": "10000"
+      },
+      "library": {
+        "kind": "built_in_extension",
+        "implementation": "backend/pa_extension.py:PaperLedger._bind",
+        "version": "1.0.0",
+        "legacy_extension_ledger": "data-binance-demo/pa-v1-extensions/PA-10.sqlite3",
+        "observed_table_names": [
+          "fills",
+          "snapshot"
+        ],
+        "legacy_api": {
+          "http": 200,
+          "market": "BTC/USD",
+          "version": "1.0.0",
+          "sha256": "ff66e1887c484e7a56c6741f1f4dda205d6b03492c754557294b1ba299c1f59d",
+          "archive_path": "source_snapshots/legacy-active-api/PA-10.json"
+        }
+      },
+      "version_match": "PARTIAL",
+      "archive_paths": [
+        "PA-10/strategy.json",
+        "PA-10/strategy.md"
+      ],
+      "rule_verification": {
+        "method": "historical_api_rule_hash",
+        "sha256": "fadcfbfe05a80d8ef644d77fe526abb5a33a87d47b08ec2816d22379ded2f728",
+        "verified_for_current_export": false,
+        "observed_current_http": null
+      },
+      "source_gaps": [
+        "8011 状态接口提供策略 ID、版本和启用状态，但未发布整个进程的部署源码摘要。共享执行入口来自工作区源码静态追踪。",
+        "现网活动规则 GET 返回 HTTP None。保留此前 HTTP 200 的 SHA-256 验证记录及当前规则源码，未经当前接口确认的 JSON 原文未取得。"
+      ],
+      "source": {
+        "project": "C:/Users/admin/Documents/btc-visual-price-action-lab",
+        "source_type": "read-only current local project snapshot",
+        "additional_evidence": "strategy archive exported 2026-11-20 15:28 Asia/Shanghai; its runtime observation is historical and environment=DEMO"
+      },
+      "status": "INACTIVE",
+      "source_hash": "fadcfbfe05a80d8ef644d77fe526abb5a33a87d47b08ec2816d22379ded2f728",
+      "source_hash_verified": false,
+      "completeness": null,
+      "source_snapshot": [
+        "backend/pa_active_rules.py",
+        "backend/pa_extension.py",
+        "scripts/pa09_pa10_candidates.py"
+      ],
+      "execution_entry": [
+        "backend/pa_active_rules.py",
+        "backend/pa_extension.py",
+        "scripts/pa09_pa10_candidates.py"
+      ],
+      "rule_conflicts": [
+        "策略扩展源码与历史规则导出存在，但当前活动 GET 未成功核验；PA09/10 生产切换记录仍为待批准。Demo enabled 列表属于独立 BINANCE_USDM_DEMO 环境。"
+      ],
+      "runtime_state": "UNVERIFIED_NO_8011_LISTENER_AT_THIS_AUDIT",
+      "unverified_fields": [
+        "current in-memory strategy version",
+        "current live enable/entry gate",
+        "runtime cycle after last persisted evidence"
+      ],
+      "current_audit_date": "2026-11-20"
+    }
+  ],
+  "strategy_active_version_match": "PARTIAL",
+  "source_snapshots": [
+    "source_snapshots/backend/app.py",
+    "source_snapshots/backend/d_circuit.py",
+    "source_snapshots/backend/d_margin.py",
+    "source_snapshots/backend/d_position_policy.py",
+    "source_snapshots/backend/d_risk.py",
+    "source_snapshots/backend/d_signal.py",
+    "source_snapshots/backend/domain.py",
+    "source_snapshots/backend/e_quant_execution.py",
+    "source_snapshots/backend/e_quant_gate.py",
+    "source_snapshots/backend/e_quant_v11.py",
+    "source_snapshots/backend/e_structure.py",
+    "source_snapshots/backend/e_visual.py",
+    "source_snapshots/backend/execution.py",
+    "source_snapshots/backend/g_mirror.py",
+    "source_snapshots/backend/pa_active_rules.py",
+    "source_snapshots/backend/pa_extension.py",
+    "source_snapshots/backend/rule_cycle.py",
+    "source_snapshots/backend/serve.py",
+    "source_snapshots/backend/settings.py",
+    "source_snapshots/backend/strategy.py",
+    "source_snapshots/backend/strategy_pool.py",
+    "source_snapshots/config/research/strategy-source-map-v1.json",
+    "source_snapshots/config/rule_v26/A-rule.json",
+    "source_snapshots/config/rule_v26/b-v31-signals.py",
+    "source_snapshots/config/rule_v26/baseline-md-hashes.json",
+    "source_snapshots/config/rule_v26/profile.json",
+    "source_snapshots/config/rule_v26/v3-signals.py",
+    "source_snapshots/config/strategy_d/D_strategy_15m.json",
+    "source_snapshots/config/strategy_d/D策略_完整说明.md",
+    "source_snapshots/config/strategy_pool/strategy-v1.schema.json",
+    "source_snapshots/docs/research/PA09_PA10_V1_RELEASE_PLAN.md",
+    "source_snapshots/legacy-active-api/PA-09.json",
+    "source_snapshots/legacy-active-api/PA-10.json",
+    "source_snapshots/README_V3_SCOPE.md",
+    "source_snapshots/registry/pa-big-candle-continuation/1.0.0.json",
+    "source_snapshots/registry/pa-full-engulfing-reversal/1.0.0.json",
+    "source_snapshots/registry/pa-gapless-three-bar-reversal/1.0.0.json",
+    "source_snapshots/registry/pa-inside-bar-break/1.0.0.json",
+    "source_snapshots/registry/pa-sma20-pullback-confirm/1.0.0.json",
+    "source_snapshots/registry/pa-three-bar-hhhl/1.0.0.json",
+    "source_snapshots/registry/pa-trend-40-breakout/1.0.0.json",
+    "source_snapshots/registry/pa-trend-false-break-reclaim/1.0.0.json",
+    "source_snapshots/scripts/pa09_pa10_candidates.py",
+    "source_snapshots/scripts/pa09_pa10_execution.py",
+    "source_snapshots/scripts/rule_evolution_v2.py",
+    "source_snapshots/strategies/A/v1.0.0.md",
+    "source_snapshots/strategies/A/v1.0.0.metadata.json",
+    "source_snapshots/strategies/B/v1.0.0.md",
+    "source_snapshots/strategies/B/v1.0.0.metadata.json",
+    "source_snapshots/strategies/C/v1.0.0.md",
+    "source_snapshots/strategies/C/v1.0.0.metadata.json",
+    "source_snapshots/strategies/E/E-shadow-parameter-whitelist.json",
+    "source_snapshots/strategies/E/E-V1.0.md",
+    "source_snapshots/strategies/E/E-V1.0.metadata.json",
+    "source_snapshots/strategies/E/E-V1.1-integration-instructions.md",
+    "source_snapshots/strategies/E/E-V1.1-QUANT.md",
+    "source_snapshots/strategies/E/E-V1.1-QUANT.metadata.json",
+    "source_snapshots/strategies/E/E-V1.1-STRUCTURE-ADDENDUM.md",
+    "source_snapshots/strategies/E/HANBA_SEED_V1.md",
+    "source_snapshots/strategies/E/integration-instructions.md"
+  ],
+  "rules_unchanged": true,
+  "production_8011_unchanged": true,
+  "source_snapshot_count": 60,
+  "scope_note": "保留可复核的规则和工作区源码。运行版本 ID 均已读取，内存代码与工作区源码的逐文件一致性无法完整验证。",
+  "v3_readonly_audit": {
+    "audit_date": "2026-11-20",
+    "timezone": "Asia/Shanghai",
+    "target_count": 16,
+    "strategy_md": 16,
+    "strategy_json": 16,
+    "status_counts": {
+      "ACTIVE_CONFIGURATION": 14,
+      "INACTIVE_OR_NOT_CONFIRMED": 2,
+      "DESIGN_ONLY": 0,
+      "MISSING": 0
+    },
+    "rule_source_counts": {
+      "SOURCE_COMPLETE_RUNTIME_UNVERIFIED": 11,
+      "PARTIAL": 5,
+      "MISSING": 0
+    },
+    "current_runtime": "UNVERIFIED; no 8011 listener observed during this audit",
+    "legacy_runtime_observation": "The embedded 2026-11-20 15:28 Asia/Shanghai observation reported BINANCE_FUTURES_DEMO / V2 and PID 6320. It is historical and not evidence of the current process.",
+    "binance_api_connected": false,
+    "binance_private_order_calls": 0,
+    "legacy_system_modified": false,
+    "excluded_from_v3_archive": [
+      "legacy Binance Demo order/account/bootstrap/hedge/funding modules",
+      "Binance Demo runtime config and demo reload log",
+      "legacy SQLite databases and credentials"
+    ],
+    "notes": [
+      "PA-09 and PA-10 remain inactive for the current local paper runtime; their separate Demo enable list is not proof of local-paper activation.",
+      "D is configured AUTO_PAPER but has an UNCERTAIN latch and an OperationalError; status is recorded as configured active with blocked runtime.",
+      "E is selected OBSERVE_ONLY while AUTO_PAPER direction flags are true; do not infer paper entries."
+    ]
+  }
+}

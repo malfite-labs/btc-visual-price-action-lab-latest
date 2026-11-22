@@ -1,0 +1,29 @@
+{
+  "agent": "E",
+  "version": "E-V1.1-QUANT",
+  "status": "AUTO_PAPER",
+  "immutable": true,
+  "md_sha256": "8fd83c6169c6e0a1d5f680abbfa1cb19cd7bea0cc9c73066a91f2b006964cf43",
+  "seed_sha256": "65eab5d3a24057e37653214f70d81e8a62e05162b02187c6194ab95e1accd907",
+  "structure_addendum": {
+    "file": "E-V1.1-STRUCTURE-ADDENDUM.md",
+    "sha256": "1e7f6926745cda215c75a61cf328597635bb321e95238fa933ee21d41e490179",
+    "status": "LOADED_AUTO_PAPER_LONG_ONLY",
+    "pivot_left_closed_bars": 3,
+    "pivot_right_closed_bars": 3,
+    "stop_buffer_u": "0.15",
+    "ai_role": "NON_BLOCKING_EXPLANATION",
+    "first_natural_cycle_utc": "2026-11-02T11:45:00+00:00"
+  },
+  "shadow_whitelist": {
+    "file": "E-shadow-parameter-whitelist.json",
+    "sha256": "2f4789f2edaec301407d8ec0254b3e69e0ec3e17fe75a51a2e403c7b796edbad",
+    "status": "AUTHORIZED_CANDIDATE_ENGINE_NOT_CONNECTED"
+  },
+  "short_margin_contract": {
+    "leverage": "1",
+    "maintenance_rate": "0.01",
+    "risk_fraction": "0.02",
+    "status": "LOADED_AUTO_PAPER_1X"
+  }
+}

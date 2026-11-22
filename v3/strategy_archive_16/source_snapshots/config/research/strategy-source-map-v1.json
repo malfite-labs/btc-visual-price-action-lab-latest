@@ -1,0 +1,695 @@
+{
+  "schema_version": "btc-research-export/v1",
+  "market_source": {
+    "path": "data/market-candles.sqlite3",
+    "table": "candles",
+    "symbol": "BTC/USD",
+    "interval": "15m",
+    "payload_column": "payload"
+  },
+  "strategies": {
+    "A": {
+      "name": "A V2.6 突破回踩",
+      "category": "ABC_RULE",
+      "execution_type": "closed_bar_rule",
+      "account": {
+        "path": "data/paper.sqlite3",
+        "table": "accounts",
+        "key": "agent",
+        "value": "A"
+      },
+      "fills": {
+        "path": "data/paper.sqlite3",
+        "table": "fills",
+        "filter_column": "agent",
+        "filter_value": "A",
+        "time_column": "occurred_at"
+      },
+      "decisions": {
+        "path": "data/paper.sqlite3",
+        "table": "decisions",
+        "filter_column": "agent",
+        "filter_value": "A",
+        "time_column": "candle_close"
+      },
+      "audit": {
+        "path": "data/paper.sqlite3",
+        "table": "audit_events",
+        "filter_column": "agent",
+        "filter_value": "A",
+        "time_column": "occurred_at"
+      },
+      "rules": [
+        {
+          "path": "config/rule_v26/profile.json",
+          "format": "json_profile",
+          "select": "A"
+        },
+        {
+          "path": "config/rule_v26/A-rule.json",
+          "format": "json_rule"
+        },
+        {
+          "path": "scripts/rule_evolution_v2.py",
+          "format": "python_source"
+        },
+        {
+          "path": "backend/rule_cycle.py",
+          "format": "python_source"
+        }
+      ],
+      "equity_events": {
+        "path": "data/paper.sqlite3",
+        "table": "ledger_events",
+        "filter_column": "agent",
+        "filter_value": "A",
+        "time_column": "occurred_at"
+      },
+      "known_limitations": [
+        "历史最大回撤/权益曲线当前没有完整标记市值序列；ledger_events.cash_after仅是现金轨迹，不能冒充含浮动盈亏的回撤。"
+      ]
+    },
+    "B": {
+      "name": "B V3.1 趋势过滤反转",
+      "category": "ABC_RULE",
+      "execution_type": "closed_bar_rule",
+      "account": {
+        "path": "data/paper.sqlite3",
+        "table": "accounts",
+        "key": "agent",
+        "value": "B"
+      },
+      "fills": {
+        "path": "data/paper.sqlite3",
+        "table": "fills",
+        "filter_column": "agent",
+        "filter_value": "B",
+        "time_column": "occurred_at"
+      },
+      "decisions": {
+        "path": "data/paper.sqlite3",
+        "table": "decisions",
+        "filter_column": "agent",
+        "filter_value": "B",
+        "time_column": "candle_close"
+      },
+      "audit": {
+        "path": "data/paper.sqlite3",
+        "table": "audit_events",
+        "filter_column": "agent",
+        "filter_value": "B",
+        "time_column": "occurred_at"
+      },
+      "rules": [
+        {
+          "path": "config/rule_v26/profile.json",
+          "format": "json_profile",
+          "select": "B"
+        },
+        {
+          "path": "config/rule_v26/b-v31-signals.py",
+          "format": "python_source"
+        },
+        {
+          "path": "backend/rule_cycle.py",
+          "format": "python_source"
+        }
+      ],
+      "equity_events": {
+        "path": "data/paper.sqlite3",
+        "table": "ledger_events",
+        "filter_column": "agent",
+        "filter_value": "B",
+        "time_column": "occurred_at"
+      },
+      "known_limitations": [
+        "历史最大回撤/权益曲线当前没有完整标记市值序列；ledger_events.cash_after仅是现金轨迹，不能冒充含浮动盈亏的回撤。"
+      ]
+    },
+    "C": {
+      "name": "C V3.1 裸K研究规则",
+      "category": "ABC_RULE",
+      "execution_type": "closed_bar_rule",
+      "account": {
+        "path": "data/paper.sqlite3",
+        "table": "accounts",
+        "key": "agent",
+        "value": "C"
+      },
+      "fills": {
+        "path": "data/paper.sqlite3",
+        "table": "fills",
+        "filter_column": "agent",
+        "filter_value": "C",
+        "time_column": "occurred_at"
+      },
+      "decisions": {
+        "path": "data/paper.sqlite3",
+        "table": "decisions",
+        "filter_column": "agent",
+        "filter_value": "C",
+        "time_column": "candle_close"
+      },
+      "audit": {
+        "path": "data/paper.sqlite3",
+        "table": "audit_events",
+        "filter_column": "agent",
+        "filter_value": "C",
+        "time_column": "occurred_at"
+      },
+      "rules": [
+        {
+          "path": "config/rule_v26/profile.json",
+          "format": "json_profile",
+          "select": "C"
+        },
+        {
+          "path": "config/rule_v26/v3-signals.py",
+          "format": "python_source"
+        },
+        {
+          "path": "backend/rule_cycle.py",
+          "format": "python_source"
+        }
+      ],
+      "equity_events": {
+        "path": "data/paper.sqlite3",
+        "table": "ledger_events",
+        "filter_column": "agent",
+        "filter_value": "C",
+        "time_column": "occurred_at"
+      },
+      "known_limitations": [
+        "历史最大回撤/权益曲线当前没有完整标记市值序列；ledger_events.cash_after仅是现金轨迹，不能冒充含浮动盈亏的回撤。"
+      ]
+    },
+    "D": {
+      "name": "D 15分钟急跌后底部反转",
+      "category": "RULE_OBSERVATION",
+      "execution_type": "closed_bar_observer",
+      "account": {
+        "path": "data/d/formal.sqlite3",
+        "table": "d_account",
+        "key": "id",
+        "value": 1
+      },
+      "decisions": {
+        "path": "data/d/formal.sqlite3",
+        "table": "d_cycles",
+        "time_column": "close_at"
+      },
+      "execution_account": {
+        "path": "data/d/trading.sqlite3",
+        "table": "d_account",
+        "key": "id",
+        "value": 1
+      },
+      "fills": {
+        "path": "data/d/trading.sqlite3",
+        "table": "d_fills",
+        "time_column": "occurred_at"
+      },
+      "risk": {
+        "path": "data/d/formal.sqlite3",
+        "tables": [
+          "d_data_loss_latch",
+          "d_runtime_status",
+          "d_gap_recovery_audit"
+        ]
+      },
+      "rules": [
+        {
+          "path": "config/strategy_d/D_strategy_15m.json",
+          "format": "json_specification"
+        },
+        {
+          "path": "config/strategy_d/D策略_完整说明.md",
+          "format": "markdown_specification"
+        },
+        {
+          "path": "backend/d_signal.py",
+          "format": "python_source"
+        },
+        {
+          "path": "backend/d_paper.py",
+          "format": "python_source"
+        }
+      ],
+      "known_limitations": [
+        "OBSERVE_ONLY；没有执行成交，不得把研究规则规格视为已验证的可执行策略。观察账户与独立空执行账本分开导出。"
+      ]
+    },
+    "E": {
+      "name": "E V1.1-QUANT",
+      "category": "RULE_AND_PAPER",
+      "execution_type": "closed_bar_rule_with_visual_observation",
+      "account": {
+        "path": "data/e/formal.sqlite3",
+        "table": "accounts",
+        "key": "agent",
+        "value": "A",
+        "public_id": "E"
+      },
+      "fills": {
+        "path": "data/e/formal.sqlite3",
+        "table": "fills",
+        "filter_column": "agent",
+        "filter_value": "A",
+        "time_column": "occurred_at",
+        "public_id": "E"
+      },
+      "decisions": {
+        "path": "data/e/formal.sqlite3",
+        "table": "e_quant_cycles",
+        "time_column": "close_at"
+      },
+      "audit": {
+        "path": "data/e/formal.sqlite3",
+        "table": "audit_events",
+        "filter_column": "agent",
+        "filter_value": "A",
+        "time_column": "occurred_at"
+      },
+      "risk": {
+        "path": "data/e/formal.sqlite3",
+        "tables": [
+          "e_protection_events",
+          "e_protective_stops",
+          "e_structure_events"
+        ]
+      },
+      "rules": [
+        {
+          "path": "data/e/observe-version.json",
+          "format": "json_runtime_selection"
+        },
+        {
+          "path": "data/e/auto-paper.json",
+          "format": "json_runtime_mode"
+        },
+        {
+          "path": "data/e/short-risk.json",
+          "format": "json_risk"
+        },
+        {
+          "path": "strategies/E/E-V1.1-QUANT.md",
+          "format": "markdown_rule"
+        },
+        {
+          "path": "backend/e_quant_v11.py",
+          "format": "python_source"
+        },
+        {
+          "path": "backend/e_paper_entry.py",
+          "format": "python_source"
+        }
+      ],
+      "separate_not_merged": [
+        {
+          "path": "data/e/shadow.sqlite3",
+          "label": "E_SHADOW_SEPARATE_LEDGER_NOT_INCLUDED"
+        }
+      ],
+      "equity_events": {
+        "path": "data/e/formal.sqlite3",
+        "table": "ledger_events",
+        "filter_column": "agent",
+        "filter_value": "A",
+        "time_column": "occurred_at"
+      }
+    },
+    "G": {
+      "name": "G 反向镜像策略",
+      "category": "EVENT_MIRROR",
+      "execution_type": "fill_event_driven",
+      "account": {
+        "path": "data/g/mirror.sqlite3",
+        "table": "g_account",
+        "key": "singleton",
+        "value": 1
+      },
+      "fills": {
+        "path": "data/g/mirror.sqlite3",
+        "table": "g_fills",
+        "time_column": "occurred_at"
+      },
+      "decisions": {
+        "path": "data/g/mirror.sqlite3",
+        "table": "g_events",
+        "time_column": "processed_at"
+      },
+      "pairs": {
+        "path": "data/g/mirror.sqlite3",
+        "table": "g_pairs",
+        "time_columns": [
+          "opened_at",
+          "closed_at"
+        ]
+      },
+      "rules": [
+        {
+          "path": "data/g/mirror.sqlite3",
+          "table": "g_strategy",
+          "format": "database_strategy_record"
+        },
+        {
+          "path": "backend/g_mirror.py",
+          "format": "python_source"
+        }
+      ],
+      "known_limitations": [
+        "成交事件数不等于闭合交易数；仅以镜像配对表和实际G开/平仓成交共同核实闭合交易。风险紧急退出可早于C交易结束。"
+      ]
+    },
+    "pa-trend-40-breakout": {
+      "name": "PA-01 顺势突破",
+      "category": "DECLARATIVE_PA",
+      "execution_type": "closed_bar_rule",
+      "account": {
+        "path": "data/strategy-pool.sqlite3",
+        "table": "accounts",
+        "key": "strategy_id",
+        "value": "pa-trend-40-breakout"
+      },
+      "fills": {
+        "path": "data/strategy-pool.sqlite3",
+        "table": "fills",
+        "filter_column": "strategy_id",
+        "filter_value": "pa-trend-40-breakout",
+        "time_column": "created_at"
+      },
+      "decisions": {
+        "history": "NOT_PERSISTED",
+        "latest_fields": [
+          "last_cycle",
+          "last_status",
+          "last_action"
+        ]
+      },
+      "versions_table": "versions",
+      "rules": [
+        {
+          "path": "data/strategy-pool.sqlite3",
+          "table": "versions",
+          "filter_column": "strategy_id",
+          "filter_value": "pa-trend-40-breakout",
+          "format": "stored_json_definition"
+        }
+      ],
+      "known_limitations": [
+        "历史有5条无法配对的开仓事件；原始成交保留，不做FIFO补配。PA-07已报告$8.35差异未改动。PA数据库不持久化决策历史及稳定交易ID；历史逐笔净盈亏不可完整确认。"
+      ]
+    },
+    "pa-sma20-pullback-confirm": {
+      "name": "PA-02 SMA20顺势回踩",
+      "category": "DECLARATIVE_PA",
+      "execution_type": "closed_bar_rule",
+      "account": {
+        "path": "data/strategy-pool.sqlite3",
+        "table": "accounts",
+        "key": "strategy_id",
+        "value": "pa-sma20-pullback-confirm"
+      },
+      "fills": {
+        "path": "data/strategy-pool.sqlite3",
+        "table": "fills",
+        "filter_column": "strategy_id",
+        "filter_value": "pa-sma20-pullback-confirm",
+        "time_column": "created_at"
+      },
+      "decisions": {
+        "history": "NOT_PERSISTED",
+        "latest_fields": [
+          "last_cycle",
+          "last_status",
+          "last_action"
+        ]
+      },
+      "versions_table": "versions",
+      "rules": [
+        {
+          "path": "data/strategy-pool.sqlite3",
+          "table": "versions",
+          "filter_column": "strategy_id",
+          "filter_value": "pa-sma20-pullback-confirm",
+          "format": "stored_json_definition"
+        }
+      ],
+      "known_limitations": [
+        "历史有5条无法配对的开仓事件；原始成交保留，不做FIFO补配。PA-07已报告$8.35差异未改动。PA数据库不持久化决策历史及稳定交易ID；历史逐笔净盈亏不可完整确认。"
+      ]
+    },
+    "pa-full-engulfing-reversal": {
+      "name": "PA-03 双重吞噬反转",
+      "category": "DECLARATIVE_PA",
+      "execution_type": "closed_bar_rule",
+      "account": {
+        "path": "data/strategy-pool.sqlite3",
+        "table": "accounts",
+        "key": "strategy_id",
+        "value": "pa-full-engulfing-reversal"
+      },
+      "fills": {
+        "path": "data/strategy-pool.sqlite3",
+        "table": "fills",
+        "filter_column": "strategy_id",
+        "filter_value": "pa-full-engulfing-reversal",
+        "time_column": "created_at"
+      },
+      "decisions": {
+        "history": "NOT_PERSISTED",
+        "latest_fields": [
+          "last_cycle",
+          "last_status",
+          "last_action"
+        ]
+      },
+      "versions_table": "versions",
+      "rules": [
+        {
+          "path": "data/strategy-pool.sqlite3",
+          "table": "versions",
+          "filter_column": "strategy_id",
+          "filter_value": "pa-full-engulfing-reversal",
+          "format": "stored_json_definition"
+        }
+      ],
+      "known_limitations": [
+        "历史有5条无法配对的开仓事件；原始成交保留，不做FIFO补配。PA-07已报告$8.35差异未改动。PA数据库不持久化决策历史及稳定交易ID；历史逐笔净盈亏不可完整确认。"
+      ]
+    },
+    "pa-gapless-three-bar-reversal": {
+      "name": "PA-04 无缺口三K反转",
+      "category": "DECLARATIVE_PA",
+      "execution_type": "closed_bar_rule",
+      "account": {
+        "path": "data/strategy-pool.sqlite3",
+        "table": "accounts",
+        "key": "strategy_id",
+        "value": "pa-gapless-three-bar-reversal"
+      },
+      "fills": {
+        "path": "data/strategy-pool.sqlite3",
+        "table": "fills",
+        "filter_column": "strategy_id",
+        "filter_value": "pa-gapless-three-bar-reversal",
+        "time_column": "created_at"
+      },
+      "decisions": {
+        "history": "NOT_PERSISTED",
+        "latest_fields": [
+          "last_cycle",
+          "last_status",
+          "last_action"
+        ]
+      },
+      "versions_table": "versions",
+      "rules": [
+        {
+          "path": "data/strategy-pool.sqlite3",
+          "table": "versions",
+          "filter_column": "strategy_id",
+          "filter_value": "pa-gapless-three-bar-reversal",
+          "format": "stored_json_definition"
+        }
+      ],
+      "known_limitations": [
+        "历史有5条无法配对的开仓事件；原始成交保留，不做FIFO补配。PA-07已报告$8.35差异未改动。PA数据库不持久化决策历史及稳定交易ID；历史逐笔净盈亏不可完整确认。"
+      ]
+    },
+    "pa-trend-false-break-reclaim": {
+      "name": "PA-05 顺势假突破收复",
+      "category": "DECLARATIVE_PA",
+      "execution_type": "closed_bar_rule",
+      "account": {
+        "path": "data/strategy-pool.sqlite3",
+        "table": "accounts",
+        "key": "strategy_id",
+        "value": "pa-trend-false-break-reclaim"
+      },
+      "fills": {
+        "path": "data/strategy-pool.sqlite3",
+        "table": "fills",
+        "filter_column": "strategy_id",
+        "filter_value": "pa-trend-false-break-reclaim",
+        "time_column": "created_at"
+      },
+      "decisions": {
+        "history": "NOT_PERSISTED",
+        "latest_fields": [
+          "last_cycle",
+          "last_status",
+          "last_action"
+        ]
+      },
+      "versions_table": "versions",
+      "rules": [
+        {
+          "path": "data/strategy-pool.sqlite3",
+          "table": "versions",
+          "filter_column": "strategy_id",
+          "filter_value": "pa-trend-false-break-reclaim",
+          "format": "stored_json_definition"
+        }
+      ],
+      "known_limitations": [
+        "历史有5条无法配对的开仓事件；原始成交保留，不做FIFO补配。PA-07已报告$8.35差异未改动。PA数据库不持久化决策历史及稳定交易ID；历史逐笔净盈亏不可完整确认。"
+      ]
+    },
+    "pa-inside-bar-break": {
+      "name": "PA-06 内包K线趋势突破",
+      "category": "DECLARATIVE_PA",
+      "execution_type": "closed_bar_rule",
+      "account": {
+        "path": "data/strategy-pool.sqlite3",
+        "table": "accounts",
+        "key": "strategy_id",
+        "value": "pa-inside-bar-break"
+      },
+      "fills": {
+        "path": "data/strategy-pool.sqlite3",
+        "table": "fills",
+        "filter_column": "strategy_id",
+        "filter_value": "pa-inside-bar-break",
+        "time_column": "created_at"
+      },
+      "decisions": {
+        "history": "NOT_PERSISTED",
+        "latest_fields": [
+          "last_cycle",
+          "last_status",
+          "last_action"
+        ]
+      },
+      "versions_table": "versions",
+      "rules": [
+        {
+          "path": "data/strategy-pool.sqlite3",
+          "table": "versions",
+          "filter_column": "strategy_id",
+          "filter_value": "pa-inside-bar-break",
+          "format": "stored_json_definition"
+        }
+      ],
+      "known_limitations": [
+        "历史有5条无法配对的开仓事件；原始成交保留，不做FIFO补配。PA-07已报告$8.35差异未改动。PA数据库不持久化决策历史及稳定交易ID；历史逐笔净盈亏不可完整确认。"
+      ]
+    },
+    "pa-big-candle-continuation": {
+      "name": "PA-07 大实体K线趋势推进",
+      "category": "DECLARATIVE_PA",
+      "execution_type": "closed_bar_rule",
+      "account": {
+        "path": "data/strategy-pool.sqlite3",
+        "table": "accounts",
+        "key": "strategy_id",
+        "value": "pa-big-candle-continuation"
+      },
+      "fills": {
+        "path": "data/strategy-pool.sqlite3",
+        "table": "fills",
+        "filter_column": "strategy_id",
+        "filter_value": "pa-big-candle-continuation",
+        "time_column": "created_at"
+      },
+      "decisions": {
+        "history": "NOT_PERSISTED",
+        "latest_fields": [
+          "last_cycle",
+          "last_status",
+          "last_action"
+        ]
+      },
+      "versions_table": "versions",
+      "rules": [
+        {
+          "path": "data/strategy-pool.sqlite3",
+          "table": "versions",
+          "filter_column": "strategy_id",
+          "filter_value": "pa-big-candle-continuation",
+          "format": "stored_json_definition"
+        }
+      ],
+      "known_limitations": [
+        "历史有5条无法配对的开仓事件；原始成交保留，不做FIFO补配。PA-07已报告$8.35差异未改动。PA数据库不持久化决策历史及稳定交易ID；历史逐笔净盈亏不可完整确认。"
+      ]
+    },
+    "pa-three-bar-hhhl": {
+      "name": "PA-08 三根高低点持续推进",
+      "category": "DECLARATIVE_PA",
+      "execution_type": "closed_bar_rule",
+      "account": {
+        "path": "data/strategy-pool.sqlite3",
+        "table": "accounts",
+        "key": "strategy_id",
+        "value": "pa-three-bar-hhhl"
+      },
+      "fills": {
+        "path": "data/strategy-pool.sqlite3",
+        "table": "fills",
+        "filter_column": "strategy_id",
+        "filter_value": "pa-three-bar-hhhl",
+        "time_column": "created_at"
+      },
+      "decisions": {
+        "history": "NOT_PERSISTED",
+        "latest_fields": [
+          "last_cycle",
+          "last_status",
+          "last_action"
+        ]
+      },
+      "versions_table": "versions",
+      "rules": [
+        {
+          "path": "data/strategy-pool.sqlite3",
+          "table": "versions",
+          "filter_column": "strategy_id",
+          "filter_value": "pa-three-bar-hhhl",
+          "format": "stored_json_definition"
+        }
+      ],
+      "known_limitations": [
+        "历史有5条无法配对的开仓事件；原始成交保留，不做FIFO补配。PA-07已报告$8.35差异未改动。PA数据库不持久化决策历史及稳定交易ID；历史逐笔净盈亏不可完整确认。"
+      ]
+    }
+  },
+  "excluded_separate_sources": [
+    {
+      "path": "data/e/shadow.sqlite3",
+      "belongs_to": "E_SHADOW",
+      "reason": "separate account and ledger; never merge into E formal export"
+    },
+    {
+      "path": "docs/reports/abc-forward-v26/shadow-ledger.sqlite3",
+      "belongs_to": "ABC_LEGACY_SHADOW",
+      "reason": "legacy research evidence; excluded from the 14 formal/paper strategy exports"
+    }
+  ],
+  "known_global_limitations": [
+    "研究导出是只读快照；缺失数据标记为UNKNOWN/UNAVAILABLE，不估算、不伪造。",
+    "E正式账本单独导出，data/e/shadow.sqlite3明确排除，不合并。",
+    "市场归档来自共用BTC/USD 15m candles表；只包含归档覆盖范围，不生成缺口K线。",
+    "历史资金费/历史买卖价差若未在账本逐笔持久化，则不纳入成本重建。"
+  ]
+}

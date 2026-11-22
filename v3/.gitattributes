@@ -1,0 +1,9 @@
+# Frozen experiment artifacts are hashed as exact bytes across operating systems.
+docs/reports/AB_CONTEXT_COMPARISON_PLAN_V1.json -text
+docs/reports/AB_CONTEXT_SYNTHETIC_SNAPSHOT_V1.json -text
+# The frozen A/B MD hashes were calculated over CRLF bytes on Windows.
+strategies/A/v1.0.0.md text eol=crlf
+strategies/B/v1.0.0.md text eol=crlf
+
+# Preserve byte-locked strategy source and release snapshot on all platforms.
+* -text

@@ -1,0 +1,305 @@
+{
+  "archive_schema": "btc-strategy-archive/1",
+  "archive_id": "E",
+  "strategy_id": "E",
+  "name": "E V1.1 量化结构策略",
+  "version": "E-V1.1-QUANT",
+  "runtime_observation": {
+    "version": "E-V1.1-QUANT",
+    "enabled": true,
+    "entry_permitted": true,
+    "research_initial_equity": "10000"
+  },
+  "library": {
+    "kind": "versioned_research_documents",
+    "version": "E-V1.1-QUANT",
+    "previous_version": "E-V1.0",
+    "file": "strategies/E/E-V1.1-QUANT.metadata.json"
+  },
+  "effective_market": "BTCUSDT",
+  "currency": "USDT",
+  "timeframe": "15m",
+  "direction_support": {
+    "long": true,
+    "short": false
+  },
+  "rule_sections_zh": {
+    "策略定位": "区间及结构反转，量化四模式。",
+    "适用行情": "区间下沿、防守转强、突破回踩及跌破反抽。",
+    "指标与参数": "前 32 根真实波幅中位数 u；ε=max(0.0005C,0.15u)，容差=max(0.0005C,0.20u)。区间按 64/48/96/144 根顺序，宽 0.5%–6%，两侧触及间隔至少 6 根且 ≥70% 收盘在区间。",
+    "做多规则": "E1 下沿两根确认，E2 急跌后反转，E3 上沿突破、回踩及续强。逐项公式见 detect_setups 摘录。",
+    "做空规则": "E4 下沿跌破、回踩及续弱仍在检测器中，现行 Demo allow_short 默认关闭。E4 不提交空单。",
+    "信号确认": "使用连续、已收盘的 BTCUSDT 15 分钟 K 线。常规路径在最新收盘后的 5 秒窗口内检查 Binance Demo 有效盘口并发单，多头用 ask、空头用 bid，实际成交以交易所确认回报为准。 使用 288 根。双向候选冲突跳过，同向优先级 E3、E1、E2、E4。扣成本后的收益/风险要求至少 2。",
+    "止损规则": "各模式结构极值加减 0.15u。持仓使用确认的七根结构枢轴，只有入场后确认的改善结构才能收紧。",
+    "止盈规则": "研究收益参考分别用区间对侧、跌前价格、箱体投影与局部障碍。Demo 以结构退出，2R 是预检参考。",
+    "退出与超时": "有效 bid/ask 止损或收盘突破反向结构后由下一有效报价执行。Demo 文档设置 max_hold_bars=0，结构分支不以该值计固定超时。",
+    "特殊逻辑": "E1 同区间键避免重复开仓；仅确认的已收盘结构可推进。E V1.0 与 E V1.1 的原始文档分开保留。",
+    "资金与仓位": "现网 V2 研究初始权益以 8011 返回为准。适用的原风险定仓、杠杆上限、交易所约束及保护保留；估算手续费与实际成交费用分开。 2%，策略杠杆上限 1×。",
+    "原始来源与版本": "归档号 E，运行 ID E。8011 版本 E-V1.1-QUANT，启用 True，当前入场许可 True。\n\n策略库或内置版本证据\n\n\n```json\n{\n  \"kind\": \"versioned_research_documents\",\n  \"version\": \"E-V1.1-QUANT\",\n  \"previous_version\": \"E-V1.0\",\n  \"file\": \"strategies/E/E-V1.1-QUANT.metadata.json\"\n}\n```\n\n规则校验\n\n\n```json\n{\n  \"method\": \"sha256_of_workspace_sources\",\n  \"verified_local_copy\": true\n}\n```\n\n开仓入口 binance_demo_pa.execute_next_open → e_quant_v11.detect_setups → e_quant_gate.quant_reward_risk。\n\n退出入口 DemoPARuntime._e_structure_close / _protect → structure_action / DemoHedgeCoordinator.exit_on_quote。\n\nPython 策略以代码快照复核。\n\n原始路径和逐文件 SHA-256 见本目录 strategy.json。\n\n8011 状态接口提供策略 ID、版本和启用状态，但未发布整个进程的部署源码摘要。共享执行入口来自工作区源码静态追踪。"
+  },
+  "rule_payload": {
+    "original_metadata": {
+      "agent": "E",
+      "version": "E-V1.1-QUANT",
+      "status": "AUTO_PAPER",
+      "immutable": true,
+      "md_sha256": "8fd83c6169c6e0a1d5f680abbfa1cb19cd7bea0cc9c73066a91f2b006964cf43",
+      "seed_sha256": "65eab5d3a24057e37653214f70d81e8a62e05162b02187c6194ab95e1accd907",
+      "structure_addendum": {
+        "file": "E-V1.1-STRUCTURE-ADDENDUM.md",
+        "sha256": "1e7f6926745cda215c75a61cf328597635bb321e95238fa933ee21d41e490179",
+        "status": "LOADED_AUTO_PAPER_LONG_ONLY",
+        "pivot_left_closed_bars": 3,
+        "pivot_right_closed_bars": 3,
+        "stop_buffer_u": "0.15",
+        "ai_role": "NON_BLOCKING_EXPLANATION",
+        "first_natural_cycle_utc": "2026-11-02T11:45:00+00:00"
+      },
+      "shadow_whitelist": {
+        "file": "E-shadow-parameter-whitelist.json",
+        "sha256": "2f4789f2edaec301407d8ec0254b3e69e0ec3e17fe75a51a2e403c7b796edbad",
+        "status": "AUTHORIZED_CANDIDATE_ENGINE_NOT_CONNECTED"
+      },
+      "short_margin_contract": {
+        "leverage": "1",
+        "maintenance_rate": "0.01",
+        "risk_fraction": "0.02",
+        "status": "LOADED_AUTO_PAPER_1X"
+      }
+    },
+    "runtime_definition_source": "backend/e_quant_execution.py:demo_e_definition",
+    "runtime_configuration": {
+      "allow_short": false,
+      "risk": {
+        "max_leverage": "1",
+        "risk_fraction": "0.02"
+      },
+      "position": {
+        "target_r": "2",
+        "max_hold_bars": 0
+      }
+    }
+  },
+  "rule_source_kind": "SOURCE_BOUND_PACKAGE",
+  "verbatim_original_json": "source_snapshots/strategies/E/E-V1.1-QUANT.metadata.json",
+  "source_evidence": {
+    "method": "sha256_of_workspace_sources",
+    "verified_local_copy": true
+  },
+  "production_wiring": {
+    "registered_via_8011": true,
+    "enabled_observed": true,
+    "entry_permitted_observed": true,
+    "entry": "binance_demo_pa.execute_next_open → e_quant_v11.detect_setups → e_quant_gate.quant_reward_risk",
+    "exit": "DemoPARuntime._e_structure_close / _protect → structure_action / DemoHedgeCoordinator.exit_on_quote",
+    "source_evidence": "工作区源码静态追踪＋8011 注册状态。未通过本次归档测试下单。"
+  },
+  "workspace_source_files": [
+    {
+      "original_path": "backend/e_quant_execution.py",
+      "archive_path": "source_snapshots/backend/e_quant_execution.py",
+      "sha256": "95c5a896024ffffb7b12b04df2e547fce849fdc3b0eca5201e4be622f0333f30"
+    },
+    {
+      "original_path": "backend/e_quant_v11.py",
+      "archive_path": "source_snapshots/backend/e_quant_v11.py",
+      "sha256": "f5ccb028c8ab28ac10f92295033bbd36a9b48e8dfab85736393c9a65306bfdf1"
+    },
+    {
+      "original_path": "backend/e_quant_gate.py",
+      "archive_path": "source_snapshots/backend/e_quant_gate.py",
+      "sha256": "bc619fccd887874bfaa0e54f4fb8316d26de673a59e84d9bc14bc2d2c9619adb"
+    },
+    {
+      "original_path": "backend/e_structure.py",
+      "archive_path": "source_snapshots/backend/e_structure.py",
+      "sha256": "16e293b10696c85640f55d4aac086c8932040c4eb296bfd74087eceb011065d0"
+    },
+    {
+      "original_path": "backend/e_visual.py",
+      "archive_path": "source_snapshots/backend/e_visual.py",
+      "sha256": "428c2d8b4774158018802b0fd09338a962952df09bf81f3954b0369255161b76"
+    },
+    {
+      "original_path": "backend/execution.py",
+      "archive_path": "source_snapshots/backend/execution.py",
+      "sha256": "9ebdd6c1a3aa191432fa47c4239940e56bb404cb7f8bd6d33b10ec31f34dd928"
+    },
+    {
+      "original_path": "strategies/E/E-V1.0.md",
+      "archive_path": "source_snapshots/strategies/E/E-V1.0.md",
+      "sha256": "f037df5d752aeaf3304f0871eee850af71d67c7df2da7354290f2aa94df5c8df"
+    },
+    {
+      "original_path": "strategies/E/E-V1.0.metadata.json",
+      "archive_path": "source_snapshots/strategies/E/E-V1.0.metadata.json",
+      "sha256": "9c8823b1cf58e2a890241ace0ec8d43aacd075119d1706a16048de696ecff54f"
+    },
+    {
+      "original_path": "strategies/E/E-V1.1-QUANT.md",
+      "archive_path": "source_snapshots/strategies/E/E-V1.1-QUANT.md",
+      "sha256": "8fd83c6169c6e0a1d5f680abbfa1cb19cd7bea0cc9c73066a91f2b006964cf43"
+    },
+    {
+      "original_path": "strategies/E/E-V1.1-QUANT.metadata.json",
+      "archive_path": "source_snapshots/strategies/E/E-V1.1-QUANT.metadata.json",
+      "sha256": "9bd1914fba15bba86ea2280e44e203a6dffaec1eb4ea516b88b82fd1ec0283bb"
+    },
+    {
+      "original_path": "strategies/E/E-V1.1-STRUCTURE-ADDENDUM.md",
+      "archive_path": "source_snapshots/strategies/E/E-V1.1-STRUCTURE-ADDENDUM.md",
+      "sha256": "1e7f6926745cda215c75a61cf328597635bb321e95238fa933ee21d41e490179"
+    },
+    {
+      "original_path": "strategies/E/E-V1.1-integration-instructions.md",
+      "archive_path": "source_snapshots/strategies/E/E-V1.1-integration-instructions.md",
+      "sha256": "b2fb433e229413c76453492015b4577e7cb4020667f7a0cdaf25ffb6554a6ded"
+    },
+    {
+      "original_path": "strategies/E/E-shadow-parameter-whitelist.json",
+      "archive_path": "source_snapshots/strategies/E/E-shadow-parameter-whitelist.json",
+      "sha256": "2f4789f2edaec301407d8ec0254b3e69e0ec3e17fe75a51a2e403c7b796edbad"
+    },
+    {
+      "original_path": "strategies/E/HANBA_SEED_V1.md",
+      "archive_path": "source_snapshots/strategies/E/HANBA_SEED_V1.md",
+      "sha256": "65eab5d3a24057e37653214f70d81e8a62e05162b02187c6194ab95e1accd907"
+    },
+    {
+      "original_path": "strategies/E/integration-instructions.md",
+      "archive_path": "source_snapshots/strategies/E/integration-instructions.md",
+      "sha256": "c22b1bc575d1b92f360ac59040d71c43b73a73c4fdfbb0e224e2a1acbb06d25d"
+    }
+  ],
+  "shared_runtime_source_files": [
+    {
+      "original_path": "backend/serve.py",
+      "archive_path": "source_snapshots/backend/serve.py",
+      "sha256": "42e36cff393f13a777a356b581111d2305de127b3708233c35113691aa48c0fc"
+    },
+    {
+      "original_path": "backend/app.py",
+      "archive_path": "source_snapshots/backend/app.py",
+      "sha256": "924875468d8ba7666982638757f0e89384f8ff6e7a0fd392b19b0a46c5dea14c"
+    },
+    {
+      "original_path": "backend/binance_demo_bootstrap.py",
+      "archive_path": "source_snapshots/backend/binance_demo_bootstrap.py",
+      "sha256": "8188c5dd42c5a7838e1f34034733c729752e34c1dad50a54ddcc33e0c1deec68"
+    },
+    {
+      "original_path": "backend/binance_demo_registry.py",
+      "archive_path": "source_snapshots/backend/binance_demo_registry.py",
+      "sha256": "db8e195556f551059c74e99caf7f6d4f77edbb8dd7f89548d1909194d220fa4e"
+    },
+    {
+      "original_path": "backend/binance_demo_market.py",
+      "archive_path": "source_snapshots/backend/binance_demo_market.py",
+      "sha256": "7d1d422b23ce1b78aef32855237f8470c854443f0875d407a5fa7a349bd0e1de"
+    },
+    {
+      "original_path": "backend/binance_demo_pa_runtime.py",
+      "archive_path": "source_snapshots/backend/binance_demo_pa_runtime.py",
+      "sha256": "639853b7185d1c373041f761f420f885cc1e4ed2122138b3b2e030630bea0a40"
+    },
+    {
+      "original_path": "backend/binance_demo_pa.py",
+      "archive_path": "source_snapshots/backend/binance_demo_pa.py",
+      "sha256": "f1a2014703aebb0c839d7c82e31a327c886f58beae850c17e9bc98df28e7f738"
+    },
+    {
+      "original_path": "backend/binance_demo_hedge.py",
+      "archive_path": "source_snapshots/backend/binance_demo_hedge.py",
+      "sha256": "08a6a1c6aec51ec52481d89d481c54ef7a2b5fc2b523974dd94f2a1a98517d32"
+    },
+    {
+      "original_path": "backend/binance_demo_orders.py",
+      "archive_path": "source_snapshots/backend/binance_demo_orders.py",
+      "sha256": "1131bec2a905b5d51fc42daf3cbf2c821a13e0947f4ed6aff7b8338cdb164de9"
+    },
+    {
+      "original_path": "backend/binance_demo_funding.py",
+      "archive_path": "source_snapshots/backend/binance_demo_funding.py",
+      "sha256": "68ec1dcb52954712f5372ace977990dd6b46e42296a03baf5cb28f1395fba4ea"
+    },
+    {
+      "original_path": "backend/domain.py",
+      "archive_path": "source_snapshots/backend/domain.py",
+      "sha256": "5a1c0514b6232634960639e79376d3af46f9a2c35d1e070f955ae2883874b464"
+    },
+    {
+      "original_path": "backend/settings.py",
+      "archive_path": "source_snapshots/backend/settings.py",
+      "sha256": "a6bcf523ffb04fc57e55e4dd656b3aa3f6cc21761cc1101c657246beee14bda5"
+    },
+    {
+      "original_path": "data-binance-demo/demo-native-strategies.json",
+      "archive_path": "source_snapshots/data-binance-demo/demo-native-strategies.json",
+      "sha256": "69f1294f0d91a63da5495c32845ee201906a7c256397e0c864b30a64021468c2"
+    }
+  ],
+  "source_gaps": [
+    "8011 状态接口提供策略 ID、版本和启用状态，但未发布整个进程的部署源码摘要。共享执行入口来自工作区源码静态追踪。"
+  ],
+  "audit_status": {
+    "status": "ACTIVE",
+    "status_as_of": "2026-11-20",
+    "status_meaning": "ACTIVE means the saved local rule/registry is enabled or selected; it does not mean a live process was observed.",
+    "runtime_state": "UNVERIFIED_NO_8011_LISTENER_AT_THIS_AUDIT",
+    "rule_source_completeness": "PARTIAL",
+    "source": {
+      "project": "C:/Users/admin/Documents/btc-visual-price-action-lab",
+      "source_type": "read-only current local project snapshot",
+      "additional_evidence": "strategy archive exported 2026-11-20 15:28 Asia/Shanghai; its runtime observation is historical and environment=DEMO"
+    },
+    "source_hash": null,
+    "source_hash_verified": false,
+    "source_snapshot": [
+      "backend/e_quant_execution.py",
+      "backend/e_quant_v11.py",
+      "strategies/E/E-V1.1-QUANT.md"
+    ],
+    "execution_entry": [
+      "strategies/E/E-V1.1-QUANT.md",
+      "backend/e_quant_v11.py",
+      "backend/e_quant_execution.py"
+    ],
+    "legacy_runtime_entry": "binance_demo_pa.execute_next_open → e_quant_v11.detect_setups → e_quant_gate.quant_reward_risk",
+    "rule_conflicts": [
+      "observe-version.json 为 OBSERVE_ONLY / E-V1.1-QUANT；auto-paper.json 的 long_enabled 与 short_enabled 均为 true，strategy_control 显示 RUNNING。执行模式存在冲突，不能据此认定自动开仓。"
+    ],
+    "unverified_fields": [
+      "current in-memory strategy version",
+      "current live enable/entry gate",
+      "runtime cycle after last persisted evidence"
+    ]
+  },
+  "source": {
+    "project": "C:/Users/admin/Documents/btc-visual-price-action-lab",
+    "source_type": "read-only current local project snapshot",
+    "additional_evidence": "strategy archive exported 2026-11-20 15:28 Asia/Shanghai; its runtime observation is historical and environment=DEMO"
+  },
+  "status": "ACTIVE",
+  "source_hash": null,
+  "source_hash_verified": false,
+  "completeness": "PARTIAL",
+  "source_snapshot": [
+    "backend/e_quant_execution.py",
+    "backend/e_quant_v11.py",
+    "strategies/E/E-V1.1-QUANT.md"
+  ],
+  "execution_entry": [
+    "strategies/E/E-V1.1-QUANT.md",
+    "backend/e_quant_v11.py",
+    "backend/e_quant_execution.py"
+  ],
+  "rule_conflicts": [
+    "observe-version.json 为 OBSERVE_ONLY / E-V1.1-QUANT；auto-paper.json 的 long_enabled 与 short_enabled 均为 true，strategy_control 显示 RUNNING。执行模式存在冲突，不能据此认定自动开仓。"
+  ],
+  "runtime_state": "UNVERIFIED_NO_8011_LISTENER_AT_THIS_AUDIT",
+  "unverified_fields": [
+    "current in-memory strategy version",
+    "current live enable/entry gate",
+    "runtime cycle after last persisted evidence"
+  ]
+}

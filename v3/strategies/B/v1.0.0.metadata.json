@@ -1,0 +1,13 @@
+{
+  "agent": "B",
+  "version": "v1.0.0",
+  "parent": null,
+  "status": "SEED",
+  "created_at_utc": "2026-10-27",
+  "source": "V1.0 frozen principles",
+  "evolvable_sections": [
+    "Examples",
+    "Evolvable sections"
+  ],
+  "immutable": true
+}

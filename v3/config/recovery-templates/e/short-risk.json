@@ -1,0 +1,6 @@
+{
+  "leverage": "1",
+  "maintenance_rate": "0.01",
+  "risk_fraction": "0.02",
+  "authorized": true
+}

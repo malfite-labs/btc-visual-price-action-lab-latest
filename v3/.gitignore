@@ -1,0 +1,50 @@
+.venv/
+.run/
+node_modules/
+frontend/dist/
+__pycache__/
+*.py[cod]
+.env
+*.env
+data/*
+!data/.gitkeep
+data/*.sqlite*
+data/cache/
+logs/
+*.log
+playwright-report/
+test-results/
+.playwright-cli/
+
+*.tsbuildinfo
+
+# Research accounts, credentials and local evidence must not be published.
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.sqlite3-*
+*.db
+*.db-wal
+*.db-shm
+/docs/reports/**
+/knowledge/**/evidence/
+/knowledge/**/audit/
+/frontend/.remote-access-src/
+# Keep tunnel credentials, static builds, logs, and the undeployed anonymous gateway
+# off the tree. Track only the Access proxy source and its tests.
+/remote-access/*
+!/remote-access/proxy.py
+!/remote-access/tests/
+/remote-access/tests/*
+!/remote-access/tests/test_proxy.py
+!.env.example
+
+# Local UI capture noise (not secrets)
+frontend/output/
+
+# Local probe/runtime environments
+.runtime/
+
+# Local packaging and test artifacts
+*.egg-info/
+.pytest_cache/

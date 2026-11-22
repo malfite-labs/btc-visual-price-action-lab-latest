@@ -1,0 +1,629 @@
+{
+  "archive_schema": "btc-strategy-archive/1",
+  "archive_id": "D",
+  "strategy_id": "D",
+  "name": "15分钟急跌后底部反转",
+  "version": "D-REBOUND-EMA-RSI-V1",
+  "runtime_observation": {
+    "version": "D-REBOUND-EMA-RSI-V1",
+    "enabled": false,
+    "entry_permitted": false,
+    "research_initial_equity": "10000"
+  },
+  "library": {
+    "kind": "standalone_research_specification",
+    "version": "schema 1.0.0",
+    "file": "config/strategy_d/D_strategy_15m.json",
+    "runtime_diff": "研究规格还列 ETHUSDT、2×逐仓、退出冷却8根。当前 Demo 为 BTCUSDT，原执行接线的预检用5×模型，退出冷却见 DemoDPolicy.close。"
+  },
+  "effective_market": "BTCUSDT",
+  "currency": "USDT",
+  "timeframe": "15m",
+  "direction_support": {
+    "long": true,
+    "short": false
+  },
+  "rule_sections_zh": {
+    "策略定位": "急跌后底部反转，只做多。",
+    "适用行情": "15 分钟形态与 1 小时空头和波动过滤。",
+    "指标与参数": "15m EMA9/20，1h EMA20/50，Wilder ATR14/RSI14，RVOL20 中位数，收盘位置 CLV。至少 960 根有效 15m 和 240 根完整 1h。",
+    "做多规则": "候选及 1–6 根内确认条件见下方完整求值源码和原始规格。WATCH 冻结 ATR、低点、颈线与止损；跌破低点−0.1ATR 失效。",
+    "做空规则": "无做空路径。",
+    "信号确认": "只在已收盘 K 线确认，下一窗口用合规 ask；检查价差、跳空、结构、数量及独立风控。",
+    "止损规则": "初始止损为候选低点−0.25×冻结 ATR。TP1 确认后，下一合格周期按实现提高至至少入场价。",
+    "止盈规则": "按确认均价计算 R。TP1 1R 约平一半并按数量步进取整，TP2 2R 平余量。",
+    "退出与超时": "报价先检查止损，然后检查未达 TP1 的 8 根和总 16 根超时，再检查目标。风险断路器或清算预警有优先平仓路径。",
+    "特殊逻辑": "UTC 日初采用 00:00 对账后可信空仓权益；无基准或数据失效堵新仓。日亏达 1% 锁存并要求清仓，连续三笔已完结亏损暂停 24 小时。现网 D 启用标志关闭，关闭不取消保护。候选取消冷却 4 根，Demo 运行实现从 LONG 恢复空仓时也设 4 根，研究规格另写退出后 8 根。",
+    "资金与仓位": "现网 V2 研究初始权益以 8011 返回为准。适用的原风险定仓、杠杆上限、交易所约束及保护保留；估算手续费与实际成交费用分开。 研究规格的 2×逐仓是独立原文，Demo 路径看 DemoDPolicy 和 d_risk。",
+    "原始来源与版本": "归档号 D，运行 ID D。8011 版本 D-REBOUND-EMA-RSI-V1，启用 False，当前入场许可 False。\n\n策略库或内置版本证据\n\n\n```json\n{\n  \"kind\": \"standalone_research_specification\",\n  \"version\": \"schema 1.0.0\",\n  \"file\": \"config/strategy_d/D_strategy_15m.json\",\n  \"runtime_diff\": \"研究规格还列 ETHUSDT、2×逐仓、退出冷却8根。当前 Demo 为 BTCUSDT，原执行接线的预检用5×模型，退出冷却见 DemoDPolicy.close。\"\n}\n```\n\n规则校验\n\n\n```json\n{\n  \"method\": \"sha256_of_workspace_sources\",\n  \"verified_local_copy\": true\n}\n```\n\n开仓入口 DemoDRuntime.on_event → DemoDPolicy.close/quote → d_signal.evaluate / d_risk.preflight_entry。\n\n退出入口 DemoDPolicy.protect → d_position_policy.plan_position_event。\n\nPython 策略以代码快照复核。\n\n原始路径和逐文件 SHA-256 见本目录 strategy.json。\n\n8011 状态接口提供策略 ID、版本和启用状态，但未发布整个进程的部署源码摘要。共享执行入口来自工作区源码静态追踪。"
+  },
+  "rule_payload": {
+    "original_research_specification": {
+      "schema_version": "1.0.0",
+      "strategy_id": "D_15M_BOTTOM_REVERSAL",
+      "name_zh": "D策略：15分钟急跌后底部反转",
+      "as_of": "2026-11-05",
+      "status": "research_specification_unbacktested",
+      "format": "custom_specification_not_platform_import_or_executable_code",
+      "specification_file": "D策略_完整说明.md",
+      "live_enabled": false,
+      "scope": {
+        "market": "crypto_perpetual",
+        "contract_type": "USDT_linear",
+        "exchange": null,
+        "exchange_required_before_live": true,
+        "symbols_research": [
+          "BTCUSDT",
+          "ETHUSDT"
+        ],
+        "direction": "long_only",
+        "margin_mode": "isolated",
+        "max_leverage": 2,
+        "auto_add_margin": false,
+        "signal_timeframe": "15m",
+        "context_timeframe": "1h",
+        "data_timezone": "UTC",
+        "report_timezone": "Asia/Shanghai"
+      },
+      "data": {
+        "ohlcv_source": "same_exchange_perpetual_trade_prices",
+        "volume_unit": "base_asset",
+        "required_auxiliary": [
+          "mark_prices",
+          "funding_rates_and_settlement_times",
+          "contract_filters",
+          "bid_ask_quotes"
+        ],
+        "execution_preferred": "1m_or_tick",
+        "warmup_bars_15m": 960,
+        "warmup_bars_1h": 240,
+        "closed_bars_only": true,
+        "one_hour_alignment": "latest_fully_closed_UTC_hour",
+        "invalid_data_action": "block_new_entries_keep_protection_require_contiguous_rewarmup",
+        "invalid_conditions": [
+          "missing",
+          "duplicate",
+          "out_of_order",
+          "invalid_ohlc",
+          "volume_nonpositive",
+          "nonfinite_indicator"
+        ],
+        "range_notation": "inclusive_start_and_end"
+      },
+      "indicators": {
+        "ema_periods_15m": [
+          9,
+          20
+        ],
+        "ema_periods_1h": [
+          20,
+          50
+        ],
+        "ema_seed": "SMA_first_n_closes_then_alpha_2_over_n_plus_1",
+        "atr_period": 14,
+        "atr_method": "Wilder_RMA_seed_mean_first_14_true_ranges",
+        "rsi_period": 14,
+        "rsi_method": "Wilder_RMA",
+        "rsi_zero_loss_value": 100,
+        "rsi_both_zero_value": 50,
+        "rvol_lookback": 20,
+        "rvol_definition": "V[t]/median(V[t-20:t-1])",
+        "clv_definition": "(C-L)/(H-L)",
+        "lower_wick_definition": "(min(O,C)-L)/(H-L)",
+        "zero_range_action": "reject_candidate_or_confirmation"
+      },
+      "state_machine": {
+        "states": [
+          "IDLE",
+          "WATCH",
+          "PENDING",
+          "LONG",
+          "COOLDOWN"
+        ],
+        "priority": [
+          "position_risk_and_exits",
+          "cooldown",
+          "candidate_invalidation",
+          "confirmation",
+          "new_candidate"
+        ],
+        "same_bar_create_and_confirm": false,
+        "same_bar_recreate_after_invalidation": false,
+        "replace_active_candidate": false,
+        "max_entries_per_candidate": 1,
+        "max_positions_per_symbol": 1,
+        "pyramiding": false,
+        "averaging_down": false,
+        "simultaneous_symbol_priority": [
+          "BTCUSDT",
+          "ETHUSDT"
+        ],
+        "cooldown_after_cancel_bars": 4,
+        "cooldown_after_exit_bars": 8,
+        "cooldown_count": "subsequent_full_15m_bars"
+      },
+      "candidate": {
+        "evaluation": "at_k_close_only_when_IDLE",
+        "all_conditions": [
+          "C[k-1]<EMA20[k-1]",
+          "EMA20[k-1]<EMA20[k-5]",
+          "A=ATR14[k-1]>0",
+          "(max(H[k-12:k-1])-L[k])/A>=2.5",
+          "L[k]<min(L[k-8:k-1])",
+          "C[k]>O[k] OR lower_wick_ratio[k]>=0.35",
+          "CLV[k]>=0.55",
+          "RVOL[k]>=1.3"
+        ],
+        "frozen_values": {
+          "A": "ATR14[k-1]",
+          "L0": "L[k]",
+          "N": "max(H[k-3:k-1])",
+          "S_raw": "L0-0.25*A"
+        },
+        "decline_lookback": 12,
+        "decline_atr_min": 2.5,
+        "new_low_lookback": 8,
+        "lower_wick_ratio_min": 0.35,
+        "clv_min": 0.55,
+        "rvol_min": 1.3,
+        "neckline_lookback": 3,
+        "stop_buffer_atr": 0.25,
+        "invalidation": "L[t]<L0-0.10*A",
+        "invalidation_buffer_atr": 0.1,
+        "confirmation_first_offset": 1,
+        "confirmation_last_offset": 6,
+        "expiry_order": "at_k_plus_6_invalidate_then_attempt_confirm_then_expire"
+      },
+      "confirmation": {
+        "all_conditions": [
+          "C[t]>N+0.05*A",
+          "C[t]>EMA9[t]",
+          "C[t]>O[t]",
+          "CLV[t]>=0.65",
+          "RVOL[t]>=1.2",
+          "RSI14[t]>RSI14[t-1] AND RSI14[t]>=35",
+          "0<C[t]-L0<=3.5*A",
+          "NOT(C1h[h]<EMA50_1h[h] AND EMA20_1h[h]<EMA20_1h[h-3])",
+          "0.6*A<=C[t]-S<=3.0*A",
+          "ATR14_1h[h]/C1h[h]<=0.04"
+        ],
+        "breakout_buffer_atr": 0.05,
+        "clv_min": 0.65,
+        "rvol_min": 1.2,
+        "rsi_min": 35,
+        "max_distance_from_low_atr": 3.5,
+        "max_hourly_atr_fraction": 0.04,
+        "signal": "D_CONFIRM"
+      },
+      "entry": {
+        "timing": "next_15m_bar_open_once",
+        "order_type": "market",
+        "reference_price_G": "O[t+1]_backtest_or_executable_ask_live",
+        "modeled_fill_E": "G*(1+slippage_fraction)",
+        "max_abs_gap_atr": 0.3,
+        "all_conditions": [
+          "abs(G-C[t])<=0.30*A",
+          "G>N",
+          "G>S",
+          "0<E-L0<=3.5*A",
+          "0.6*A<=E-S<=3.0*A",
+          "(E-S)/E<=0.02",
+          "spread_fraction<=0.0005",
+          "all_portfolio_margin_liquidation_and_contract_filters_pass"
+        ],
+        "min_stop_distance_atr": 0.6,
+        "max_stop_distance_atr": 3.0,
+        "max_stop_distance_fraction": 0.02,
+        "max_spread_fraction": 0.0005,
+        "missing_quote_live": "reject",
+        "missing_quote_research": "disclose_execution_unverified",
+        "failed_gate_action": "cancel_and_cooldown_no_delayed_entry",
+        "after_fill": "recompute_actual_risk_reduce_if_excess_exit_and_pause_if_protection_fails"
+      },
+      "exits": {
+        "R_definition": "actual_entry_E_minus_tick_rounded_initial_S",
+        "initial_stop": "floor_to_tick(L0-0.25*A)",
+        "stop_trigger": "last_trade_price",
+        "liquidation_monitor": "independent_mark_price",
+        "reduce_only": true,
+        "take_profits": [
+          {
+            "r_multiple": 1.0,
+            "fraction_initial_quantity": 0.5
+          },
+          {
+            "r_multiple": 2.0,
+            "fraction_initial_quantity": 0.5
+          }
+        ],
+        "take_profit_rounding": "ceil_to_tick",
+        "take_profit_execution": "trigger_then_market_with_sell_slippage_and_taker_fee",
+        "after_tp1_stop": "max(previous_stop,E)_effective_next_15m_bar",
+        "breakeven_is_price_only_not_fee_adjusted": true,
+        "no_tp1_time_stop_bars": 8,
+        "max_holding_bars": 16,
+        "entry_bar_counts_as": 1,
+        "time_exit": "next_open_after_counted_bar_closes",
+        "time_exit_priority": "gap_stop_first_then_scheduled_exit_before_new_signals",
+        "stop_gap_fill": "min(stop,bar_open)*(1-slippage_fraction)",
+        "same_bar_stop_and_target": "stop_first_if_no_lower_timeframe_path",
+        "same_bar_both_targets_only": "tp1_then_tp2",
+        "illegal_split_quantity": "reject_before_entry"
+      },
+      "costs": {
+        "status": "illustrative_replace_with_actual_account_and_execution_data",
+        "taker_fee_fraction_per_side": 0.0005,
+        "slippage_fraction_per_side": 0.0003,
+        "funding_risk_reserve_fraction": 0.0005,
+        "funding_pnl": "-remaining_base_quantity*settlement_mark_price*actual_funding_rate",
+        "funding_schedule": "actual_exchange_settlement_timestamps_not_fixed_8h",
+        "future_realized_funding_in_entry_features": false
+      },
+      "risk": {
+        "risk_fraction_per_trade": 0.0025,
+        "unit_loss": "E-S*(1-s)+f*(E+S*(1-s))+b*E",
+        "quantity": "floor_to_lot(min(equity*0.0025/unit_loss,equity*0.50/E,previous_closed_bar_base_volume*0.005,margin_available_quantity))",
+        "max_symbol_notional_fraction": 0.5,
+        "max_portfolio_notional_fraction": 1.0,
+        "max_order_previous_bar_volume_fraction": 0.005,
+        "max_positions": 2,
+        "max_portfolio_open_risk_fraction": 0.005,
+        "open_risk_definition": "sum_remaining_qty_times_max(entry-current_stop,0)_plus_exit_cost_and_funding_reserve",
+        "liquidation_price_source": "exchange_specific_tiers_margin_and_fees",
+        "min_stop_minus_liquidation_atr": 2.0,
+        "liquidation_gate_failure": "reduce_leverage_or_skip_never_auto_add_margin",
+        "daily_equity_loss_fraction": 0.01,
+        "daily_reset_timezone": "UTC",
+        "daily_loss_basis": "equity_including_unrealized_pnl_fees_funding_vs_day_start_equity",
+        "daily_loss_action": "cancel_pending_flatten_strategy_positions_pause_until_next_UTC_day",
+        "consecutive_net_losses_limit": 3,
+        "loss_streak_pause_hours": 24,
+        "loss_streak_scope": "portfolio_across_symbols",
+        "emergency_block_new_entries": [
+          "liquidation_event",
+          "data_feed_loss",
+          "missing_protection",
+          "unavailable_contract_rules"
+        ]
+      },
+      "vision": {
+        "variant_id": "D-V",
+        "enabled": false,
+        "baseline_variant_id": "D-R",
+        "role": "filter_only_after_rule_confirmation",
+        "image_windows": {
+          "15m": 96,
+          "1h": 96
+        },
+        "input_cutoff": "signal_close_latest_closed_bars_only",
+        "input_panels": [
+          "candlesticks",
+          "volume"
+        ],
+        "remove_overlays": [
+          "user_arrows",
+          "trade_labels",
+          "future_bars",
+          "profit_text"
+        ],
+        "normalization": "per_window_past_only",
+        "candidate_architectures": [
+          "ViT_plus_numeric_features",
+          "Swin_plus_numeric_features"
+        ],
+        "architecture_selected": null,
+        "trained_model_version": null,
+        "label": "net_pnl_of_fixed_D-R_trade_after_all_costs_positive",
+        "calibration": "past_only_heldout_validation",
+        "min_calibrated_probability": 0.6,
+        "min_expected_net_R_exclusive": 0.0,
+        "expected_net_R_estimator": "training_fixed_probability_bin_mean_net_R_validated_then_frozen",
+        "required_grounding": "evidence_indices_in_input_and_relations_verified_against_ohlcv",
+        "vlm_self_confidence_is_probability": false,
+        "missing_model_timeout_or_inconsistent_evidence": "D-V_abstain_no_silent_baseline_fallback",
+        "output_fields": [
+          "decision_time",
+          "candidate_id",
+          "model_version",
+          "training_cutoff",
+          "input_hash",
+          "evidence_bar_indices",
+          "structure_label",
+          "p_net_positive_calibrated",
+          "expected_net_R",
+          "grounding_pass",
+          "abstain_reason",
+          "decision"
+        ]
+      },
+      "validation": {
+        "backtest_run": false,
+        "performance_results": null,
+        "minimum_history_months": 24,
+        "walk_forward_months": {
+          "train": 12,
+          "validation": 3,
+          "test": 3,
+          "step": 3
+        },
+        "final_locked_holdout_months": 3,
+        "split": "chronological_synchronized_across_symbols",
+        "purge": "remove_samples_whose_feature_start_to_label_exit_span_crosses_boundary",
+        "boundary_embargo_bars_15m": 400,
+        "random_image_split_allowed": false,
+        "slippage_stress_multipliers": [
+          1,
+          2,
+          3
+        ],
+        "one_factor_sensitivity": {
+          "decline_atr_min": [
+            2.0,
+            2.5,
+            3.0
+          ],
+          "confirmation_bars": [
+            4,
+            6,
+            8
+          ],
+          "candidate_rvol_min": [
+            1.1,
+            1.3,
+            1.5
+          ]
+        },
+        "acceptance_research_thresholds": {
+          "min_out_of_sample_trades": 200,
+          "net_expectancy_R_gt": 0,
+          "block_bootstrap_95pct_lower_bound_R_gt": 0,
+          "profit_factor_min": 1.2,
+          "max_drawdown_fraction": 0.1,
+          "double_slippage_net_expectancy_gt": 0
+        },
+        "paper_trading_min_days": 30,
+        "paper_trading_min_trades": 50,
+        "vision_incremental_evidence_required": true,
+        "metrics": [
+          "trade_count",
+          "win_rate",
+          "net_expectancy_R",
+          "profit_factor",
+          "max_drawdown",
+          "daily_sharpe_365",
+          "capital_exposure",
+          "MAE",
+          "MFE",
+          "tail_loss",
+          "monthly_pnl",
+          "per_symbol_and_regime",
+          "vision_coverage",
+          "Brier_score",
+          "calibration_error"
+        ]
+      },
+      "sources": [
+        {
+          "title": "FinChart-Bench",
+          "url": "https://arxiv.org/abs/2507.14823",
+          "date": "2025-07-20"
+        },
+        {
+          "title": "Do VLMs Truly Read Candlesticks",
+          "url": "https://arxiv.org/abs/2604.12659",
+          "date": "2026-04-14"
+        },
+        {
+          "title": "QuantHarness v4",
+          "url": "https://arxiv.org/abs/2509.09995v4",
+          "date": "2026-07-27"
+        },
+        {
+          "title": "E2A-Bench",
+          "url": "https://arxiv.org/abs/2609.14302",
+          "date": "2026-09-13"
+        },
+        {
+          "title": "Bybit liquidation process",
+          "url": "https://www.bybit.global/en/help-center/article/UTA-Trading-Rules-Liquidation-Process"
+        },
+        {
+          "title": "Binance funding rates",
+          "url": "https://www.binance.com/en/support/faq/detail/360033525031"
+        }
+      ]
+    },
+    "runtime_definition_source": "backend/binance_demo_d.py:demo_d_definition"
+  },
+  "rule_source_kind": "SOURCE_BOUND_PACKAGE",
+  "verbatim_original_json": "source_snapshots/config/strategy_d/D_strategy_15m.json",
+  "source_evidence": {
+    "method": "sha256_of_workspace_sources",
+    "verified_local_copy": true
+  },
+  "production_wiring": {
+    "registered_via_8011": true,
+    "enabled_observed": false,
+    "entry_permitted_observed": false,
+    "entry": "DemoDRuntime.on_event → DemoDPolicy.close/quote → d_signal.evaluate / d_risk.preflight_entry",
+    "exit": "DemoDPolicy.protect → d_position_policy.plan_position_event",
+    "source_evidence": "工作区源码静态追踪＋8011 注册状态。未通过本次归档测试下单。"
+  },
+  "workspace_source_files": [
+    {
+      "original_path": "config/strategy_d/D_strategy_15m.json",
+      "archive_path": "source_snapshots/config/strategy_d/D_strategy_15m.json",
+      "sha256": "d51f03960535c1010eaedcc03ec063f75b691afb07de9294d0c4ad8088ad26a8"
+    },
+    {
+      "original_path": "config/strategy_d/D策略_完整说明.md",
+      "archive_path": "source_snapshots/config/strategy_d/D策略_完整说明.md",
+      "sha256": "b1cd952c60c86dea49aeda51811034e467727b982730e8f671754af8b5ccb450"
+    },
+    {
+      "original_path": "backend/binance_demo_d.py",
+      "archive_path": "source_snapshots/backend/binance_demo_d.py",
+      "sha256": "b96afb16fde12dc558e25f2edade0e587597250774f68493bd0cafd7243a89ac"
+    },
+    {
+      "original_path": "backend/d_signal.py",
+      "archive_path": "source_snapshots/backend/d_signal.py",
+      "sha256": "5fda32e49c5417d5a38f32fc9e4af381e113822ba7e268181c269e1b291770d0"
+    },
+    {
+      "original_path": "backend/d_risk.py",
+      "archive_path": "source_snapshots/backend/d_risk.py",
+      "sha256": "e72f8a669da42487658de5ff2f0bba9e6b919078d983b1344dd4cdd00e804d7b"
+    },
+    {
+      "original_path": "backend/d_circuit.py",
+      "archive_path": "source_snapshots/backend/d_circuit.py",
+      "sha256": "f0928bda39ec6417dc1215ffe6dccef4c47fc3c9337955f477cecf92609a4511"
+    },
+    {
+      "original_path": "backend/d_margin.py",
+      "archive_path": "source_snapshots/backend/d_margin.py",
+      "sha256": "ded275d3fdc980f7b110fbdec2772fe54bd08f8b6a4ab1f7299c1b918e107702"
+    },
+    {
+      "original_path": "backend/d_position_policy.py",
+      "archive_path": "source_snapshots/backend/d_position_policy.py",
+      "sha256": "1c5735291d09a2f67a5498a4059371a28cde979fe0d881de3d6e57f2ee05fac6"
+    }
+  ],
+  "shared_runtime_source_files": [
+    {
+      "original_path": "backend/serve.py",
+      "archive_path": "source_snapshots/backend/serve.py",
+      "sha256": "42e36cff393f13a777a356b581111d2305de127b3708233c35113691aa48c0fc"
+    },
+    {
+      "original_path": "backend/app.py",
+      "archive_path": "source_snapshots/backend/app.py",
+      "sha256": "924875468d8ba7666982638757f0e89384f8ff6e7a0fd392b19b0a46c5dea14c"
+    },
+    {
+      "original_path": "backend/binance_demo_bootstrap.py",
+      "archive_path": "source_snapshots/backend/binance_demo_bootstrap.py",
+      "sha256": "8188c5dd42c5a7838e1f34034733c729752e34c1dad50a54ddcc33e0c1deec68"
+    },
+    {
+      "original_path": "backend/binance_demo_registry.py",
+      "archive_path": "source_snapshots/backend/binance_demo_registry.py",
+      "sha256": "db8e195556f551059c74e99caf7f6d4f77edbb8dd7f89548d1909194d220fa4e"
+    },
+    {
+      "original_path": "backend/binance_demo_market.py",
+      "archive_path": "source_snapshots/backend/binance_demo_market.py",
+      "sha256": "7d1d422b23ce1b78aef32855237f8470c854443f0875d407a5fa7a349bd0e1de"
+    },
+    {
+      "original_path": "backend/binance_demo_pa_runtime.py",
+      "archive_path": "source_snapshots/backend/binance_demo_pa_runtime.py",
+      "sha256": "639853b7185d1c373041f761f420f885cc1e4ed2122138b3b2e030630bea0a40"
+    },
+    {
+      "original_path": "backend/binance_demo_pa.py",
+      "archive_path": "source_snapshots/backend/binance_demo_pa.py",
+      "sha256": "f1a2014703aebb0c839d7c82e31a327c886f58beae850c17e9bc98df28e7f738"
+    },
+    {
+      "original_path": "backend/binance_demo_hedge.py",
+      "archive_path": "source_snapshots/backend/binance_demo_hedge.py",
+      "sha256": "08a6a1c6aec51ec52481d89d481c54ef7a2b5fc2b523974dd94f2a1a98517d32"
+    },
+    {
+      "original_path": "backend/binance_demo_orders.py",
+      "archive_path": "source_snapshots/backend/binance_demo_orders.py",
+      "sha256": "1131bec2a905b5d51fc42daf3cbf2c821a13e0947f4ed6aff7b8338cdb164de9"
+    },
+    {
+      "original_path": "backend/binance_demo_funding.py",
+      "archive_path": "source_snapshots/backend/binance_demo_funding.py",
+      "sha256": "68ec1dcb52954712f5372ace977990dd6b46e42296a03baf5cb28f1395fba4ea"
+    },
+    {
+      "original_path": "backend/domain.py",
+      "archive_path": "source_snapshots/backend/domain.py",
+      "sha256": "5a1c0514b6232634960639e79376d3af46f9a2c35d1e070f955ae2883874b464"
+    },
+    {
+      "original_path": "backend/settings.py",
+      "archive_path": "source_snapshots/backend/settings.py",
+      "sha256": "a6bcf523ffb04fc57e55e4dd656b3aa3f6cc21761cc1101c657246beee14bda5"
+    },
+    {
+      "original_path": "data-binance-demo/demo-native-strategies.json",
+      "archive_path": "source_snapshots/data-binance-demo/demo-native-strategies.json",
+      "sha256": "69f1294f0d91a63da5495c32845ee201906a7c256397e0c864b30a64021468c2"
+    }
+  ],
+  "source_gaps": [
+    "8011 状态接口提供策略 ID、版本和启用状态，但未发布整个进程的部署源码摘要。共享执行入口来自工作区源码静态追踪。"
+  ],
+  "audit_status": {
+    "status": "ACTIVE",
+    "status_as_of": "2026-11-20",
+    "status_meaning": "ACTIVE means the saved local rule/registry is enabled or selected; it does not mean a live process was observed.",
+    "runtime_state": "UNVERIFIED_NO_8011_LISTENER_AT_THIS_AUDIT",
+    "rule_source_completeness": "PARTIAL",
+    "source": {
+      "project": "C:/Users/admin/Documents/btc-visual-price-action-lab",
+      "source_type": "read-only current local project snapshot",
+      "additional_evidence": "strategy archive exported 2026-11-20 15:28 Asia/Shanghai; its runtime observation is historical and environment=DEMO"
+    },
+    "source_hash": null,
+    "source_hash_verified": false,
+    "source_snapshot": [
+      "backend/d_paper.py",
+      "backend/d_runtime.py",
+      "backend/d_signal.py",
+      "config/strategy_d/D_strategy_15m.json"
+    ],
+    "execution_entry": [
+      "config/strategy_d/D_strategy_15m.json",
+      "backend/d_signal.py",
+      "backend/d_paper.py",
+      "backend/d_runtime.py"
+    ],
+    "legacy_runtime_entry": "DemoDRuntime.on_event → DemoDPolicy.close/quote → d_signal.evaluate / d_risk.preflight_entry",
+    "rule_conflicts": [
+      "D_strategy_15m.json 标注 research_specification_unbacktested 且 live_enabled=false；auto-paper.json 为 enabled=true，但 D 持久状态为 UNCERTAIN / D_DISPATCH_OperationalError，执行资格冲突。"
+    ],
+    "unverified_fields": [
+      "current in-memory strategy version",
+      "current live enable/entry gate",
+      "runtime cycle after last persisted evidence"
+    ]
+  },
+  "source": {
+    "project": "C:/Users/admin/Documents/btc-visual-price-action-lab",
+    "source_type": "read-only current local project snapshot",
+    "additional_evidence": "strategy archive exported 2026-11-20 15:28 Asia/Shanghai; its runtime observation is historical and environment=DEMO"
+  },
+  "status": "ACTIVE",
+  "source_hash": null,
+  "source_hash_verified": false,
+  "completeness": "PARTIAL",
+  "source_snapshot": [
+    "backend/d_paper.py",
+    "backend/d_runtime.py",
+    "backend/d_signal.py",
+    "config/strategy_d/D_strategy_15m.json"
+  ],
+  "execution_entry": [
+    "config/strategy_d/D_strategy_15m.json",
+    "backend/d_signal.py",
+    "backend/d_paper.py",
+    "backend/d_runtime.py"
+  ],
+  "rule_conflicts": [
+    "D_strategy_15m.json 标注 research_specification_unbacktested 且 live_enabled=false；auto-paper.json 为 enabled=true，但 D 持久状态为 UNCERTAIN / D_DISPATCH_OperationalError，执行资格冲突。"
+  ],
+  "runtime_state": "UNVERIFIED_NO_8011_LISTENER_AT_THIS_AUDIT",
+  "unverified_fields": [
+    "current in-memory strategy version",
+    "current live enable/entry gate",
+    "runtime cycle after last persisted evidence"
+  ]
+}

@@ -1,0 +1,128 @@
+{
+  "fixture_kind": "synthetic_blinded_visual_evaluation",
+  "market_data": false,
+  "prompt_must_not_include_ground_truth": true,
+  "bars_per_image": {
+    "global_3d": 288,
+    "local_1d": 96
+  },
+  "layout_version": "v2",
+  "image_size": [
+    1920,
+    1280
+  ],
+  "cases": {
+    "case_01": {
+      "pattern": "trend_up",
+      "global_bias": "rising",
+      "local_bias": "rising",
+      "assessment": "trend_structure",
+      "image": "case_01.png",
+      "sha256": "0ddd04e8d224a679f21567733fa9b09ed4edd729f843c08c92f8e7756c997bd8",
+      "global_count": 288,
+      "local_count": 96,
+      "price_axes": {
+        "global": [
+          "52742.00",
+          "51800.00",
+          "50858.00",
+          "49916.00",
+          "48974.00"
+        ],
+        "local": [
+          "52742.00",
+          "52386.00",
+          "52030.00",
+          "51674.00",
+          "51318.00"
+        ]
+      },
+      "candle_sha256": "ee3230656d3447268cd73c3bbeb5d8a53f4373a4464af2aee2da991c45f0838a",
+      "synthetic": true
+    },
+    "case_02": {
+      "pattern": "trend_down",
+      "global_bias": "falling",
+      "local_bias": "falling",
+      "assessment": "trend_structure",
+      "image": "case_02.png",
+      "sha256": "eae67df15a24e8a0125b42e3d98cc1857d7bd3e78644cb503e8cf2c163aae6e8",
+      "global_count": 288,
+      "local_count": 96,
+      "price_axes": {
+        "global": [
+          "60990.00",
+          "60053.50",
+          "59117.00",
+          "58180.50",
+          "57244.00"
+        ],
+        "local": [
+          "58710.00",
+          "58343.50",
+          "57977.00",
+          "57610.50",
+          "57244.00"
+        ]
+      },
+      "candle_sha256": "c16ef0266f7fe5ca0bd29aa52417dcff3454aba29ff4bbb867ad06b5f78a027d",
+      "synthetic": true
+    },
+    "case_03": {
+      "pattern": "range",
+      "global_bias": "sideways",
+      "local_bias": "sideways",
+      "assessment": "range_or_wait",
+      "image": "case_03.png",
+      "sha256": "9929999b0b359cef67c7793cbf13217cc51f251042b8f1f58bc2d8a071e8a3a2",
+      "global_count": 288,
+      "local_count": 96,
+      "price_axes": {
+        "global": [
+          "52610.00",
+          "52300.25",
+          "51990.50",
+          "51680.75",
+          "51371.00"
+        ],
+        "local": [
+          "52610.00",
+          "52300.25",
+          "51990.50",
+          "51680.75",
+          "51371.00"
+        ]
+      },
+      "candle_sha256": "6c525a9c25d85056c6b61d9204dcc540d7fcb3c1f6cd2b7562e9946f11d01133",
+      "synthetic": true
+    },
+    "case_04": {
+      "pattern": "downtrend_then_reversal",
+      "global_bias": "falling",
+      "local_bias": "rising_reversal",
+      "assessment": "reversal_structure",
+      "image": "case_04.png",
+      "sha256": "b8c96d8d32d38b015e9e17c38115b909031ed0aac3c7da64b88b8ec05e91b0ee",
+      "global_count": 288,
+      "local_count": 96,
+      "price_axes": {
+        "global": [
+          "60972.00",
+          "59909.50",
+          "58847.00",
+          "57784.50",
+          "56722.00"
+        ],
+        "local": [
+          "60972.00",
+          "59917.50",
+          "58863.00",
+          "57808.50",
+          "56754.00"
+        ]
+      },
+      "candle_sha256": "cc06449896d218b3ee68c03960c2d3a72dcea3a1de7600c642cf9c92e27be9c3",
+      "synthetic": true
+    }
+  }
+}

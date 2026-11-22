@@ -1,0 +1,15 @@
+{
+  "agent": "C",
+  "version": "v1.0.0",
+  "parent": null,
+  "status": "ACTIVE",
+  "md_sha256": "672451cfc52201fd4a216dd2578c52c14ec5a1e866d5cc5ff4d94bdf1b766d20",
+  "core_lock_sha256": "ae0a9a5f072c553d2aca1c198330a29a3d2c5a2fc8696fe1cd82deac7e4f858e",
+  "core_scope": "Section 1 and Section 2 protected; full boundaries require validation before activation",
+  "evolvable_sections": "awaiting user-designated sections",
+  "immutable": true,
+  "research_leverage": "5",
+  "maintenance_rate": "0.01",
+  "margin_model": "C_SPOT_RESEARCH_MARGIN_V1_1PCT",
+  "activation_source": "user_authorized_internal_paper"
+}

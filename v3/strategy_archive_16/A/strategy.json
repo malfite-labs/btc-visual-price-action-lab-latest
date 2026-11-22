@@ -1,0 +1,377 @@
+{
+  "archive_schema": "btc-strategy-archive/1",
+  "archive_id": "A",
+  "strategy_id": "A",
+  "name": "突破回踩",
+  "version": "V2.6",
+  "runtime_observation": {
+    "version": "V2.6",
+    "enabled": true,
+    "entry_permitted": true,
+    "research_initial_equity": "10000"
+  },
+  "library": {
+    "kind": "frozen_active_profile_and_separate_visual_library",
+    "active_profile_version": "V2.6",
+    "visual_library_metadata": {
+      "agent": "A",
+      "version": "v1.0.0",
+      "parent": null,
+      "status": "SEED",
+      "created_at_utc": "2026-10-27",
+      "source": "V1.0 frozen principles",
+      "evolvable_sections": [
+        "Examples",
+        "Evolvable sections"
+      ],
+      "immutable": true
+    },
+    "visual_library_metadata_path": "strategies/A/v1.0.0.metadata.json",
+    "visual_library_active_api": {
+      "http": 200,
+      "path": "/strategies/A/versions",
+      "version": "v1.0.0",
+      "sha256": "9d5272f3eac221566a769287f81bd452fcf6d324d61774934f059efbfac1e0b1",
+      "archived_file_byte_hash_matches": true
+    }
+  },
+  "effective_market": "BTCUSDT",
+  "currency": "USDT",
+  "timeframe": "15m",
+  "direction_support": {
+    "long": true,
+    "short": true
+  },
+  "rule_sections_zh": {
+    "策略定位": "突破既有极值后回踩确认。",
+    "适用行情": "趋势突破与回踩。",
+    "指标与参数": "8 根滚动最高/最低截至偏移 2。K 线实体占比为 |C−O|/(H−L)，阈值严格大于 0.2。",
+    "做多规则": "上一收盘突破该高点，本根最低回踩，本根收盘高于该高点且高于上一收盘，实体条件通过。",
+    "做空规则": "上一收盘跌破该低点，本根最高反抽，本根收盘低于该低点且低于上一收盘，实体条件通过。",
+    "信号确认": "使用连续、已收盘的 BTCUSDT 15 分钟 K 线。常规路径在最新收盘后的 5 秒窗口内检查 Binance Demo 有效盘口并发单，多头用 ask、空头用 bid，实际成交以交易所确认回报为准。 A/B/C 使用 288 根，双向同时满足则放弃。",
+    "止损规则": "含信号根最近 6 根的最低减 0.01（多）或最高加 0.01（空）。",
+    "止盈规则": "以确认入场价和初始止损距离设 1.8R。预检目标须覆盖预计双边手续费。",
+    "退出与超时": "有效报价多头用 bid、空头用 ask。共享退出检查先判断止损，再判断止盈，最后检查超时，使用确认仓位及真实退出成交。旧版 OHLC 同根优先级原样保留在原文中。 最长 8 根。",
+    "特殊逻辑": "规则档由工作配置 SHA-256 锁定。",
+    "资金与仓位": "现网 V2 研究初始权益以 8011 返回为准。适用的原风险定仓、杠杆上限、交易所约束及保护保留；估算手续费与实际成交费用分开。 风险比例 2%，策略杠杆上限 1×。",
+    "原始来源与版本": "归档号 A，运行 ID A。8011 版本 V2.6，启用 True，当前入场许可 True。\n\n策略库或内置版本证据\n\n\n```json\n{\n  \"kind\": \"frozen_active_profile_and_separate_visual_library\",\n  \"active_profile_version\": \"V2.6\",\n  \"visual_library_metadata\": {\n    \"agent\": \"A\",\n    \"version\": \"v1.0.0\",\n    \"parent\": null,\n    \"status\": \"SEED\",\n    \"created_at_utc\": \"2026-10-27\",\n    \"source\": \"V1.0 frozen principles\",\n    \"evolvable_sections\": [\n      \"Examples\",\n      \"Evolvable sections\"\n    ],\n    \"immutable\": true\n  },\n  \"visual_library_metadata_path\": \"strategies/A/v1.0.0.metadata.json\"\n}\n```\n\n规则校验\n\n\n```json\n{\n  \"method\": \"frozen_profile_matches_file\",\n  \"sha256\": \"af9ca1ffc97aefc021b2e8f4d041596fca4fa963b6a76dc605dfd2aa644af691\",\n  \"verified\": true\n}\n```\n\n开仓入口 binance_demo_pa.execute_next_open → rule_cycle.evaluate_rule_signal → rule_evolution_v2.signal。\n\n退出入口 DemoPARuntime._protect → DemoHedgeCoordinator.exit_on_quote → finish_position。\n\n原始 JSON 已原样保留，解释器以代码快照复核。\n\n原始路径和逐文件 SHA-256 见本目录 strategy.json。\n\n8011 状态接口提供策略 ID、版本和启用状态，但未发布整个进程的部署源码摘要。共享执行入口来自工作区源码静态追踪。\n\n视觉策略库接口返回活动版本 v1.0.0，SHA-256 为 9d5272f3eac221566a769287f81bd452fcf6d324d61774934f059efbfac1e0b1。归档文件原始字节校验结果为 通过。"
+  },
+  "rule_payload": {
+    "active_profile": {
+      "version": "V2.6",
+      "label": "突破回踩",
+      "file": "A-rule.json",
+      "sha256": "af9ca1ffc97aefc021b2e8f4d041596fca4fa963b6a76dc605dfd2aa644af691",
+      "risk_fraction": "0.02",
+      "max_leverage": "1",
+      "require_target_cover_costs": true
+    },
+    "source_form": "JSON",
+    "original_configuration": {
+      "long": [
+        {
+          "left": {
+            "kind": "close",
+            "offset": 1
+          },
+          "op": ">",
+          "right": {
+            "kind": "rolling_high",
+            "offset": 2,
+            "period": 8
+          }
+        },
+        {
+          "left": {
+            "kind": "low",
+            "offset": 0
+          },
+          "op": "<=",
+          "right": {
+            "kind": "rolling_high",
+            "offset": 2,
+            "period": 8
+          }
+        },
+        {
+          "left": {
+            "kind": "close",
+            "offset": 0
+          },
+          "op": ">",
+          "right": {
+            "kind": "rolling_high",
+            "offset": 2,
+            "period": 8
+          }
+        },
+        {
+          "left": {
+            "kind": "close",
+            "offset": 0
+          },
+          "op": ">",
+          "right": {
+            "kind": "close",
+            "offset": 1
+          }
+        },
+        {
+          "left": {
+            "kind": "body_ratio",
+            "offset": 0
+          },
+          "op": ">",
+          "right": 0.2
+        }
+      ],
+      "short": [
+        {
+          "left": {
+            "kind": "close",
+            "offset": 1
+          },
+          "op": "<",
+          "right": {
+            "kind": "rolling_low",
+            "offset": 2,
+            "period": 8
+          }
+        },
+        {
+          "left": {
+            "kind": "high",
+            "offset": 0
+          },
+          "op": ">=",
+          "right": {
+            "kind": "rolling_low",
+            "offset": 2,
+            "period": 8
+          }
+        },
+        {
+          "left": {
+            "kind": "close",
+            "offset": 0
+          },
+          "op": "<",
+          "right": {
+            "kind": "rolling_low",
+            "offset": 2,
+            "period": 8
+          }
+        },
+        {
+          "left": {
+            "kind": "close",
+            "offset": 0
+          },
+          "op": "<",
+          "right": {
+            "kind": "close",
+            "offset": 1
+          }
+        },
+        {
+          "left": {
+            "kind": "body_ratio",
+            "offset": 0
+          },
+          "op": ">",
+          "right": 0.2
+        }
+      ],
+      "stop_bars": 6,
+      "target_r": 1.8,
+      "max_hold": 8
+    }
+  },
+  "rule_source_kind": "SOURCE_BOUND_PACKAGE",
+  "verbatim_original_json": "source_snapshots/config/rule_v26/A-rule.json",
+  "source_evidence": {
+    "method": "frozen_profile_matches_file",
+    "sha256": "af9ca1ffc97aefc021b2e8f4d041596fca4fa963b6a76dc605dfd2aa644af691",
+    "verified": true
+  },
+  "production_wiring": {
+    "registered_via_8011": true,
+    "enabled_observed": true,
+    "entry_permitted_observed": true,
+    "entry": "binance_demo_pa.execute_next_open → rule_cycle.evaluate_rule_signal → rule_evolution_v2.signal",
+    "exit": "DemoPARuntime._protect → DemoHedgeCoordinator.exit_on_quote → finish_position",
+    "source_evidence": "工作区源码静态追踪＋8011 注册状态。未通过本次归档测试下单。"
+  },
+  "workspace_source_files": [
+    {
+      "original_path": "config/rule_v26/profile.json",
+      "archive_path": "source_snapshots/config/rule_v26/profile.json",
+      "sha256": "955e56b0c15dc98a3527e8b47ad7d4e298d1b33bdc8474b885ba45f40b94aa92"
+    },
+    {
+      "original_path": "config/rule_v26/A-rule.json",
+      "archive_path": "source_snapshots/config/rule_v26/A-rule.json",
+      "sha256": "af9ca1ffc97aefc021b2e8f4d041596fca4fa963b6a76dc605dfd2aa644af691"
+    },
+    {
+      "original_path": "backend/rule_cycle.py",
+      "archive_path": "source_snapshots/backend/rule_cycle.py",
+      "sha256": "4a81c157e81e86dc6595e9bb585c35267d87f73b9290f71ebf48e7a7b23a2da0"
+    },
+    {
+      "original_path": "scripts/rule_evolution_v2.py",
+      "archive_path": "source_snapshots/scripts/rule_evolution_v2.py",
+      "sha256": "90ba8836477823e51fb06679e6e5bc6dab6cbb0f7ab5041c22dc4f81a3af12c9"
+    },
+    {
+      "original_path": "backend/execution.py",
+      "archive_path": "source_snapshots/backend/execution.py",
+      "sha256": "9ebdd6c1a3aa191432fa47c4239940e56bb404cb7f8bd6d33b10ec31f34dd928"
+    },
+    {
+      "original_path": "strategies/A/v1.0.0.md",
+      "archive_path": "source_snapshots/strategies/A/v1.0.0.md",
+      "sha256": "9d5272f3eac221566a769287f81bd452fcf6d324d61774934f059efbfac1e0b1"
+    },
+    {
+      "original_path": "strategies/A/v1.0.0.metadata.json",
+      "archive_path": "source_snapshots/strategies/A/v1.0.0.metadata.json",
+      "sha256": "f0c619c7082ce6330b7601fa95304d89d953930b2a27f1f310e998b6b7818218"
+    }
+  ],
+  "shared_runtime_source_files": [
+    {
+      "original_path": "backend/serve.py",
+      "archive_path": "source_snapshots/backend/serve.py",
+      "sha256": "42e36cff393f13a777a356b581111d2305de127b3708233c35113691aa48c0fc"
+    },
+    {
+      "original_path": "backend/app.py",
+      "archive_path": "source_snapshots/backend/app.py",
+      "sha256": "924875468d8ba7666982638757f0e89384f8ff6e7a0fd392b19b0a46c5dea14c"
+    },
+    {
+      "original_path": "backend/binance_demo_bootstrap.py",
+      "archive_path": "source_snapshots/backend/binance_demo_bootstrap.py",
+      "sha256": "8188c5dd42c5a7838e1f34034733c729752e34c1dad50a54ddcc33e0c1deec68"
+    },
+    {
+      "original_path": "backend/binance_demo_registry.py",
+      "archive_path": "source_snapshots/backend/binance_demo_registry.py",
+      "sha256": "db8e195556f551059c74e99caf7f6d4f77edbb8dd7f89548d1909194d220fa4e"
+    },
+    {
+      "original_path": "backend/binance_demo_market.py",
+      "archive_path": "source_snapshots/backend/binance_demo_market.py",
+      "sha256": "7d1d422b23ce1b78aef32855237f8470c854443f0875d407a5fa7a349bd0e1de"
+    },
+    {
+      "original_path": "backend/binance_demo_pa_runtime.py",
+      "archive_path": "source_snapshots/backend/binance_demo_pa_runtime.py",
+      "sha256": "639853b7185d1c373041f761f420f885cc1e4ed2122138b3b2e030630bea0a40"
+    },
+    {
+      "original_path": "backend/binance_demo_pa.py",
+      "archive_path": "source_snapshots/backend/binance_demo_pa.py",
+      "sha256": "f1a2014703aebb0c839d7c82e31a327c886f58beae850c17e9bc98df28e7f738"
+    },
+    {
+      "original_path": "backend/binance_demo_hedge.py",
+      "archive_path": "source_snapshots/backend/binance_demo_hedge.py",
+      "sha256": "08a6a1c6aec51ec52481d89d481c54ef7a2b5fc2b523974dd94f2a1a98517d32"
+    },
+    {
+      "original_path": "backend/binance_demo_orders.py",
+      "archive_path": "source_snapshots/backend/binance_demo_orders.py",
+      "sha256": "1131bec2a905b5d51fc42daf3cbf2c821a13e0947f4ed6aff7b8338cdb164de9"
+    },
+    {
+      "original_path": "backend/binance_demo_funding.py",
+      "archive_path": "source_snapshots/backend/binance_demo_funding.py",
+      "sha256": "68ec1dcb52954712f5372ace977990dd6b46e42296a03baf5cb28f1395fba4ea"
+    },
+    {
+      "original_path": "backend/domain.py",
+      "archive_path": "source_snapshots/backend/domain.py",
+      "sha256": "5a1c0514b6232634960639e79376d3af46f9a2c35d1e070f955ae2883874b464"
+    },
+    {
+      "original_path": "backend/settings.py",
+      "archive_path": "source_snapshots/backend/settings.py",
+      "sha256": "a6bcf523ffb04fc57e55e4dd656b3aa3f6cc21761cc1101c657246beee14bda5"
+    },
+    {
+      "original_path": "data-binance-demo/demo-native-strategies.json",
+      "archive_path": "source_snapshots/data-binance-demo/demo-native-strategies.json",
+      "sha256": "69f1294f0d91a63da5495c32845ee201906a7c256397e0c864b30a64021468c2"
+    }
+  ],
+  "source_gaps": [
+    "8011 状态接口提供策略 ID、版本和启用状态，但未发布整个进程的部署源码摘要。共享执行入口来自工作区源码静态追踪。"
+  ],
+  "audit_status": {
+    "status": "ACTIVE",
+    "status_as_of": "2026-11-20",
+    "status_meaning": "ACTIVE means the saved local rule/registry is enabled or selected; it does not mean a live process was observed.",
+    "runtime_state": "UNVERIFIED_NO_8011_LISTENER_AT_THIS_AUDIT",
+    "rule_source_completeness": "SOURCE_COMPLETE_RUNTIME_UNVERIFIED",
+    "source": {
+      "project": "C:/Users/admin/Documents/btc-visual-price-action-lab",
+      "source_type": "read-only current local project snapshot",
+      "additional_evidence": "strategy archive exported 2026-11-20 15:28 Asia/Shanghai; its runtime observation is historical and environment=DEMO"
+    },
+    "source_hash": "af9ca1ffc97aefc021b2e8f4d041596fca4fa963b6a76dc605dfd2aa644af691",
+    "source_hash_verified": true,
+    "source_snapshot": [
+      "backend/rule_cycle.py",
+      "config/rule_v26/A-rule.json",
+      "config/rule_v26/profile.json",
+      "scripts/rule_evolution_v2.py"
+    ],
+    "execution_entry": [
+      "config/rule_v26/A-rule.json",
+      "config/rule_v26/profile.json",
+      "backend/rule_cycle.py",
+      "scripts/rule_evolution_v2.py"
+    ],
+    "legacy_runtime_entry": "binance_demo_pa.execute_next_open → rule_cycle.evaluate_rule_signal → rule_evolution_v2.signal",
+    "rule_conflicts": [
+      "当前无 8011 监听，运行进程内版本无法读取；静态规则文件 SHA 与 profile 一致。"
+    ],
+    "unverified_fields": [
+      "current in-memory strategy version",
+      "current live enable/entry gate",
+      "runtime cycle after last persisted evidence"
+    ]
+  },
+  "source": {
+    "project": "C:/Users/admin/Documents/btc-visual-price-action-lab",
+    "source_type": "read-only current local project snapshot",
+    "additional_evidence": "strategy archive exported 2026-11-20 15:28 Asia/Shanghai; its runtime observation is historical and environment=DEMO"
+  },
+  "status": "ACTIVE",
+  "source_hash": "af9ca1ffc97aefc021b2e8f4d041596fca4fa963b6a76dc605dfd2aa644af691",
+  "source_hash_verified": true,
+  "completeness": "SOURCE_COMPLETE_RUNTIME_UNVERIFIED",
+  "source_snapshot": [
+    "backend/rule_cycle.py",
+    "config/rule_v26/A-rule.json",
+    "config/rule_v26/profile.json",
+    "scripts/rule_evolution_v2.py"
+  ],
+  "execution_entry": [
+    "config/rule_v26/A-rule.json",
+    "config/rule_v26/profile.json",
+    "backend/rule_cycle.py",
+    "scripts/rule_evolution_v2.py"
+  ],
+  "rule_conflicts": [
+    "当前无 8011 监听，运行进程内版本无法读取；静态规则文件 SHA 与 profile 一致。"
+  ],
+  "runtime_state": "UNVERIFIED_NO_8011_LISTENER_AT_THIS_AUDIT",
+  "unverified_fields": [
+    "current in-memory strategy version",
+    "current live enable/entry gate",
+    "runtime cycle after last persisted evidence"
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "name": "RULE_DRIVEN_V26",
+  "A": {
+    "version": "V2.5",
+    "label": "突破回踩",
+    "file": "A-rule.json",
+    "sha256": "edc5594865495dd4a334a1791b4f6a20ef4d12622e4c5ceac83c20cf25a552c7"
+  },
+  "B": {
+    "version": "V3.0",
+    "label": "反转",
+    "file": "v3-signals.py",
+    "sha256": "c27eef69cc256444ed7ad0d501cc695adbdeb06867c8ed063db2c6c01a9a69e5"
+  },
+  "C": {
+    "version": "V3.0",
+    "label": "Tony裸K研究近似",
+    "file": "v3-signals.py",
+    "sha256": "c27eef69cc256444ed7ad0d501cc695adbdeb06867c8ed063db2c6c01a9a69e5"
+  }
+}

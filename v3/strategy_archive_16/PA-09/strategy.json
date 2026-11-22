@@ -1,0 +1,327 @@
+{
+  "archive_schema": "btc-strategy-archive/1",
+  "archive_id": "PA-09",
+  "strategy_id": "PA-09",
+  "name": "区间边界 Pinbar 反转",
+  "version": "1.0.0",
+  "runtime_observation": {
+    "version": "1.0.0",
+    "enabled": true,
+    "entry_permitted": true,
+    "research_initial_equity": "10000"
+  },
+  "library": {
+    "kind": "built_in_extension",
+    "implementation": "backend/pa_extension.py:PaperLedger._bind",
+    "version": "1.0.0",
+    "legacy_extension_ledger": "data-binance-demo/pa-v1-extensions/PA-09.sqlite3",
+    "observed_table_names": [
+      "fills",
+      "snapshot"
+    ],
+    "legacy_api": {
+      "http": 200,
+      "market": "BTC/USD",
+      "version": "1.0.0",
+      "sha256": "f270836e0e02723ff221b328558b95d2689ea423b4bbb282d707a9b26d31841f",
+      "archive_path": "source_snapshots/legacy-active-api/PA-09.json"
+    }
+  },
+  "effective_market": "BTCUSDT",
+  "currency": "USDT",
+  "timeframe": "15m",
+  "direction_support": {
+    "long": true,
+    "short": true
+  },
+  "rule_sections_zh": {
+    "策略定位": "区间边界 Pinbar 反转",
+    "适用行情": "横盘区间，价格触及支撑或阻力后收回区间；不适用于明显均线分离的趋势。",
+    "指标与参数": "\n\n{\n  \"warmup_closed_bars\": 61,\n  \"range_bars\": 40,\n  \"atr_period\": 14,\n  \"width_fraction_inclusive\": [\n    0.015,\n    0.06\n  ],\n  \"boundary_atr_tolerance\": 0.2,\n  \"min_touches_each\": 2,\n  \"touch_min_bar_spacing\": 3,\n  \"sma_periods\": [\n    20,\n    60\n  ],\n  \"sma_relative_difference_max\": 0.015,\n  \"long_wick_min_body_multiple\": 2,\n  \"opposite_wick_max_body_multiple\": 1,\n  \"stop_atr_buffer\": 0.1,\n  \"target_atr_inset\": 0.15,\n  \"minimum_reward_risk\": 2\n}\n\n信号前40根：S=min(Low)，R=max(High)，区间宽度 (R−S)/((R+S)/2) 为1.5%–6%（含边界）。支撑用 Low、阻力用 High，距离 ≤0.2×ATR；两侧各至少2次，独立触及间隔至少3根。信号前 SMA20、SMA60 的差除以 SMA60，绝对值 ≤1.5%。ATR14 为信号前14根真实波幅简单均值，必须大于0。",
+    "做多规则": "S≤Close≤R；Close>Open；Open−Low≥2×实体；High−Close≤实体；|Low−S|≤0.2×ATR。",
+    "做空规则": "S≤Close≤R；Close<Open；High−Open≥2×实体；Close−Low≤实体；|High−R|≤0.2×ATR。",
+    "信号确认": "使用连续、已收盘的 BTCUSDT 15 分钟 K 线。常规路径在最新收盘后的 5 秒窗口内检查 Binance Demo 有效盘口并发单，多头用 ask、空头用 bid，实际成交以交易所确认回报为准。 过期机会不回填。",
+    "止损规则": "多：min(信号 Low,S)−0.1ATR。空：max(信号 High,R)+0.1ATR。",
+    "止盈规则": "固定对侧价，多 R−0.15ATR，空 S+0.15ATR。信号收盘与预估入场均检查最低 2R，入场前检查成本。",
+    "退出与超时": "有效报价多头用 bid、空头用 ask。共享退出检查先判断止损，再判断止盈，最后检查超时，使用确认仓位及真实退出成交。旧版 OHLC 同根优先级原样保留在原文中。 最长 96 根。",
+    "特殊逻辑": "不满61根、区间/趋势/触及/形态校验失败、零实体、收盘出界、错误方向的保护价、低于2R、成本或仓位校验失败，不开仓。 Demo 按持久化的信号周期去重。",
+    "资金与仓位": "现网 V2 研究初始权益以 8011 返回为准。适用的原风险定仓、杠杆上限、交易所约束及保护保留；估算手续费与实际成交费用分开。 2%，策略杠杆上限 5×。",
+    "原始来源与版本": "归档号 PA-09，运行 ID PA-09。8011 版本 1.0.0，启用 True，当前入场许可 True。\n\n策略库或内置版本证据\n\n\n```json\n{\n  \"kind\": \"built_in_extension\",\n  \"implementation\": \"backend/pa_extension.py:PaperLedger._bind\",\n  \"version\": \"1.0.0\",\n  \"legacy_extension_ledger\": \"data-binance-demo/pa-v1-extensions/PA-09.sqlite3\",\n  \"observed_table_names\": [\n    \"fills\",\n    \"snapshot\"\n  ]\n}\n```\n\n规则校验\n\n\n```json\n{\n  \"method\": \"historical_api_rule_hash\",\n  \"sha256\": \"c3cd72d4dcb8a8a9865a3a206feccc8ec5fd2d4b78e4d846596386e338457be6\",\n  \"verified_for_current_export\": false,\n  \"observed_current_http\": null\n}\n```\n\n开仓入口 DemoPAExtensionRuntime.on_event → pa09 → _entry_signal → execute_next_open。\n\n退出入口 DemoPARuntime._protect → DemoHedgeCoordinator.exit_on_quote → finish_position。\n\nPython 策略以代码快照复核。\n\n原始路径和逐文件 SHA-256 见本目录 strategy.json。\n\n8011 状态接口提供策略 ID、版本和启用状态，但未发布整个进程的部署源码摘要。共享执行入口来自工作区源码静态追踪。\n\n现网活动规则 GET 返回 HTTP None。保留此前 HTTP 200 的 SHA-256 验证记录及当前规则源码，未经当前接口确认的 JSON 原文未取得。\n\n旧规则查询接口返回 HTTP 200。BTC/USD 规则原始字节保存在 source_snapshots/legacy-active-api/PA-09.json，SHA-256 为 f270836e0e02723ff221b328558b95d2689ea423b4bbb282d707a9b26d31841f。当前仍无法读取 BTCUSDT Demo 的活动规则响应。"
+  },
+  "rule_payload": {
+    "readable_rules_from_workspace": {
+      "type": "区间边界 Pinbar 反转",
+      "market_conditions": "横盘区间，价格触及支撑或阻力后收回区间；不适用于明显均线分离的趋势。",
+      "parameters": {
+        "warmup_closed_bars": 61,
+        "range_bars": 40,
+        "atr_period": 14,
+        "width_fraction_inclusive": [
+          0.015,
+          0.06
+        ],
+        "boundary_atr_tolerance": 0.2,
+        "min_touches_each": 2,
+        "touch_min_bar_spacing": 3,
+        "sma_periods": [
+          20,
+          60
+        ],
+        "sma_relative_difference_max": 0.015,
+        "long_wick_min_body_multiple": 2,
+        "opposite_wick_max_body_multiple": 1,
+        "stop_atr_buffer": 0.1,
+        "target_atr_inset": 0.15,
+        "minimum_reward_risk": 2
+      },
+      "sections": [
+        [
+          "区间与趋势过滤",
+          "信号前40根：S=min(Low)，R=max(High)，区间宽度 (R−S)/((R+S)/2) 为1.5%–6%（含边界）。支撑用 Low、阻力用 High，距离 ≤0.2×ATR；两侧各至少2次，独立触及间隔至少3根。信号前 SMA20、SMA60 的差除以 SMA60，绝对值 ≤1.5%。ATR14 为信号前14根真实波幅简单均值，必须大于0。"
+        ],
+        [
+          "LONG",
+          "S≤Close≤R；Close>Open；Open−Low≥2×实体；High−Close≤实体；|Low−S|≤0.2×ATR。"
+        ],
+        [
+          "SHORT",
+          "S≤Close≤R；Close<Open；High−Open≥2×实体；Close−Low≤实体；|High−R|≤0.2×ATR。"
+        ],
+        [
+          "固定止损与止盈",
+          "多：SL=min(信号Low,S)−0.1×ATR；TP=R−0.15×ATR。空：SL=max(信号High,R)+0.1×ATR；TP=S+0.15×ATR。以信号收盘价先检查2R，再以含滑点的实际模拟入场价复核2R；目标价不随成交价重算，并须覆盖双边手续费。"
+        ],
+        [
+          "拒绝条件",
+          "不满61根、区间/趋势/触及/形态校验失败、零实体、收盘出界、错误方向的保护价、低于2R、成本或仓位校验失败，不开仓。"
+        ]
+      ],
+      "position": {
+        "target_mode": "FIXED_RANGE_OPPOSITE_PRICE",
+        "max_hold_bars": 96
+      }
+    },
+    "pinned_source_checks": {
+      "scripts/pa09_pa10_candidates.py": {
+        "expected": "0ca34cfdbc9564528857c7a2ce9c985a46cc561542ab37cddf5669b4d6177db5",
+        "observed": "0ca34cfdbc9564528857c7a2ce9c985a46cc561542ab37cddf5669b4d6177db5",
+        "match": true
+      },
+      "scripts/pa09_pa10_execution.py": {
+        "expected": "6345b1d0b12a26b338f51e5b3be4316215d52fa04a3753b9b99f3251ccda97bd",
+        "observed": "6345b1d0b12a26b338f51e5b3be4316215d52fa04a3753b9b99f3251ccda97bd",
+        "match": true
+      },
+      "backend/pa_extension.py": {
+        "expected": "df103c8c4568062d6ff1c4d4b4246ebae811997fbc21022aa761550b53341059",
+        "observed": "df103c8c4568062d6ff1c4d4b4246ebae811997fbc21022aa761550b53341059",
+        "match": true
+      },
+      "backend/strategy_pool.py": {
+        "expected": "0208e001cdf848e6a5044337258e4f0f258df4624c2fbe195184b98eabc6b9cf",
+        "observed": "0208e001cdf848e6a5044337258e4f0f258df4624c2fbe195184b98eabc6b9cf",
+        "match": true
+      },
+      "backend/domain.py": {
+        "expected": "5a1c0514b6232634960639e79376d3af46f9a2c35d1e070f955ae2883874b464",
+        "observed": "5a1c0514b6232634960639e79376d3af46f9a2c35d1e070f955ae2883874b464",
+        "match": true
+      },
+      "backend/settings.py": {
+        "expected": "a6bcf523ffb04fc57e55e4dd656b3aa3f6cc21761cc1101c657246beee14bda5",
+        "observed": "a6bcf523ffb04fc57e55e4dd656b3aa3f6cc21761cc1101c657246beee14bda5",
+        "match": true
+      }
+    }
+  },
+  "rule_source_kind": "SOURCE_BOUND_PACKAGE",
+  "verbatim_original_json": null,
+  "source_evidence": {
+    "method": "historical_api_rule_hash",
+    "sha256": "c3cd72d4dcb8a8a9865a3a206feccc8ec5fd2d4b78e4d846596386e338457be6",
+    "verified_for_current_export": false,
+    "observed_current_http": null
+  },
+  "production_wiring": {
+    "registered_via_8011": true,
+    "enabled_observed": true,
+    "entry_permitted_observed": true,
+    "entry": "DemoPAExtensionRuntime.on_event → pa09 → _entry_signal → execute_next_open",
+    "exit": "DemoPARuntime._protect → DemoHedgeCoordinator.exit_on_quote → finish_position",
+    "source_evidence": "工作区源码静态追踪＋8011 注册状态。未通过本次归档测试下单。"
+  },
+  "workspace_source_files": [
+    {
+      "original_path": "logs/demo-rule-reload-20261120T0304Z/rules-verified.json",
+      "archive_path": "source_snapshots/logs/demo-rule-reload-20261120T0304Z/rules-verified.json",
+      "sha256": "a786840ca303aacdd58981e25b26c6f74344987b111e2d2df2fce4d3e5b6315b"
+    },
+    {
+      "original_path": "backend/pa_active_rules.py",
+      "archive_path": "source_snapshots/backend/pa_active_rules.py",
+      "sha256": "66f636ef3ac7e0ab55fbf97710886a37e7d1e28d705001a448175ca5bb47d2df"
+    },
+    {
+      "original_path": "backend/pa_extension.py",
+      "archive_path": "source_snapshots/backend/pa_extension.py",
+      "sha256": "df103c8c4568062d6ff1c4d4b4246ebae811997fbc21022aa761550b53341059"
+    },
+    {
+      "original_path": "backend/strategy_pool.py",
+      "archive_path": "source_snapshots/backend/strategy_pool.py",
+      "sha256": "0208e001cdf848e6a5044337258e4f0f258df4624c2fbe195184b98eabc6b9cf"
+    },
+    {
+      "original_path": "scripts/pa09_pa10_candidates.py",
+      "archive_path": "source_snapshots/scripts/pa09_pa10_candidates.py",
+      "sha256": "0ca34cfdbc9564528857c7a2ce9c985a46cc561542ab37cddf5669b4d6177db5"
+    },
+    {
+      "original_path": "scripts/pa09_pa10_execution.py",
+      "archive_path": "source_snapshots/scripts/pa09_pa10_execution.py",
+      "sha256": "6345b1d0b12a26b338f51e5b3be4316215d52fa04a3753b9b99f3251ccda97bd"
+    },
+    {
+      "original_path": "docs/research/PA09_PA10_V1_RELEASE_PLAN.md",
+      "archive_path": "source_snapshots/docs/research/PA09_PA10_V1_RELEASE_PLAN.md",
+      "sha256": "4a831fb0ce48a9c7dfc10f34afc363048cbf85f6029226025dfdf3c98f0989e5"
+    },
+    {
+      "original_path": "GET /strategy-pool/PA-09/versions",
+      "archive_path": "source_snapshots/legacy-active-api/PA-09.json",
+      "sha256": "f270836e0e02723ff221b328558b95d2689ea423b4bbb282d707a9b26d31841f"
+    }
+  ],
+  "shared_runtime_source_files": [
+    {
+      "original_path": "backend/serve.py",
+      "archive_path": "source_snapshots/backend/serve.py",
+      "sha256": "42e36cff393f13a777a356b581111d2305de127b3708233c35113691aa48c0fc"
+    },
+    {
+      "original_path": "backend/app.py",
+      "archive_path": "source_snapshots/backend/app.py",
+      "sha256": "924875468d8ba7666982638757f0e89384f8ff6e7a0fd392b19b0a46c5dea14c"
+    },
+    {
+      "original_path": "backend/binance_demo_bootstrap.py",
+      "archive_path": "source_snapshots/backend/binance_demo_bootstrap.py",
+      "sha256": "8188c5dd42c5a7838e1f34034733c729752e34c1dad50a54ddcc33e0c1deec68"
+    },
+    {
+      "original_path": "backend/binance_demo_registry.py",
+      "archive_path": "source_snapshots/backend/binance_demo_registry.py",
+      "sha256": "db8e195556f551059c74e99caf7f6d4f77edbb8dd7f89548d1909194d220fa4e"
+    },
+    {
+      "original_path": "backend/binance_demo_market.py",
+      "archive_path": "source_snapshots/backend/binance_demo_market.py",
+      "sha256": "7d1d422b23ce1b78aef32855237f8470c854443f0875d407a5fa7a349bd0e1de"
+    },
+    {
+      "original_path": "backend/binance_demo_pa_runtime.py",
+      "archive_path": "source_snapshots/backend/binance_demo_pa_runtime.py",
+      "sha256": "639853b7185d1c373041f761f420f885cc1e4ed2122138b3b2e030630bea0a40"
+    },
+    {
+      "original_path": "backend/binance_demo_pa.py",
+      "archive_path": "source_snapshots/backend/binance_demo_pa.py",
+      "sha256": "f1a2014703aebb0c839d7c82e31a327c886f58beae850c17e9bc98df28e7f738"
+    },
+    {
+      "original_path": "backend/binance_demo_hedge.py",
+      "archive_path": "source_snapshots/backend/binance_demo_hedge.py",
+      "sha256": "08a6a1c6aec51ec52481d89d481c54ef7a2b5fc2b523974dd94f2a1a98517d32"
+    },
+    {
+      "original_path": "backend/binance_demo_orders.py",
+      "archive_path": "source_snapshots/backend/binance_demo_orders.py",
+      "sha256": "1131bec2a905b5d51fc42daf3cbf2c821a13e0947f4ed6aff7b8338cdb164de9"
+    },
+    {
+      "original_path": "backend/binance_demo_funding.py",
+      "archive_path": "source_snapshots/backend/binance_demo_funding.py",
+      "sha256": "68ec1dcb52954712f5372ace977990dd6b46e42296a03baf5cb28f1395fba4ea"
+    },
+    {
+      "original_path": "backend/domain.py",
+      "archive_path": "source_snapshots/backend/domain.py",
+      "sha256": "5a1c0514b6232634960639e79376d3af46f9a2c35d1e070f955ae2883874b464"
+    },
+    {
+      "original_path": "backend/settings.py",
+      "archive_path": "source_snapshots/backend/settings.py",
+      "sha256": "a6bcf523ffb04fc57e55e4dd656b3aa3f6cc21761cc1101c657246beee14bda5"
+    },
+    {
+      "original_path": "data-binance-demo/demo-native-strategies.json",
+      "archive_path": "source_snapshots/data-binance-demo/demo-native-strategies.json",
+      "sha256": "69f1294f0d91a63da5495c32845ee201906a7c256397e0c864b30a64021468c2"
+    }
+  ],
+  "source_gaps": [
+    "8011 状态接口提供策略 ID、版本和启用状态，但未发布整个进程的部署源码摘要。共享执行入口来自工作区源码静态追踪。",
+    "现网活动规则 GET 返回 HTTP None。保留此前 HTTP 200 的 SHA-256 验证记录及当前规则源码，未经当前接口确认的 JSON 原文未取得。"
+  ],
+  "audit_status": {
+    "status": "INACTIVE",
+    "status_as_of": "2026-11-20",
+    "status_meaning": "ACTIVE means the saved local rule/registry is enabled or selected; it does not mean a live process was observed.",
+    "runtime_state": "UNVERIFIED_NO_8011_LISTENER_AT_THIS_AUDIT",
+    "rule_source_completeness": "PARTIAL",
+    "source": {
+      "project": "C:/Users/admin/Documents/btc-visual-price-action-lab",
+      "source_type": "read-only current local project snapshot",
+      "additional_evidence": "strategy archive exported 2026-11-20 15:28 Asia/Shanghai; its runtime observation is historical and environment=DEMO"
+    },
+    "source_hash": "c3cd72d4dcb8a8a9865a3a206feccc8ec5fd2d4b78e4d846596386e338457be6",
+    "source_hash_verified": false,
+    "source_snapshot": [
+      "backend/pa_active_rules.py",
+      "backend/pa_extension.py",
+      "scripts/pa09_pa10_candidates.py"
+    ],
+    "execution_entry": [
+      "backend/pa_active_rules.py",
+      "backend/pa_extension.py",
+      "scripts/pa09_pa10_candidates.py"
+    ],
+    "legacy_runtime_entry": "DemoPAExtensionRuntime.on_event → pa09 → _entry_signal → execute_next_open",
+    "rule_conflicts": [
+      "策略扩展源码与历史规则导出存在，但当前活动 GET 未成功核验；PA09/10 生产切换记录仍为待批准。Demo enabled 列表属于独立 BINANCE_USDM_DEMO 环境。"
+    ],
+    "unverified_fields": [
+      "current in-memory strategy version",
+      "current live enable/entry gate",
+      "runtime cycle after last persisted evidence"
+    ]
+  },
+  "source": {
+    "project": "C:/Users/admin/Documents/btc-visual-price-action-lab",
+    "source_type": "read-only current local project snapshot",
+    "additional_evidence": "strategy archive exported 2026-11-20 15:28 Asia/Shanghai; its runtime observation is historical and environment=DEMO"
+  },
+  "status": "INACTIVE",
+  "source_hash": "c3cd72d4dcb8a8a9865a3a206feccc8ec5fd2d4b78e4d846596386e338457be6",
+  "source_hash_verified": false,
+  "completeness": "PARTIAL",
+  "source_snapshot": [
+    "backend/pa_active_rules.py",
+    "backend/pa_extension.py",
+    "scripts/pa09_pa10_candidates.py"
+  ],
+  "execution_entry": [
+    "backend/pa_active_rules.py",
+    "backend/pa_extension.py",
+    "scripts/pa09_pa10_candidates.py"
+  ],
+  "rule_conflicts": [
+    "策略扩展源码与历史规则导出存在，但当前活动 GET 未成功核验；PA09/10 生产切换记录仍为待批准。Demo enabled 列表属于独立 BINANCE_USDM_DEMO 环境。"
+  ],
+  "runtime_state": "UNVERIFIED_NO_8011_LISTENER_AT_THIS_AUDIT",
+  "unverified_fields": [
+    "current in-memory strategy version",
+    "current live enable/entry gate",
+    "runtime cycle after last persisted evidence"
+  ]
+}

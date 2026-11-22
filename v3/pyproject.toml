@@ -1,0 +1,24 @@
+[project]
+name = "btc-visual-price-lab"
+version = "1.0.3"
+requires-python = ">=3.12"
+dependencies = ["fastapi>=0.115,<1", "uvicorn[standard]>=0.34,<1", "httpx>=0.28,<1", "websockets>=14,<16", "pydantic>=2.10,<3", "pillow>=13,<14"]
+
+[project.optional-dependencies]
+test = ["pytest>=9.0.3,<10", "ruff>=0.9,<1"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+lint.select = ["E4", "E7", "E9", "F", "I"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["backend", "backend.*", "scripts", "scripts.*"]
+namespaces = true

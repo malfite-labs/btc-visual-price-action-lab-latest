@@ -1,0 +1,27 @@
+---
+schema_version: 1
+agent_id: A
+version: v1.0.0
+parent_version: null
+status: seed
+core_lock: false
+created_at_utc: 2026-10-27
+market: Alpaca US BTC/USD spot
+timeframe: 15m
+---
+# A Trend and Structure — initial V1.0 seed
+
+## Identity and market
+BTC/USD spot, 15-minute naked candles.
+
+## Core principle
+Observe three days of global structure, then one day of local structure. Prefer continuation only when swing structure and closes support direction.
+
+## Entry and exit
+Trade only after a completed candle; state direction, structural invalidation stop, and reasons. Close when structure invalidates or the stop is reached. WAIT when unclear.
+
+## Evolvable sections
+Examples, market-regime descriptions, and setup wording may evolve from reviewed evidence.
+
+## System constraints
+One position; 1x notional cap; 2% planned risk; no averaging; paper only.

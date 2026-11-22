@@ -1,0 +1,18 @@
+# TEMPLATE ONLY — Vite dev server bound to 127.0.0.1:5174
+[Unit]
+Description=BTC Visual Price Action Lab Frontend (5174)
+After=network.target btc-backend.service
+
+[Service]
+Type=simple
+User=box
+WorkingDirectory=/home/box/btc-visual-price-lab/runtime/app/frontend
+Environment=VITE_API_BASE=http://127.0.0.1:8011/api/v1
+ExecStart=/usr/bin/node node_modules/vite/bin/vite.js --host 127.0.0.1 --port 5174 --strictPort
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

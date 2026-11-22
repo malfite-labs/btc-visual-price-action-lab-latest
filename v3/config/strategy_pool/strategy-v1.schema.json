@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "btc-lab-declarative-strategy-v1",
+  "title": "BTC Lab declarative strategy v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "strategy_id", "version", "name", "market", "timeframe", "description", "parameters", "risk", "entry", "exit"],
+  "properties": {
+    "format": {"const": "btc-lab-declarative-strategy/v1"},
+    "strategy_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,48}$"},
+    "version": {"type": "string", "minLength": 1, "maxLength": 32},
+    "name": {"type": "string", "minLength": 1, "maxLength": 80},
+    "market": {"const": "BTC/USD"}, "timeframe": {"const": "15m"},
+    "description": {"type": "string", "maxLength": 1000},
+    "parameters": {"type": "object", "maxProperties": 32, "additionalProperties": {"type": "number"}},
+    "risk": {"const": {"initial_equity": "10000", "currency": "USD_RESEARCH", "max_leverage": 5, "risk_fraction": "0.02"}},
+    "entry": {"$ref": "#/$defs/expression"}, "exit": {"$ref": "#/$defs/expression"}
+  },
+  "$defs": {"expression": {"type": "object", "additionalProperties": false, "required": ["op", "args"], "properties": {"op": {"enum": ["and", "or", "not", "gt", "gte", "lt", "lte", "eq", "crosses_above", "crosses_below", "sma", "ema", "rsi", "close", "volume", "param"]}, "args": {"type": "array", "maxItems": 16, "items": {"oneOf": [{"type": "number"}, {"type": "string"}, {"$ref": "#/$defs/expression"}]}}}}}
+}

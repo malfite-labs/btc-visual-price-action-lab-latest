@@ -1,0 +1,531 @@
+{
+  "archive_schema": "btc-strategy-archive/1",
+  "archive_id": "PA-03",
+  "strategy_id": "pa-full-engulfing-reversal",
+  "name": "PA 兼容无缺口吞噬反转",
+  "version": "1.0.0",
+  "runtime_observation": {
+    "version": "1.0.0",
+    "enabled": true,
+    "entry_permitted": true,
+    "research_initial_equity": "10000"
+  },
+  "library": {
+    "id": "pa-full-engulfing-reversal",
+    "active_version": "1.0.0",
+    "enabled": 1,
+    "archived_at": null,
+    "sha256": "ea9140d3162f072934abfc8a79a888146d3cc6f7031761045bd054885d3cc4b0",
+    "uploaded_at": "2026-11-19T14:56:29.381319+00:00",
+    "path": "data-binance-demo/strategy-pool.sqlite3",
+    "source": "strategies.active_version → versions.document",
+    "canonical_sha256_verified": true
+  },
+  "effective_market": "BTCUSDT",
+  "currency": "USDT",
+  "timeframe": "15m",
+  "direction_support": {
+    "long": true,
+    "short": true
+  },
+  "rule_sections_zh": {
+    "策略定位": "量化假设：下跌/上涨的SMA20与60背景下，前一根阴/阳，当前反向K线同时实体和全幅包含前K；BTC连续K线允许当前开盘等于上一根收盘，且实体比至少0.35。 信号仅用已收盘K线；v2下一根开盘入场；固定信号时摆动+ATR止损、2R止盈、最长96根K线、同根止损优先。上传保持未启用；自然周期下一开盘执行待代码修复验收。",
+    "适用行情": "按原始布尔表达式中的趋势、突破或反转条件识别。",
+    "指标与参数": "K 线偏移 0 为最近已收盘根，SMA 取窗口收盘算术均值，ATR 为窗口 TR 算术均值，实体比例为 |C−O|/(H−L)。策略参数 {\n  \"min_body\": 0.35\n}。窗口与比较阈值见下列条件。",
+    "做多规则": "((SMA(20, 0) < SMA(60, 0)) 且 (收盘(1) < 开盘(1)) 且 (收盘(0) > 开盘(0)) 且 (开盘(0) ≤ 收盘(1)) 且 (收盘(0) > 开盘(1)) 且 (最高(0) > 最高(1)) 且 (最低(0) < 最低(1)) 且 (实体比例(0) ≥ 参数(min_body)))",
+    "做空规则": "((SMA(20, 0) > SMA(60, 0)) 且 (收盘(1) > 开盘(1)) 且 (收盘(0) < 开盘(0)) 且 (开盘(0) ≥ 收盘(1)) 且 (收盘(0) < 开盘(1)) 且 (最低(0) < 最低(1)) 且 (最高(0) > 最高(1)) 且 (实体比例(0) ≥ 参数(min_body)))",
+    "信号确认": "使用连续、已收盘的 BTCUSDT 15 分钟 K 线。常规路径在最新收盘后的 5 秒窗口内检查 Binance Demo 有效盘口并发单，多头用 ask、空头用 bid，实际成交以交易所确认回报为准。 双向同时成立则不入场，数据缺口不可用历史成交补造。",
+    "止损规则": "最近 2 根极值，止损向外加减 0.1×ATR14。信号收盘价到止损的距离须在 [0.5,4]×ATR 内。",
+    "止盈规则": "确认成交后的 2R。",
+    "退出与超时": "有效报价多头用 bid、空头用 ask。共享退出检查先判断止损，再判断止盈，最后检查超时，使用确认仓位及真实退出成交。旧版 OHLC 同根优先级原样保留在原文中。 最长 96 根。原始 same_bar_priority=stop。",
+    "特殊逻辑": "只在授权启用、市场与对账门禁许可时开新仓。归属仓位仍接受保护。订单意图按策略及信号周期去重。",
+    "资金与仓位": "现网 V2 研究初始权益以 8011 返回为准。适用的原风险定仓、杠杆上限、交易所约束及保护保留；估算手续费与实际成交费用分开。 原始风险字段 {\n  \"currency\": \"USD_RESEARCH\",\n  \"initial_equity\": \"10000\",\n  \"max_leverage\": 5,\n  \"risk_fraction\": \"0.02\"\n}。",
+    "原始来源与版本": "归档号 PA-03，运行 ID pa-full-engulfing-reversal。8011 版本 1.0.0，启用 True，当前入场许可 True。\n\n策略库或内置版本证据\n\n\n```json\n{\n  \"id\": \"pa-full-engulfing-reversal\",\n  \"active_version\": \"1.0.0\",\n  \"enabled\": 1,\n  \"archived_at\": null,\n  \"sha256\": \"ea9140d3162f072934abfc8a79a888146d3cc6f7031761045bd054885d3cc4b0\",\n  \"uploaded_at\": \"2026-11-19T14:56:29.381319+00:00\",\n  \"path\": \"data-binance-demo/strategy-pool.sqlite3\",\n  \"source\": \"strategies.active_version → versions.document\",\n  \"canonical_sha256_verified\": true\n}\n```\n\n规则校验\n\n\n```json\n{\n  \"method\": \"sqlite_canonical_json\",\n  \"sha256\": \"ea9140d3162f072934abfc8a79a888146d3cc6f7031761045bd054885d3cc4b0\",\n  \"verified\": true\n}\n```\n\n开仓入口 DemoPARuntime.on_event → execute_next_open → strategy_pool.evaluate_entry_v2 / build_v2_stop。\n\n退出入口 DemoPARuntime._protect → DemoHedgeCoordinator.exit_on_quote → finish_position。\n\n结构化布尔条件见 strategy.json。\n\n原始路径和逐文件 SHA-256 见本目录 strategy.json。\n\n8011 状态接口提供策略 ID、版本和启用状态，但未发布整个进程的部署源码摘要。共享执行入口来自工作区源码静态追踪。"
+  },
+  "rule_payload": {
+    "registry_document": {
+      "description": "量化假设：下跌/上涨的SMA20与60背景下，前一根阴/阳，当前反向K线同时实体和全幅包含前K；BTC连续K线允许当前开盘等于上一根收盘，且实体比至少0.35。 信号仅用已收盘K线；v2下一根开盘入场；固定信号时摆动+ATR止损、2R止盈、最长96根K线、同根止损优先。上传保持未启用；自然周期下一开盘执行待代码修复验收。",
+      "entry": {
+        "long": {
+          "args": [
+            {
+              "args": [
+                {
+                  "args": [
+                    20,
+                    0
+                  ],
+                  "op": "sma"
+                },
+                {
+                  "args": [
+                    60,
+                    0
+                  ],
+                  "op": "sma"
+                }
+              ],
+              "op": "lt"
+            },
+            {
+              "args": [
+                {
+                  "args": [
+                    1
+                  ],
+                  "op": "close"
+                },
+                {
+                  "args": [
+                    1
+                  ],
+                  "op": "open"
+                }
+              ],
+              "op": "lt"
+            },
+            {
+              "args": [
+                {
+                  "args": [
+                    0
+                  ],
+                  "op": "close"
+                },
+                {
+                  "args": [
+                    0
+                  ],
+                  "op": "open"
+                }
+              ],
+              "op": "gt"
+            },
+            {
+              "args": [
+                {
+                  "args": [
+                    0
+                  ],
+                  "op": "open"
+                },
+                {
+                  "args": [
+                    1
+                  ],
+                  "op": "close"
+                }
+              ],
+              "op": "lte"
+            },
+            {
+              "args": [
+                {
+                  "args": [
+                    0
+                  ],
+                  "op": "close"
+                },
+                {
+                  "args": [
+                    1
+                  ],
+                  "op": "open"
+                }
+              ],
+              "op": "gt"
+            },
+            {
+              "args": [
+                {
+                  "args": [
+                    0
+                  ],
+                  "op": "high"
+                },
+                {
+                  "args": [
+                    1
+                  ],
+                  "op": "high"
+                }
+              ],
+              "op": "gt"
+            },
+            {
+              "args": [
+                {
+                  "args": [
+                    0
+                  ],
+                  "op": "low"
+                },
+                {
+                  "args": [
+                    1
+                  ],
+                  "op": "low"
+                }
+              ],
+              "op": "lt"
+            },
+            {
+              "args": [
+                {
+                  "args": [
+                    0
+                  ],
+                  "op": "body_fraction"
+                },
+                {
+                  "args": [
+                    "min_body"
+                  ],
+                  "op": "param"
+                }
+              ],
+              "op": "gte"
+            }
+          ],
+          "op": "and"
+        },
+        "short": {
+          "args": [
+            {
+              "args": [
+                {
+                  "args": [
+                    20,
+                    0
+                  ],
+                  "op": "sma"
+                },
+                {
+                  "args": [
+                    60,
+                    0
+                  ],
+                  "op": "sma"
+                }
+              ],
+              "op": "gt"
+            },
+            {
+              "args": [
+                {
+                  "args": [
+                    1
+                  ],
+                  "op": "close"
+                },
+                {
+                  "args": [
+                    1
+                  ],
+                  "op": "open"
+                }
+              ],
+              "op": "gt"
+            },
+            {
+              "args": [
+                {
+                  "args": [
+                    0
+                  ],
+                  "op": "close"
+                },
+                {
+                  "args": [
+                    0
+                  ],
+                  "op": "open"
+                }
+              ],
+              "op": "lt"
+            },
+            {
+              "args": [
+                {
+                  "args": [
+                    0
+                  ],
+                  "op": "open"
+                },
+                {
+                  "args": [
+                    1
+                  ],
+                  "op": "close"
+                }
+              ],
+              "op": "gte"
+            },
+            {
+              "args": [
+                {
+                  "args": [
+                    0
+                  ],
+                  "op": "close"
+                },
+                {
+                  "args": [
+                    1
+                  ],
+                  "op": "open"
+                }
+              ],
+              "op": "lt"
+            },
+            {
+              "args": [
+                {
+                  "args": [
+                    0
+                  ],
+                  "op": "low"
+                },
+                {
+                  "args": [
+                    1
+                  ],
+                  "op": "low"
+                }
+              ],
+              "op": "lt"
+            },
+            {
+              "args": [
+                {
+                  "args": [
+                    0
+                  ],
+                  "op": "high"
+                },
+                {
+                  "args": [
+                    1
+                  ],
+                  "op": "high"
+                }
+              ],
+              "op": "gt"
+            },
+            {
+              "args": [
+                {
+                  "args": [
+                    0
+                  ],
+                  "op": "body_fraction"
+                },
+                {
+                  "args": [
+                    "min_body"
+                  ],
+                  "op": "param"
+                }
+              ],
+              "op": "gte"
+            }
+          ],
+          "op": "and"
+        }
+      },
+      "format": "btc-lab-declarative-strategy/v2",
+      "market": "BTC/USD",
+      "name": "PA 兼容无缺口吞噬反转",
+      "parameters": {
+        "min_body": 0.35
+      },
+      "position": {
+        "direction": "both",
+        "entry_timing": "next_open",
+        "max_hold_bars": 96,
+        "same_bar_priority": "stop",
+        "stop": {
+          "atr_period": 14,
+          "buffer_atr": 0.1,
+          "kind": "swing_atr",
+          "lookback": 2,
+          "max_distance_atr": 4,
+          "min_distance_atr": 0.5
+        },
+        "target_r": 2
+      },
+      "risk": {
+        "currency": "USD_RESEARCH",
+        "initial_equity": "10000",
+        "max_leverage": 5,
+        "risk_fraction": "0.02"
+      },
+      "strategy_id": "pa-full-engulfing-reversal",
+      "timeframe": "15m",
+      "version": "1.0.0"
+    }
+  },
+  "rule_source_kind": "COMPLETE_REGISTRY_JSON",
+  "verbatim_original_json": "source_snapshots/registry/pa-full-engulfing-reversal/1.0.0.json",
+  "source_evidence": {
+    "method": "sqlite_canonical_json",
+    "sha256": "ea9140d3162f072934abfc8a79a888146d3cc6f7031761045bd054885d3cc4b0",
+    "verified": true
+  },
+  "production_wiring": {
+    "registered_via_8011": true,
+    "enabled_observed": true,
+    "entry_permitted_observed": true,
+    "entry": "DemoPARuntime.on_event → execute_next_open → strategy_pool.evaluate_entry_v2 / build_v2_stop",
+    "exit": "DemoPARuntime._protect → DemoHedgeCoordinator.exit_on_quote → finish_position",
+    "source_evidence": "工作区源码静态追踪＋8011 注册状态。未通过本次归档测试下单。"
+  },
+  "workspace_source_files": [
+    {
+      "original_path": "data-binance-demo/strategy-pool.sqlite3#versions/pa-full-engulfing-reversal/1.0.0",
+      "archive_path": "source_snapshots/registry/pa-full-engulfing-reversal/1.0.0.json",
+      "sha256": "09c0dbbe9a2b78088953ad078324b8be7d84ba21ed26d8aa07931fe260a58b8c"
+    },
+    {
+      "original_path": "backend/strategy_pool.py",
+      "archive_path": "source_snapshots/backend/strategy_pool.py",
+      "sha256": "0208e001cdf848e6a5044337258e4f0f258df4624c2fbe195184b98eabc6b9cf"
+    },
+    {
+      "original_path": "config/strategy_pool/strategy-v1.schema.json",
+      "archive_path": "source_snapshots/config/strategy_pool/strategy-v1.schema.json",
+      "sha256": "77b220ea3af1f50f88d3cb8b44a9e1ff3da5fd74ece7f3710bf919458e0a4a2c"
+    }
+  ],
+  "shared_runtime_source_files": [
+    {
+      "original_path": "backend/serve.py",
+      "archive_path": "source_snapshots/backend/serve.py",
+      "sha256": "42e36cff393f13a777a356b581111d2305de127b3708233c35113691aa48c0fc"
+    },
+    {
+      "original_path": "backend/app.py",
+      "archive_path": "source_snapshots/backend/app.py",
+      "sha256": "924875468d8ba7666982638757f0e89384f8ff6e7a0fd392b19b0a46c5dea14c"
+    },
+    {
+      "original_path": "backend/binance_demo_bootstrap.py",
+      "archive_path": "source_snapshots/backend/binance_demo_bootstrap.py",
+      "sha256": "8188c5dd42c5a7838e1f34034733c729752e34c1dad50a54ddcc33e0c1deec68"
+    },
+    {
+      "original_path": "backend/binance_demo_registry.py",
+      "archive_path": "source_snapshots/backend/binance_demo_registry.py",
+      "sha256": "db8e195556f551059c74e99caf7f6d4f77edbb8dd7f89548d1909194d220fa4e"
+    },
+    {
+      "original_path": "backend/binance_demo_market.py",
+      "archive_path": "source_snapshots/backend/binance_demo_market.py",
+      "sha256": "7d1d422b23ce1b78aef32855237f8470c854443f0875d407a5fa7a349bd0e1de"
+    },
+    {
+      "original_path": "backend/binance_demo_pa_runtime.py",
+      "archive_path": "source_snapshots/backend/binance_demo_pa_runtime.py",
+      "sha256": "639853b7185d1c373041f761f420f885cc1e4ed2122138b3b2e030630bea0a40"
+    },
+    {
+      "original_path": "backend/binance_demo_pa.py",
+      "archive_path": "source_snapshots/backend/binance_demo_pa.py",
+      "sha256": "f1a2014703aebb0c839d7c82e31a327c886f58beae850c17e9bc98df28e7f738"
+    },
+    {
+      "original_path": "backend/binance_demo_hedge.py",
+      "archive_path": "source_snapshots/backend/binance_demo_hedge.py",
+      "sha256": "08a6a1c6aec51ec52481d89d481c54ef7a2b5fc2b523974dd94f2a1a98517d32"
+    },
+    {
+      "original_path": "backend/binance_demo_orders.py",
+      "archive_path": "source_snapshots/backend/binance_demo_orders.py",
+      "sha256": "1131bec2a905b5d51fc42daf3cbf2c821a13e0947f4ed6aff7b8338cdb164de9"
+    },
+    {
+      "original_path": "backend/binance_demo_funding.py",
+      "archive_path": "source_snapshots/backend/binance_demo_funding.py",
+      "sha256": "68ec1dcb52954712f5372ace977990dd6b46e42296a03baf5cb28f1395fba4ea"
+    },
+    {
+      "original_path": "backend/domain.py",
+      "archive_path": "source_snapshots/backend/domain.py",
+      "sha256": "5a1c0514b6232634960639e79376d3af46f9a2c35d1e070f955ae2883874b464"
+    },
+    {
+      "original_path": "backend/settings.py",
+      "archive_path": "source_snapshots/backend/settings.py",
+      "sha256": "a6bcf523ffb04fc57e55e4dd656b3aa3f6cc21761cc1101c657246beee14bda5"
+    },
+    {
+      "original_path": "data-binance-demo/demo-native-strategies.json",
+      "archive_path": "source_snapshots/data-binance-demo/demo-native-strategies.json",
+      "sha256": "69f1294f0d91a63da5495c32845ee201906a7c256397e0c864b30a64021468c2"
+    }
+  ],
+  "source_gaps": [
+    "8011 状态接口提供策略 ID、版本和启用状态，但未发布整个进程的部署源码摘要。共享执行入口来自工作区源码静态追踪。"
+  ],
+  "audit_status": {
+    "status": "ACTIVE",
+    "status_as_of": "2026-11-20",
+    "status_meaning": "ACTIVE means the saved local rule/registry is enabled or selected; it does not mean a live process was observed.",
+    "runtime_state": "UNVERIFIED_NO_8011_LISTENER_AT_THIS_AUDIT",
+    "rule_source_completeness": "SOURCE_COMPLETE_RUNTIME_UNVERIFIED",
+    "source": {
+      "project": "C:/Users/admin/Documents/btc-visual-price-action-lab",
+      "source_type": "read-only current local project snapshot",
+      "additional_evidence": "strategy archive exported 2026-11-20 15:28 Asia/Shanghai; its runtime observation is historical and environment=DEMO"
+    },
+    "source_hash": "ea9140d3162f072934abfc8a79a888146d3cc6f7031761045bd054885d3cc4b0",
+    "source_hash_verified": true,
+    "source_snapshot": [
+      "backend/strategy.py",
+      "backend/strategy_pool.py",
+      "registry/pa-full-engulfing-reversal/1.0.0.json"
+    ],
+    "execution_entry": [
+      "registry/pa-full-engulfing-reversal/1.0.0.json",
+      "backend/strategy_pool.py",
+      "backend/strategy.py"
+    ],
+    "legacy_runtime_entry": "DemoPARuntime.on_event → execute_next_open → strategy_pool.evaluate_entry_v2 / build_v2_stop",
+    "rule_conflicts": [
+      "策略库 enabled=1、版本 SHA 已核对；最近保存周期为 2026-11-19 15:15 UTC，当前无 8011，不能称正在运行。"
+    ],
+    "unverified_fields": [
+      "current in-memory strategy version",
+      "current live enable/entry gate",
+      "runtime cycle after last persisted evidence"
+    ]
+  },
+  "source": {
+    "project": "C:/Users/admin/Documents/btc-visual-price-action-lab",
+    "source_type": "read-only current local project snapshot",
+    "additional_evidence": "strategy archive exported 2026-11-20 15:28 Asia/Shanghai; its runtime observation is historical and environment=DEMO"
+  },
+  "status": "ACTIVE",
+  "source_hash": "ea9140d3162f072934abfc8a79a888146d3cc6f7031761045bd054885d3cc4b0",
+  "source_hash_verified": true,
+  "completeness": "SOURCE_COMPLETE_RUNTIME_UNVERIFIED",
+  "source_snapshot": [
+    "backend/strategy.py",
+    "backend/strategy_pool.py",
+    "registry/pa-full-engulfing-reversal/1.0.0.json"
+  ],
+  "execution_entry": [
+    "registry/pa-full-engulfing-reversal/1.0.0.json",
+    "backend/strategy_pool.py",
+    "backend/strategy.py"
+  ],
+  "rule_conflicts": [
+    "策略库 enabled=1、版本 SHA 已核对；最近保存周期为 2026-11-19 15:15 UTC，当前无 8011，不能称正在运行。"
+  ],
+  "runtime_state": "UNVERIFIED_NO_8011_LISTENER_AT_THIS_AUDIT",
+  "unverified_fields": [
+    "current in-memory strategy version",
+    "current live enable/entry gate",
+    "runtime cycle after last persisted evidence"
+  ]
+}

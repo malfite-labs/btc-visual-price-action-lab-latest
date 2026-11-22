@@ -1,0 +1,119 @@
+{
+  "long": [
+    {
+      "left": {
+        "kind": "close",
+        "offset": 1
+      },
+      "op": ">",
+      "right": {
+        "kind": "rolling_high",
+        "offset": 2,
+        "period": 8
+      }
+    },
+    {
+      "left": {
+        "kind": "low",
+        "offset": 0
+      },
+      "op": "<=",
+      "right": {
+        "kind": "rolling_high",
+        "offset": 2,
+        "period": 8
+      }
+    },
+    {
+      "left": {
+        "kind": "close",
+        "offset": 0
+      },
+      "op": ">",
+      "right": {
+        "kind": "rolling_high",
+        "offset": 2,
+        "period": 8
+      }
+    },
+    {
+      "left": {
+        "kind": "close",
+        "offset": 0
+      },
+      "op": ">",
+      "right": {
+        "kind": "close",
+        "offset": 1
+      }
+    },
+    {
+      "left": {
+        "kind": "body_ratio",
+        "offset": 0
+      },
+      "op": ">",
+      "right": 0.2
+    }
+  ],
+  "short": [
+    {
+      "left": {
+        "kind": "close",
+        "offset": 1
+      },
+      "op": "<",
+      "right": {
+        "kind": "rolling_low",
+        "offset": 2,
+        "period": 8
+      }
+    },
+    {
+      "left": {
+        "kind": "high",
+        "offset": 0
+      },
+      "op": ">=",
+      "right": {
+        "kind": "rolling_low",
+        "offset": 2,
+        "period": 8
+      }
+    },
+    {
+      "left": {
+        "kind": "close",
+        "offset": 0
+      },
+      "op": "<",
+      "right": {
+        "kind": "rolling_low",
+        "offset": 2,
+        "period": 8
+      }
+    },
+    {
+      "left": {
+        "kind": "close",
+        "offset": 0
+      },
+      "op": "<",
+      "right": {
+        "kind": "close",
+        "offset": 1
+      }
+    },
+    {
+      "left": {
+        "kind": "body_ratio",
+        "offset": 0
+      },
+      "op": ">",
+      "right": 0.2
+    }
+  ],
+  "stop_bars": 6,
+  "target_r": 1.8,
+  "max_hold": 8
+}

@@ -1,0 +1,197 @@
+{
+  "archive_schema": "btc-strategy-archive/1",
+  "archive_id": "G",
+  "strategy_id": "G",
+  "name": "C 成交确认反向镜像",
+  "version": "1.0.0",
+  "runtime_observation": {
+    "version": "1.0.0",
+    "enabled": true,
+    "entry_permitted": true,
+    "research_initial_equity": "10000"
+  },
+  "library": {
+    "kind": "built_in_code",
+    "version": "1.0.0",
+    "independent_json": null
+  },
+  "effective_market": "BTCUSDT",
+  "currency": "USDT",
+  "timeframe": "C 确认成交及有效报价事件（来源 C 15m）",
+  "direction_support": {
+    "long": true,
+    "short": true
+  },
+  "rule_sections_zh": {
+    "策略定位": "以 C 真实成交为输入的反向镜像。",
+    "适用行情": "不独立从 K 线产生信号；C 原策略为 15 分钟。",
+    "指标与参数": "C 成交归属、已确认数量、终态、信号时点和实时盘口。紧急止损保守损失预算为研究权益 2%。",
+    "做多规则": "C 已确认有效空仓成交时，在满足快照与时效门禁后尝试 G 多。",
+    "做空规则": "C 已确认有效多仓成交时，在满足快照与时效门禁后尝试 G 空。",
+    "信号确认": "以有效报价回调检查 C 已终态且有实际成交的开仓记录；已确认数量与当前 C 方向仓位一致，且信号符合报价时效要求。",
+    "止损规则": "按入场价、数量、费用和滑点计算满足 2% 最大损失预算的最远有效价格步进，持仓用各自方向 bid/ask。",
+    "止盈规则": "无独立固定目标；跟随 C 已确认减仓及退出。",
+    "退出与超时": "C 原入场 ID 消失或对应仓位归零时退出。C 部分减仓时按归属协同减量，尊重交易所最小数量与金额；无独立固定 K 线超时。",
+    "特殊逻辑": "以 C 入场 ID 构成镜像意图去重，G 成交和费用按自身归属独立记录，已有仓位先行保护。",
+    "资金与仓位": "V2 按 C 已确认数量尝试反向开仓，再执行 G 自身资金、费用、精度、杠杆上限和风控检查。",
+    "原始来源与版本": "归档号 G，运行 ID G。8011 版本 1.0.0，启用 True，当前入场许可 True。\n\n策略库或内置版本证据\n\n\n```json\n{\n  \"kind\": \"built_in_code\",\n  \"version\": \"1.0.0\",\n  \"independent_json\": null\n}\n```\n\n规则校验\n\n\n```json\n{\n  \"method\": \"sha256_of_workspace_sources\",\n  \"verified_local_copy\": true\n}\n```\n\n开仓入口 DemoPAFleet._dispatch → DemoGMirror.on_quote → DemoHedgeCoordinator.execute。\n\n退出入口 DemoGMirror.on_quote → mirror_emergency_stop / DemoHedgeCoordinator.finish_position。\n\nPython 策略以代码快照复核。\n\n原始路径和逐文件 SHA-256 见本目录 strategy.json。\n\n8011 状态接口提供策略 ID、版本和启用状态，但未发布整个进程的部署源码摘要。共享执行入口来自工作区源码静态追踪。"
+  },
+  "rule_payload": {
+    "runtime_definition_source": "backend/binance_demo_bootstrap.py:_configure",
+    "legacy_definition_source": "backend/g_mirror.py:GMirror",
+    "activation_mode": "confirmed_C_demo_fills"
+  },
+  "rule_source_kind": "SOURCE_BOUND_PACKAGE",
+  "verbatim_original_json": null,
+  "source_evidence": {
+    "method": "sha256_of_workspace_sources",
+    "verified_local_copy": true
+  },
+  "production_wiring": {
+    "registered_via_8011": true,
+    "enabled_observed": true,
+    "entry_permitted_observed": true,
+    "entry": "DemoPAFleet._dispatch → DemoGMirror.on_quote → DemoHedgeCoordinator.execute",
+    "exit": "DemoGMirror.on_quote → mirror_emergency_stop / DemoHedgeCoordinator.finish_position",
+    "source_evidence": "工作区源码静态追踪＋8011 注册状态。未通过本次归档测试下单。"
+  },
+  "workspace_source_files": [
+    {
+      "original_path": "backend/binance_demo_g.py",
+      "archive_path": "source_snapshots/backend/binance_demo_g.py",
+      "sha256": "f3d8bc8f77a8194c51d80d36ca82154fa3d3caa668b0bf32ff13a0f8c5c9e295"
+    },
+    {
+      "original_path": "backend/g_mirror.py",
+      "archive_path": "source_snapshots/backend/g_mirror.py",
+      "sha256": "092618b34275270df7e45723f488e669902a0e68f911b70499568e92f5f11c69"
+    }
+  ],
+  "shared_runtime_source_files": [
+    {
+      "original_path": "backend/serve.py",
+      "archive_path": "source_snapshots/backend/serve.py",
+      "sha256": "42e36cff393f13a777a356b581111d2305de127b3708233c35113691aa48c0fc"
+    },
+    {
+      "original_path": "backend/app.py",
+      "archive_path": "source_snapshots/backend/app.py",
+      "sha256": "924875468d8ba7666982638757f0e89384f8ff6e7a0fd392b19b0a46c5dea14c"
+    },
+    {
+      "original_path": "backend/binance_demo_bootstrap.py",
+      "archive_path": "source_snapshots/backend/binance_demo_bootstrap.py",
+      "sha256": "8188c5dd42c5a7838e1f34034733c729752e34c1dad50a54ddcc33e0c1deec68"
+    },
+    {
+      "original_path": "backend/binance_demo_registry.py",
+      "archive_path": "source_snapshots/backend/binance_demo_registry.py",
+      "sha256": "db8e195556f551059c74e99caf7f6d4f77edbb8dd7f89548d1909194d220fa4e"
+    },
+    {
+      "original_path": "backend/binance_demo_market.py",
+      "archive_path": "source_snapshots/backend/binance_demo_market.py",
+      "sha256": "7d1d422b23ce1b78aef32855237f8470c854443f0875d407a5fa7a349bd0e1de"
+    },
+    {
+      "original_path": "backend/binance_demo_pa_runtime.py",
+      "archive_path": "source_snapshots/backend/binance_demo_pa_runtime.py",
+      "sha256": "639853b7185d1c373041f761f420f885cc1e4ed2122138b3b2e030630bea0a40"
+    },
+    {
+      "original_path": "backend/binance_demo_pa.py",
+      "archive_path": "source_snapshots/backend/binance_demo_pa.py",
+      "sha256": "f1a2014703aebb0c839d7c82e31a327c886f58beae850c17e9bc98df28e7f738"
+    },
+    {
+      "original_path": "backend/binance_demo_hedge.py",
+      "archive_path": "source_snapshots/backend/binance_demo_hedge.py",
+      "sha256": "08a6a1c6aec51ec52481d89d481c54ef7a2b5fc2b523974dd94f2a1a98517d32"
+    },
+    {
+      "original_path": "backend/binance_demo_orders.py",
+      "archive_path": "source_snapshots/backend/binance_demo_orders.py",
+      "sha256": "1131bec2a905b5d51fc42daf3cbf2c821a13e0947f4ed6aff7b8338cdb164de9"
+    },
+    {
+      "original_path": "backend/binance_demo_funding.py",
+      "archive_path": "source_snapshots/backend/binance_demo_funding.py",
+      "sha256": "68ec1dcb52954712f5372ace977990dd6b46e42296a03baf5cb28f1395fba4ea"
+    },
+    {
+      "original_path": "backend/domain.py",
+      "archive_path": "source_snapshots/backend/domain.py",
+      "sha256": "5a1c0514b6232634960639e79376d3af46f9a2c35d1e070f955ae2883874b464"
+    },
+    {
+      "original_path": "backend/settings.py",
+      "archive_path": "source_snapshots/backend/settings.py",
+      "sha256": "a6bcf523ffb04fc57e55e4dd656b3aa3f6cc21761cc1101c657246beee14bda5"
+    },
+    {
+      "original_path": "data-binance-demo/demo-native-strategies.json",
+      "archive_path": "source_snapshots/data-binance-demo/demo-native-strategies.json",
+      "sha256": "69f1294f0d91a63da5495c32845ee201906a7c256397e0c864b30a64021468c2"
+    }
+  ],
+  "source_gaps": [
+    "8011 状态接口提供策略 ID、版本和启用状态，但未发布整个进程的部署源码摘要。共享执行入口来自工作区源码静态追踪。"
+  ],
+  "audit_status": {
+    "status": "ACTIVE",
+    "status_as_of": "2026-11-20",
+    "status_meaning": "ACTIVE means the saved local rule/registry is enabled or selected; it does not mean a live process was observed.",
+    "runtime_state": "UNVERIFIED_NO_8011_LISTENER_AT_THIS_AUDIT",
+    "rule_source_completeness": "PARTIAL",
+    "source": {
+      "project": "C:/Users/admin/Documents/btc-visual-price-action-lab",
+      "source_type": "read-only current local project snapshot",
+      "additional_evidence": "strategy archive exported 2026-11-20 15:28 Asia/Shanghai; its runtime observation is historical and environment=DEMO"
+    },
+    "source_hash": null,
+    "source_hash_verified": false,
+    "source_snapshot": [
+      "backend/g_mirror.py",
+      "config/research/strategy-source-map-v1.json"
+    ],
+    "execution_entry": [
+      "backend/g_mirror.py",
+      "config/research/strategy-source-map-v1.json"
+    ],
+    "legacy_runtime_entry": "DemoPAFleet._dispatch → DemoGMirror.on_quote → DemoHedgeCoordinator.execute",
+    "rule_conflicts": [
+      "策略源映射为 C 成交事件镜像；当前 g 镜像账本状态未读到，本次无 8011 运行态。Demo 配置中的启用状态不能证明本地纸盘当前运行。"
+    ],
+    "unverified_fields": [
+      "current in-memory strategy version",
+      "current live enable/entry gate",
+      "runtime cycle after last persisted evidence"
+    ]
+  },
+  "source": {
+    "project": "C:/Users/admin/Documents/btc-visual-price-action-lab",
+    "source_type": "read-only current local project snapshot",
+    "additional_evidence": "strategy archive exported 2026-11-20 15:28 Asia/Shanghai; its runtime observation is historical and environment=DEMO"
+  },
+  "status": "ACTIVE",
+  "source_hash": null,
+  "source_hash_verified": false,
+  "completeness": "PARTIAL",
+  "source_snapshot": [
+    "backend/g_mirror.py",
+    "config/research/strategy-source-map-v1.json"
+  ],
+  "execution_entry": [
+    "backend/g_mirror.py",
+    "config/research/strategy-source-map-v1.json"
+  ],
+  "rule_conflicts": [
+    "策略源映射为 C 成交事件镜像；当前 g 镜像账本状态未读到，本次无 8011 运行态。Demo 配置中的启用状态不能证明本地纸盘当前运行。"
+  ],
+  "runtime_state": "UNVERIFIED_NO_8011_LISTENER_AT_THIS_AUDIT",
+  "unverified_fields": [
+    "current in-memory strategy version",
+    "current live enable/entry gate",
+    "runtime cycle after last persisted evidence"
+  ]
+}

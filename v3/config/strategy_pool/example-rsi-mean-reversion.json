@@ -1,0 +1,13 @@
+{
+  "format": "btc-lab-declarative-strategy/v1",
+  "strategy_id": "example-rsi-long",
+  "version": "1.0.0",
+  "name": "RSI oversold demonstration",
+  "market": "BTC/USD",
+  "timeframe": "15m",
+  "description": "Demonstration only. Entry when RSI(14) is below parameter threshold; exit when RSI rises above 50.",
+  "parameters": {"oversold": 30, "exit_rsi": 50},
+  "risk": {"initial_equity": "10000", "currency": "USD_RESEARCH", "max_leverage": 5, "risk_fraction": "0.02"},
+  "entry": {"op": "lt", "args": [{"op": "rsi", "args": [14]}, {"op": "param", "args": ["oversold"]}]},
+  "exit": {"op": "gt", "args": [{"op": "rsi", "args": [14]}, {"op": "param", "args": ["exit_rsi"]}]}
+}
