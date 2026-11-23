@@ -2066,3 +2066,12 @@ ecover_backend_minimal.ps1 预检又因缺少 docs/reports/abc-forward-v26/freez
 - Checklist：暂存后用`git diff --cached --name-only -z`核对路径数量；确认所有预期新增文件存在；CRLF仓库用`core.whitespace=cr-at-eol`检查，避免把换行差异当作代码尾随空格并批量改写源码。
 - Anti-pattern：把PowerShell显示的Git路径直接当作pathspec；因CRLF检查噪声而全仓改换行。
 - 结果：新私有仓库`https://github.com/malfite-labs/btc-visual-price-action-lab-latest`的`main`已验证与本地提交`a58988a446967bf599d105e143848a3cd670a811`一致；原`origin`保留。最终同步记录提交另行推送。
+
+## 2026-11-23 K线观察窗口主题
+- 开发副本增加默认白天、可切换黑夜及本地持久化。隔离浏览器验收通过，正式监听保持 8012 PID 8328、5175 PID 16552。截图使用隔离演示数据。
+- Rule：仅在观察窗口内切换样式和图表配色，保留图表实例。Checklist：核对双主题截图、同一配置下重开恢复、周期与指标操作、策略选择及轮播。Anti-pattern：以隔离浏览器通过宣称正式 WebView2 已验收，或为验证主题占用正式端口。
+- 复盘：中断后临时测试会话已失效，改用同一 Node 进程管理隔离预览并重跑。Windows 换行检查使用 `core.whitespace=cr-at-eol`，避免无关格式改动。
+
+## 2026-11-23 盈亏日历与主题版本归档
+- 日期回调与重绘递归已修复。成交表按北京时间展示当日成交，盈亏仍按平仓日期归属。Tk 点击验证覆盖跨日开平仓、当日新开仓、仅开仓与无成交。
+- Rule：发布副本只同步已核对的正式修复。Checklist：比较候选源码与正式文件、核对远端基线、限定暂存清单、推送后校验远端 SHA。Anti-pattern：将临时验证脚本或在线运行数据放进源码备份。

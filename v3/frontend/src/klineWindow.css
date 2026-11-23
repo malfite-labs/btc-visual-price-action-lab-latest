@@ -1,14 +1,52 @@
-.kw{height:100vh;display:grid;grid-template-rows:46px 40px minmax(0,1fr) clamp(130px,22vh,185px);background:#101721;color:#dce5ef;font:13px "Microsoft YaHei UI","Segoe UI",sans-serif;min-width:0;overflow:hidden}
-.kw-market,.kw-indicators,.kw-feed-top{display:flex;align-items:center;gap:12px;padding:0 14px;border-bottom:1px solid #28364a;white-space:nowrap}
-.kw-market strong{font-size:17px;letter-spacing:.03em}.kw-market span,.kw-feed-top span,.kw-card span,.kw-card small{color:#a5b5c9}.kw-market b{font-size:17px;font-variant-numeric:tabular-nums}
-.kw button,.kw select,.kw input:not([type=checkbox]),.kw summary{color:#dce5ef;background:#182434;border:1px solid #33435a;border-radius:4px;padding:5px 9px;font:inherit}
-.kw button,.kw summary{cursor:pointer}.kw button:disabled{opacity:.4;cursor:default}.kw button[aria-pressed=true]{background:#223d57;border-color:#5e9ac6;color:#cdeaff}
+.kw {
+  color-scheme: light;
+  --kw-canvas: #fff;
+  --kw-panel: #f4f6fa;
+  --kw-text: #182435;
+  --kw-muted: #526176;
+  --kw-divider: #e2e8f0;
+  --kw-border: #cbd5e1;
+  --kw-control: #fff;
+  --kw-hover: #edf3f9;
+  --kw-active: #e1effc;
+  --kw-active-text: #144979;
+  --kw-accent: #3474aa;
+  --kw-popup: #fff;
+  --kw-popup-border: #b8c7d9;
+  --kw-shadow: #25334b26;
+}
+.kw[data-theme=dark] {
+  color-scheme: dark;
+  --kw-canvas: #101721;
+  --kw-panel: #121d2a;
+  --kw-text: #e4edf6;
+  --kw-muted: #afc0d1;
+  --kw-divider: #28364a;
+  --kw-border: #3c4e65;
+  --kw-control: #182434;
+  --kw-hover: #233448;
+  --kw-active: #223d57;
+  --kw-active-text: #d6edff;
+  --kw-accent: #77b5e3;
+  --kw-popup: #1a283a;
+  --kw-popup-border: #465b72;
+  --kw-shadow: #0008;
+}
+.kw :is(button:not(:disabled), summary):hover { border-color: var(--kw-accent) }
+.kw :is(button:not(:disabled):not([aria-pressed=true]), summary):hover { background: var(--kw-hover) }
+.kw :is(button, summary, input, select):focus-visible { outline: 2px solid var(--kw-accent); outline-offset: 2px }
+.kw input[type=checkbox] { accent-color: var(--kw-accent) }
+.kw{height:100vh;display:grid;grid-template-rows:46px 40px minmax(0,1fr) clamp(130px,22vh,185px);background:var(--kw-canvas);color:var(--kw-text);font:13px "Microsoft YaHei UI","Segoe UI",sans-serif;min-width:0;overflow:hidden}
+.kw-market,.kw-indicators,.kw-feed-top{display:flex;align-items:center;gap:12px;padding:0 14px;border-bottom:1px solid var(--kw-divider);white-space:nowrap}
+.kw-market strong{font-size:17px;letter-spacing:.03em}.kw-market span,.kw-feed-top span,.kw-card span,.kw-card small{color:var(--kw-muted)}.kw-market b{font-size:17px;font-variant-numeric:tabular-nums}
+.kw button,.kw select,.kw input:not([type=checkbox]),.kw summary{color:var(--kw-text);background:var(--kw-control);border:1px solid var(--kw-border);border-radius:4px;padding:5px 9px;font:inherit}
+.kw button,.kw summary{cursor:pointer}.kw button:disabled{opacity:.4;cursor:default}.kw button[aria-pressed=true]{background:var(--kw-active);border-color:var(--kw-accent);color:var(--kw-active-text)}
 .kw-latest{margin-left:auto}.kw-indicators{gap:7px}.kw-dropdown{position:relative}.kw-dropdown summary{list-style:none}
-.kw-pop{position:absolute;z-index:6;top:100%;left:0;margin-top:4px;min-width:215px;padding:10px;background:#182434;border:1px solid #465b72;box-shadow:0 8px 24px #0008}
+.kw-pop{position:absolute;z-index:6;top:100%;left:0;margin-top:4px;min-width:215px;padding:10px;background:var(--kw-popup);border:1px solid var(--kw-popup-border);box-shadow:0 8px 24px var(--kw-shadow)}
 .kw-strategies{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:10px 0}.kw-pop label{margin-right:5px}.kw-param{display:flex;justify-content:space-between;align-items:center;margin:0 0 7px}.kw-param input{width:110px}
-.kw-chart-shell{min-height:0;display:grid;grid-template-rows:24px minmax(0,1fr);position:relative}.kw-chart-status{padding:4px 13px;color:#afc0d1}.kw-chart{min-height:0;min-width:0}
-.kw-notice,.kw-detail{position:absolute;z-index:5;background:#1a283a;border:1px solid #425a75;padding:10px;border-radius:4px}.kw-notice{bottom:34px;left:15px}
-.kw-detail{top:28px;right:75px;width:min(450px,55vw);max-height:82%;overflow:auto}.kw-detail>button{float:right}.kw-detail article{padding:8px 0;border-bottom:1px solid #33435a;overflow-wrap:anywhere}.kw-detail p{margin:5px 0}.kw-detail small{color:#afc0d1}
-.kw-feed{min-height:0;background:#121d2a;border-top:1px solid #33435a}.kw-feed-top{height:38px}.kw-feed-top span{flex:1}.kw-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:10px 14px}.kw-card{text-align:left;display:grid;gap:7px;min-width:0;padding:10px!important}.kw-card>*{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.kw-cards p{grid-column:1/-1;margin:12px 0;color:#afc0d1}
+.kw-chart-shell{min-height:0;display:grid;grid-template-rows:24px minmax(0,1fr);position:relative}.kw-chart-status{padding:4px 13px;color:var(--kw-muted)}.kw-chart{min-height:0;min-width:0}
+.kw-notice,.kw-detail{position:absolute;z-index:5;background:var(--kw-popup);border:1px solid var(--kw-popup-border);padding:10px;border-radius:4px}.kw-notice{bottom:34px;left:15px}
+.kw-detail{top:28px;right:75px;width:min(450px,55vw);max-height:82%;overflow:auto}.kw-detail>button{float:right}.kw-detail article{padding:8px 0;border-bottom:1px solid var(--kw-border);overflow-wrap:anywhere}.kw-detail p{margin:5px 0}.kw-detail small{color:var(--kw-muted)}
+.kw-feed{min-height:0;background:var(--kw-panel);border-top:1px solid var(--kw-border)}.kw-feed-top{height:38px}.kw-feed-top span{flex:1}.kw-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:10px 14px}.kw-card{text-align:left;display:grid;gap:7px;min-width:0;padding:10px!important}.kw-card>*{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.kw-cards p{grid-column:1/-1;margin:12px 0;color:var(--kw-muted)}
 @media(max-width:1120px){.kw-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.kw-card:nth-child(n+3){display:none}.kw-market{gap:8px}}
-.kw-intervals{min-width:298px}.kw-intervals small{display:block;color:#a5b5c9;margin:5px 0}.kw-intervals>div>div{display:flex;gap:5px;margin-bottom:7px}.kw-intervals button{min-width:38px;padding:4px 6px}
+.kw-intervals{min-width:298px}.kw-intervals small{display:block;color:var(--kw-muted);margin:5px 0}.kw-intervals>div>div{display:flex;gap:5px;margin-bottom:7px}.kw-intervals button{min-width:38px;padding:4px 6px}

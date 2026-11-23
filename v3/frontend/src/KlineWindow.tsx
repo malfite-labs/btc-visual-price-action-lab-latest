@@ -9,7 +9,25 @@ const defaults={EMA:'9,20,50',SMA:'20',BOLL:'20,2',MACD:'12,26,9',RSI:'14',VOL:'
 type Indicator=keyof typeof defaults
 const keys=Object.keys(defaults) as Indicator[]
 const activeDefaults=['EMA','MACD','VOL'] as Indicator[]
-const colors=['#ffc46a','#71a8ff','#b49afd','#62d5ba']
+const themes = {
+  light: {
+    background: '#ffffff', text: '#475569', grid: '#e8edf3', border: '#cbd5e1',
+    crosshair: '#64748b', crosshairLabel: '#334155',
+    up: '#087f5b', down: '#c43149', selected: '#9a5700',
+    indicators: ['#a56608', '#2166b5', '#7842a9', '#087c70'],
+    boll: '#4b5fc2', bollMiddle: '#676b91',
+    macdUp: '#168773', macdDown: '#ba4355', volumeUp: '#61a390', volumeDown: '#cc7885',
+  },
+  dark: {
+    background: '#101721', text: '#b9c8da', grid: '#233142', border: '#384a60',
+    crosshair: '#8196ae', crosshairLabel: '#364b61',
+    up: '#26bb8a', down: '#ee6573', selected: '#ffd87f',
+    indicators: ['#ffc46a', '#71a8ff', '#b49afd', '#62d5ba'],
+    boll: '#899aff', bollMiddle: '#8797bd',
+    macdUp: '#38ae90', macdDown: '#d1667b', volumeUp: '#357e70', volumeDown: '#a3566b',
+  },
+}
+type Theme = keyof typeof themes
 const beijing=new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',dateStyle:'short',timeStyle:'medium',hourCycle:'h23'})
 const stamp=(c:Candle) => c.open_at_ms/1000 as UTCTimestamp
 function saved<T,>(key:string,fallback:T):T {
@@ -28,6 +46,8 @@ async function read(path:string,signal?:AbortSignal) {
 }
 
 export default function KlineWindow() {
+  const [theme, setTheme] = useState<Theme>(() => saved<string>('theme', 'light') === 'dark' ? 'dark' : 'light')
+  const palette = themes[theme]
   const [interval,setIntervalValue]=useState('15m')
   const [intervalOpen,setIntervalOpen]=useState(false)
   const [bars,setBars]=useState<Candle[]>([])
@@ -72,8 +92,8 @@ export default function KlineWindow() {
   },[active,params])
   useEffect(()=>{
     if(!host.current)return
-    const c=createChart(host.current,{autoSize:true,layout:{background:{color:'#101721'},textColor:'#b1bfd0'},grid:{vertLines:{color:'#1d2937'},horzLines:{color:'#1d2937'}},timeScale:{timeVisible:true,secondsVisible:false,tickMarkFormatter:(time:Time,type:number)=>typeof time==='number'?formatBeijingTick(time,type):String(time)},localization:{timeFormatter:(t:Time)=>typeof t==='number'?beijing.format(t*1000):String(t)}})
-    const s=c.addSeries(CandlestickSeries,{upColor:'#26bb8a',downColor:'#ee6573',borderVisible:false,wickUpColor:'#26bb8a',wickDownColor:'#ee6573'})
+    const c=createChart(host.current,{autoSize:true,timeScale:{timeVisible:true,secondsVisible:false,tickMarkFormatter:(time:Time,type:number)=>typeof time==='number'?formatBeijingTick(time,type):String(time)},localization:{timeFormatter:(t:Time)=>typeof t==='number'?beijing.format(t*1000):String(t)}})
+    const s=c.addSeries(CandlestickSeries,{borderVisible:false})
     chart.current=c;series.current=s;markerApi.current=createSeriesMarkers(s,[])
     c.subscribeCrosshairMove(p=>{
       const bar=p.seriesData.get(s)
@@ -84,6 +104,28 @@ export default function KlineWindow() {
     c.timeScale().subscribeVisibleLogicalRangeChange(range=>{if(range&&range.from<12)older.current()})
     return ()=>{c.remove();chart.current=null;overlays.current=[];overlaySignature.current=''}
   },[])
+
+  useEffect(() => {
+    try { localStorage.setItem('btc-kline-theme', JSON.stringify(theme)) } catch { /* Keep the in-window selection when storage is unavailable. */ }
+    chart.current?.applyOptions({
+      layout: {
+        background: { color: palette.background },
+        textColor: palette.text,
+        panes: { separatorColor: palette.border, separatorHoverColor: palette.crosshair },
+      },
+      grid: { vertLines: { color: palette.grid }, horzLines: { color: palette.grid } },
+      crosshair: {
+        vertLine: { color: palette.crosshair, labelBackgroundColor: palette.crosshairLabel },
+        horzLine: { color: palette.crosshair, labelBackgroundColor: palette.crosshairLabel },
+      },
+      timeScale: { borderColor: palette.border },
+      rightPriceScale: { borderColor: palette.border },
+    })
+    series.current?.applyOptions({
+      upColor: palette.up, downColor: palette.down,
+      wickUpColor: palette.up, wickDownColor: palette.down,
+    })
+  }, [palette, theme])
 
   useEffect(()=>{
     const controller=new AbortController()
@@ -212,33 +254,35 @@ export default function KlineWindow() {
     const closes=bars.map(b=>+b.close)
     const line=(values:(number|null)[], color:string,pane=0)=>{
       const s=addSeries(LineSeries,{color,lineWidth:1,priceLineVisible:false,lastValueVisible:false},pane)
+      s.applyOptions({color})
       s.setData(values.flatMap((value,i)=>value===null?[]:[{time:stamp(bars[i]),value}]))
     }
     let pane=1
+    const colors = palette.indicators
     if(active.includes('EMA'))numbers('EMA',params.EMA).forEach((n,i)=>line(ema(closes,n),colors[i%colors.length]))
     if(active.includes('SMA'))numbers('SMA',params.SMA).forEach((n,i)=>line(sma(closes,n),colors[(i+2)%colors.length]))
     if(active.includes('BOLL')) {
       const [n,m]=numbers('BOLL',params.BOLL)
       const bands=boll(closes,n,m)
-      line(bands.map(x=>x?.upper??null),'#7c8fff')
-      line(bands.map(x=>x?.middle??null),'#596aaf')
-      line(bands.map(x=>x?.lower??null),'#7c8fff')
+      line(bands.map(x=>x?.upper??null),palette.boll)
+      line(bands.map(x=>x?.middle??null),palette.bollMiddle)
+      line(bands.map(x=>x?.lower??null),palette.boll)
     }
     if(active.includes('MACD')) {
       const [fast,slow,signal]=numbers('MACD',params.MACD)
       const data=macd(closes,fast,slow,signal)
       const hist=addSeries(HistogramSeries,{priceLineVisible:false,lastValueVisible:false},pane)
-      hist.setData(data.flatMap((v,i)=>v.hist===null?[]:[{time:stamp(bars[i]),value:v.hist,color:v.hist>=0?'#249a7d':'#b74f66'}]))
+      hist.setData(data.flatMap((v,i)=>v.hist===null?[]:[{time:stamp(bars[i]),value:v.hist,color:v.hist>=0?palette.macdUp:palette.macdDown}]))
       line(data.map(x=>x.dif),colors[0],pane)
       line(data.map(x=>x.signal),colors[1],pane++)
     }
     if(active.includes('RSI'))line(rsi(closes,numbers('RSI',params.RSI)[0]),colors[2],pane++)
     if(active.includes('VOL')) {
       const vol=addSeries(HistogramSeries,{priceFormat:{type:'volume'},priceLineVisible:false,lastValueVisible:false},pane)
-      vol.setData(bars.map(b=>({time:stamp(b),value:+b.volume,color:+b.close>=+b.open?'#256c61':'#824657'})))
+      vol.setData(bars.map(b=>({time:stamp(b),value:+b.volume,color:+b.close>=+b.open?palette.volumeUp:palette.volumeDown})))
     }
     c.panes().forEach((p,i)=>p.setStretchFactor(i===0?5:1))
-  },[bars,active,params])
+  },[bars,active,params,palette])
 
   useEffect(()=>{
     markerActive.current=markersOn
@@ -254,10 +298,10 @@ export default function KlineWindow() {
       const selected=items.find(x=>x.event_id===highlight)
       const e=selected||items[0]
       const buy=(e.position_effect==='OPEN')===(e.position_direction==='LONG')
-      return {time:time as UTCTimestamp,position:buy?'belowBar':'aboveBar',shape:e.position_effect==='PARTIAL_CLOSE'?'circle':buy?'arrowUp':'arrowDown',color:selected?'#ffd87f':buy?'#30d8a0':'#ff7888',text:items.length>1?eventLabel(e)+' +'+(items.length-1):eventLabel(e)}
+      return {time:time as UTCTimestamp,position:buy?'belowBar':'aboveBar',shape:e.position_effect==='PARTIAL_CLOSE'?'circle':buy?'arrowUp':'arrowDown',color:selected?palette.selected:buy?palette.up:palette.down,text:items.length>1?eventLabel(e)+' +'+(items.length-1):eventLabel(e)}
     })
     markerApi.current?.setMarkers(markers)
-  },[bars,filtered,markersOn,highlight])
+  },[bars,filtered,markersOn,highlight,palette])
 
   const latest=bars.at(-1)
   const prior=bars.at(-2)
@@ -270,7 +314,7 @@ export default function KlineWindow() {
     if(index>=0)locate(index)
     else void history(time,event)
   }
-  return <main className="kw">
+  return <main className="kw" data-theme={theme}>
     <div className="kw-market">
       <strong>BTCUSDT</strong><span>Binance USDⓈ-M</span>
       <b>{latest?Number(latest.close).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</b>
@@ -295,6 +339,9 @@ export default function KlineWindow() {
         <label><input type="checkbox" checked={markersOn} onChange={e=>setMarkersOn(e.target.checked)}/>成交标记</label>
       </div></details>
       <button className="kw-latest" onClick={()=>chart.current?.timeScale().scrollToRealTime()}>返回最新</button>
+      <button type="button" aria-label="黑夜主题" aria-pressed={theme==='dark'} onClick={()=>setTheme(value=>value==='light'?'dark':'light')}>
+        {theme==='light'?'☀ 白天':'☾ 黑夜'}
+      </button>
     </div>
     <div className="kw-indicators">
       {keys.map(k=><button key={k} aria-pressed={active.includes(k)} onClick={()=>setActive(old=>old.includes(k)?old.filter(x=>x!==k):[...old,k])}>{k}{active.includes(k)&&params[k]?' '+params[k].replaceAll(',','/'):''}</button>)}

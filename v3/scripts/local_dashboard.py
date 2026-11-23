@@ -1873,21 +1873,24 @@ def open_strategy_details(root, strategy_id, row):
                         bg='#111827', fg='#64748b', font=('Microsoft YaHei UI', 8), anchor='w', wraplength=680)
         foot.pack(fill='x', padx=14, pady=(0, 10))
         def choose_day(day):
-            selected_date['value'] = day; render_calendar()
+            selected_date['value'] = day
+            month.update(year=day.year, month=day.month)
+            render_calendar()
+
+        def show_day(day):
             date_key = day.isoformat(); entry = day_details.get(date_key)
             for iid in day_grid.get_children(): day_grid.delete(iid)
             day_fill_map.clear()
+            event_detail_var.set('选择下方成交可查看原始账本字段。')
+            day_fills = calendar_data['transaction_fills'].get(date_key, [])
             if not entry:
-                day_fills = calendar_data['transaction_fills'].get(date_key, [])
-                selected_summary.set(f"{date_key}｜" + ('有成交但无已实现平仓盈亏；浮动盈亏不计。' if day_fills else '无成交记录；当日已实现净盈亏：—'))
-                for idx, fill in enumerate(sorted(day_fills, key=lambda f: str(f.get('occurred_at') or f.get('created_at') or f.get('cycle') or ''))):
-                    values = detail_fill_values(fill); iid = str(idx); day_fill_map[iid] = fill
-                    day_grid.insert('', 'end', iid=iid, values=(values[0], values[1], values[3], values[4], values[5], values[6], values[9], values[10]))
-                return
-            summary_text = (f"{date_key}｜已实现净盈亏：{entry['net']:+,.2f} USD｜完整闭合交易：{entry.get('closed_count',0)}｜"
-                            f"盈利：{entry.get('wins',0)}｜亏损：{entry.get('losses',0)}｜手续费（归属平仓日）：{entry['fees']:,.2f} USD")
-            selected_summary.set(summary_text)
-            source_fills = sorted(entry['fill_events'], key=lambda f: str(f.get('occurred_at') or f.get('cycle') or f.get('created_at') or ''))
+                selected_summary.set(f"{date_key}｜" + ('有成交；无可确认的已实现净盈亏。' if day_fills else '无成交记录；当日已实现净盈亏：—'))
+            else:
+                selected_summary.set(
+                    f"{date_key}｜已实现净盈亏：{entry['net']:+,.2f} USD｜完整闭合交易：{entry.get('closed_count',0)}｜"
+                    f"盈利：{entry.get('wins',0)}｜亏损：{entry.get('losses',0)}｜手续费（归属平仓日）：{entry['fees']:,.2f} USD"
+                )
+            source_fills = sorted(day_fills, key=_calendar_timestamp)
             for idx, fill in enumerate(source_fills):
                 values = detail_fill_values(fill)
                 iid = str(idx); day_fill_map[iid] = fill
@@ -1950,9 +1953,11 @@ def open_strategy_details(root, strategy_id, row):
             else:
                 foot.configure(text='净盈亏 = 实际执行价差 − 开仓及平仓手续费；成交价已包含滑点，滑点不重复扣除。未平仓浮盈不计。')
             if selected_date['value'] and selected_date['value'].year == year and selected_date['value'].month == mon:
-                choose_day(selected_date['value'])
+                show_day(selected_date['value'])
             else:
                 for iid in day_grid.get_children(): day_grid.delete(iid)
+                day_fill_map.clear()
+                event_detail_var.set('选择下方成交可查看原始账本字段。')
                 selected_summary.set('点击日期查看当日真实成交与已实现盈亏。')
         render_calendar()
 

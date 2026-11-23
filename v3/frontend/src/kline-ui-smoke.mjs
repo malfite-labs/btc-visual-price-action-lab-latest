@@ -6,7 +6,8 @@ import { join } from 'node:path'
 // Run against a Vite preview on 5186. All API calls are fulfilled locally.
 const browser=await chromium.launch({channel:'msedge',headless:true})
 try {
-  const page=await browser.newPage({viewport:{width:1440,height:900}})
+  const context=await browser.newContext({viewport:{width:1440,height:900}})
+  const page=await context.newPage()
   const output=process.env.KLINE_SMOKE_SCREENSHOTS
   if(output) await mkdir(output,{recursive:true})
   async function capture(name) {
@@ -15,7 +16,7 @@ try {
   const errors=[]
   page.on('pageerror',error=>errors.push(error.message))
   const time=Date.UTC(2026,10,22,5)
-  await page.route('**/api/v1/**',route=>{
+  await context.route('**/api/v1/**',route=>{
     const url=new URL(route.request().url())
     if(url.pathname.endsWith('/events'))return route.fulfill({json:{items:[
       {event_id:'fixture-1',strategy_id:'D',trade_id:'fixture',occurred_at:new Date(time+60000).toISOString(),position_effect:'PARTIAL_CLOSE',position_direction:'LONG',quantity:'0.1',price:'61000',reason_text:'隔离演示数据',verification_status:'VERIFIED',source:'TEST_ONLY'},
@@ -41,7 +42,26 @@ try {
       badge.style.cssText='position:fixed;right:110px;top:51px;z-index:100;background:#593e1c;color:#ffe0a2;padding:5px 10px;font:13px Segoe UI'
       document.body.append(badge)
     })
-    await capture('01-default')
+    const theme = page.getByRole('button', { name: '黑夜主题' })
+    const root = page.locator('.kw')
+    const canvas = await page.locator('.kw-chart canvas').first().elementHandle()
+    const surfaces = () => page.evaluate(() => [ '.kw-market', '.kw-indicators', '.kw-card' ].map(selector => {
+      const style = getComputedStyle(document.querySelector(selector))
+      return [style.color, style.backgroundColor]
+    }))
+    assert.equal(await root.getAttribute('data-theme'), 'light')
+    await capture('01-light')
+    const lightSurfaces = await surfaces()
+    await theme.click()
+    assert.equal(await root.getAttribute('data-theme'), 'dark')
+    const darkSurfaces = await surfaces()
+    darkSurfaces.forEach((surface, i) => assert.notDeepEqual(surface, lightSurfaces[i]))
+    assert.ok(await canvas.evaluate(element => element.isConnected))
+    await capture('02-dark')
+    const reopened = await context.newPage()
+    await reopened.goto('http://127.0.0.1:5186/kline')
+    await reopened.getByRole('button', { name: '黑夜主题', pressed: true }).waitFor()
+    await reopened.close()
     await page.getByRole('button',{name:/D 减仓/}).click()
     await page.locator('.kw-detail').getByText('隔离演示数据',{exact:true}).waitFor()
     await capture('02-trade-detail')
