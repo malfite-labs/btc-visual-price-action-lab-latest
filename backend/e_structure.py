@@ -43,7 +43,7 @@ def process_structure_close(*,store,bars,now):
         return {'action':'NO_OPEN_POSITION'}
     try:
         resolve_e_decision({'action':'SKIP'},bars,mapping_verified=False)
-        if any(b.get('symbol')!='BTC/USD' or b.get('source')!='ALPACA_US_BTCUSD_SPOT' or b.get('currency')!='USD_RESEARCH' or str(b.get('interval','')).lower() not in {'15min','15m'} for b in bars):raise ValueError('SNAPSHOT_SOURCE_INVALID')
+        if any(b.get('symbol')!='BTC/USD' or b.get('source')!='BINANCE_USDM_PERP' or b.get('currency')!='USD_RESEARCH' or str(b.get('interval','')).lower() not in {'15min','15m'} for b in bars):raise ValueError('SNAPSHOT_SOURCE_INVALID')
         close=datetime.fromisoformat(bars[-1]['close_at'].replace('Z','+00:00')).astimezone(UTC)
         if now.tzinfo is None or not close<=now.astimezone(UTC)<close+timedelta(minutes=15) or close.minute%15 or close.second or close.microsecond:raise ValueError('SNAPSHOT_TIME_INVALID')
         key=close.isoformat();position=json.loads(account['position_json']);trade=position['trade_id']
@@ -85,7 +85,7 @@ def execute_structure_due(store,quote,cost):
             if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='e_structure_due'").fetchone():return {'accepted':False,'reason':'NO_STRUCTURE_EXIT_DUE'}
             due=db.execute('SELECT close_at FROM e_structure_due WHERE trade_id=?',(trade,)).fetchone()
         if not due:return {'accepted':False,'reason':'NO_STRUCTURE_EXIT_DUE'}
-        if not quote or quote.get('source')!='ALPACA_US_BTCUSD_SPOT' or quote.get('currency')!='USD_RESEARCH' or quote.get('timestamp_valid') is not True or not 0<=int(quote.get('age_ms',10**9))<=cost.max_quote_age_ms:return {'accepted':False,'reason':'QUOTE_INVALID'}
+        if not quote or quote.get('source')!='BINANCE_USDM_PERP' or quote.get('currency')!='USD_RESEARCH' or quote.get('timestamp_valid') is not True or not 0<=int(quote.get('age_ms',10**9))<=cost.max_quote_age_ms:return {'accepted':False,'reason':'QUOTE_INVALID'}
         event_at=datetime.fromisoformat(str(quote['event_at']).replace('Z','+00:00'))
         due_at=datetime.fromisoformat(due[0])
         if event_at.tzinfo is None or event_at.astimezone(UTC)<due_at.astimezone(UTC):return {'accepted':False,'reason':'QUOTE_BEFORE_STRUCTURE_CLOSE'}
@@ -96,3 +96,4 @@ def execute_structure_due(store,quote,cost):
         price,fee=fill;reference=bid if side=='SELL' else ask
         return store.close_position(agent='E',price=price,fee=fee,slippage=abs(price-reference)*quantity,idempotency_key='E-structure-exit:'+trade,expected_version=account['version'],reason='E_STRUCTURE_EXIT',quote_id=quote.get('event_id'),rationale='E confirmed structure exit '+due[0],cost_model=cost)
     except (KeyError,ValueError,TypeError,ArithmeticError,sqlite3.Error):return {'accepted':False,'reason':'STRUCTURE_EXIT_ERROR'}
+

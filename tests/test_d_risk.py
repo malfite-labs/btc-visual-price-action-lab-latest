@@ -7,7 +7,7 @@ def sample():
     now = datetime(2026, 11, 5, 12, 0, 5, tzinfo=timezone.utc)
     signal = {'direction': 'LONG', 'setup': 'D_CONFIRM', 'signal_close': '2026-11-05T12:00:00+00:00',
               'atr': '2', 'low': '98', 'neckline': '100', 'stop': '98.9', 'close': '100'}
-    quote = {'source': 'ALPACA_US_BTCUSD_SPOT', 'currency': 'USD_RESEARCH', 'timestamp_valid': True,
+    quote = {'source': 'BINANCE_USDM_PERP', 'currency': 'USD_RESEARCH', 'timestamp_valid': True,
              'bid': '100.08', 'ask': '100.1', 'event_at': (now - timedelta(seconds=1)).isoformat()}
     return signal, quote, now
 
@@ -44,3 +44,4 @@ def test_five_x_margin_and_risk_remain_bounded_under_low_cash():
     assert quantity * price / Decimal('5') + Decimal(result['fee']) <= Decimal('50')
     assert Decimal(result['estimated_loss']) <= Decimal('200')
     assert quantity * price <= Decimal('5000')
+

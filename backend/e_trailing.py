@@ -41,7 +41,7 @@ def monitor_protective_stop(store,quote,cost):
         with closing(sqlite3.connect(store.path,timeout=10)) as db,db:
             _schema(db);row=db.execute('SELECT stop FROM e_protective_stops WHERE trade_id=?',(trade,)).fetchone()
         if not row:return {'accepted':False,'reason':'NO_TRAILING_STOP'}
-        if not quote or quote.get('source')!='ALPACA_US_BTCUSD_SPOT' or quote.get('currency')!='USD_RESEARCH' or quote.get('timestamp_valid') is not True or not 0<=int(quote.get('age_ms',10**9))<=cost.max_quote_age_ms:return {'accepted':False,'reason':'QUOTE_INVALID'}
+        if not quote or quote.get('source')!='BINANCE_USDM_PERP' or quote.get('currency')!='USD_RESEARCH' or quote.get('timestamp_valid') is not True or not 0<=int(quote.get('age_ms',10**9))<=cost.max_quote_age_ms:return {'accepted':False,'reason':'QUOTE_INVALID'}
         stop=Decimal(row[0]);bid=Decimal(str(quote['bid']));ask=Decimal(str(quote['ask']))
         if not bid.is_finite() or not ask.is_finite() or bid<=0 or ask<bid:return {'accepted':False,'reason':'QUOTE_INVALID'}
         px=bid if position['direction']=='LONG' else ask
@@ -54,3 +54,4 @@ def monitor_protective_stop(store,quote,cost):
         if not pending.get('accepted'):return pending
         return recover_pending_stop(ledger=store,agent='E',quote=quote,cost=cost,event_id=event,reason='STOP_E_TRAILING')
     except (ValueError,TypeError,KeyError,InvalidOperation,sqlite3.Error):return {'accepted':False,'reason':'INVALID_PROTECTION_CONTEXT'}
+

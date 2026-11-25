@@ -61,6 +61,7 @@ class DBridge:
         self.max_pending = max_pending
         self.runtime = None
         self.dispatcher = None
+        self.enabled = True
         self._watchdog_task = None
         self._stream_down = True
         self._entry_gate = _EntryGate()
@@ -111,6 +112,29 @@ class DBridge:
             return False
         return self.dispatcher.submit('bar', close_at)
 
+    def set_enabled(self, enabled):
+        """Pause/resume new entries without stopping quote-based exits."""
+        enabled = bool(enabled)
+        if enabled == self.enabled:
+            return {'enabled': self.enabled, 'changed': False}
+        if not enabled:
+            # Block the entry commit before expiring any queued candidate.
+            self.enabled = False
+            self._entry_gate.invalidate()
+            if self.runtime is not None:
+                self.runtime.cancel_pending_entry()
+            return {'enabled': False, 'changed': True}
+
+        self.enabled = True
+        epoch = self._entry_gate.epoch
+        if (self.dispatcher is not None and self.dispatcher.failure is None
+                and not self._fault_persisting and self._feed_ready()
+                and self.dispatcher._queue.empty() and self.runtime is not None
+                and self.runtime.status()['protection'] == 'READY'
+                and not self.runtime.has_data_loss()):
+            self._entry_gate.rearm(epoch)
+        return {'enabled': True, 'changed': True}
+
     def fail_dispatch(self, reason):
         """Immediately latch entry failure and persist protection asynchronously."""
         self._stream_down = True
@@ -155,7 +179,7 @@ class DBridge:
             await asyncio.sleep(1)
 
     def _ready(self):
-        return not self._entry_gate.blocked.is_set() and self._feed_ready()
+        return self.enabled and not self._entry_gate.blocked.is_set() and self._feed_ready()
 
     def _feed_ready(self):
         return (not self._stream_down and not self._fault_persisting and self.dispatcher is not None
@@ -165,6 +189,8 @@ class DBridge:
     def _handle(self, kind, value):
         now = self.clock()
         if kind == 'bar':
+            if not self.enabled:
+                return {'status': 'PAUSED', 'reason': 'STRATEGY_PAUSED'}
             return self.runtime.on_bar(value, now, market_ready=self._ready())
         if kind == 'quote':
             ready = self._feed_ready()
@@ -182,7 +208,7 @@ class DBridge:
                 self._gap_quotes = []
             elif ready and self._entry_gate.blocked.is_set() and self.runtime.has_data_loss():
                 self._observe_gap_recovery(value, now, recovery_epoch)
-            if (ready and self._entry_gate.blocked.is_set() and self.dispatcher.failure is None
+            if (ready and self.enabled and self._entry_gate.blocked.is_set() and self.dispatcher.failure is None
                     and self.dispatcher._queue.empty() and self._feed_ready()
                     and self.runtime.status()['protection'] == 'READY'):
                 self._entry_gate.rearm(recovery_epoch)
@@ -221,6 +247,7 @@ class DBridge:
     async def status(self, quote=None):
         if self.runtime is None or self.dispatcher is None:
             return {'status': 'UNAVAILABLE', 'reason': 'D_BRIDGE_NOT_STARTED', 'execution_ready': False}
+        from backend.d_signal import RULE_VERSION, SOURCE_COMMIT
         runtime = await asyncio.to_thread(self.runtime.status)
         account = await asyncio.to_thread(read_execution_account, self.ledger_path, quote, self.clock())
         observation = await asyncio.to_thread(read_status, self.observation_path)
@@ -231,14 +258,17 @@ class DBridge:
         risk_quote = self._event(quote) if isinstance(quote, dict) else None
         risk = await asyncio.to_thread(self.runtime.circuit_status, risk_quote, self.clock())
         reason = failure or runtime['reason'] or (risk.get('reason') if risk.get('block_entries') else None)
-        ready = (self._ready() and runtime['protection'] == 'READY' and not failure
+        ready = (self.enabled and self._ready() and runtime['protection'] == 'READY' and not failure
                  and not risk.get('block_entries', True)
                  and account['status'] == 'READY'
                  and account.get('reason') != 'VALUATION_UNAVAILABLE')
-        return {**account, 'status': 'AUTO_PAPER' if ready else 'PROTECTION_UNCERTAIN',
+        status = 'PAUSED' if not self.enabled else 'AUTO_PAPER' if ready else 'PROTECTION_UNCERTAIN'
+        reason = 'STRATEGY_PAUSED' if not self.enabled else reason
+        return {**account, 'status': status, 'enabled': self.enabled,
                 'reason': reason, 'execution_ready': ready,
                 'circuit': risk,
-                'control_state': 'RUNNING' if ready else 'UNAVAILABLE',
+                'control_state': 'PAUSED' if not self.enabled else 'RUNNING' if ready else 'PROTECTION_UNCERTAIN',
+                'rule_version': RULE_VERSION, 'source_commit': SOURCE_COMMIT,
                 'decision': observation.get('decision'), 'signal': observation.get('signal'),
                 'decision_state': runtime['state']}
 

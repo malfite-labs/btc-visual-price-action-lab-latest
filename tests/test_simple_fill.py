@@ -6,7 +6,7 @@ from backend.execution import prepare_entry
 
 @pytest.mark.parametrize('direction,stop,expected', [('LONG','90','100.13'),('SHORT','110','99.98')])
 def test_entry_ignores_book_quantity_and_uses_quote(direction, stop, expected):
-    q = dict(source='ALPACA_US_BTCUSD_SPOT', timestamp_valid=True, bid='100', ask='100.1', bid_qty='0', ask_qty='0')
+    q = dict(source='BINANCE_USDM_PERP', timestamp_valid=True, bid='100', ask='100.1', bid_qty='0', ask_qty='0')
     r = prepare_entry(equity=D('10000'), available_cash=D('10000'), direction=direction,
         stop=D(stop), quote=q, orderbook={}, cost=CostModel(), quote_age_ms=0, book_age_ms=999999)
     assert r['accepted']
@@ -17,7 +17,7 @@ def test_entry_ignores_book_quantity_and_uses_quote(direction, stop, expected):
 
 
 def test_stale_quote_still_rejected():
-    q = dict(source='ALPACA_US_BTCUSD_SPOT', timestamp_valid=True, bid='100', ask='100.1')
+    q = dict(source='BINANCE_USDM_PERP', timestamp_valid=True, bid='100', ask='100.1')
     r = prepare_entry(equity=D('10000'),available_cash=D('10000'), direction='LONG',stop=D('90'),
         quote=q,orderbook={},cost=CostModel(),quote_age_ms=60001,book_age_ms=0)
     assert not r['accepted']
@@ -38,7 +38,7 @@ def test_time_exit_full_fill_fee_and_idempotency(tmp_path, direction, bid, ask, 
     with sqlite3.connect(db) as c:
         c.execute('insert into rule_position_meta values(?,?,?,?,?,?,?,?)',
             ('B','test',opened['trade_id'],'120' if direction=='LONG' else '80','2026-10-31T09:30:00+00:00',12,'V3.0','RULE_TIME_EXIT'))
-    q = dict(source='ALPACA_US_BTCUSD_SPOT',currency='USD_RESEARCH',timestamp_valid=True,
+    q = dict(source='BINANCE_USDM_PERP',currency='USD_RESEARCH',timestamp_valid=True,
         age_ms=60001,bid=bid,ask=ask,bid_qty='0',ask_qty='0')
     assert runner.monitor_targets(q) == {}
     assert ledger.account('B')['state'] != 'FLAT'
@@ -54,3 +54,4 @@ def test_time_exit_full_fill_fee_and_idempotency(tmp_path, direction, bid, ask, 
     import json
     assert json.loads(close['cost_model_json'])['fill_model'] == 'QUOTE_SIDE_FULL_FILL_V1'
     assert D(close['slippage']) == abs(D(expected)-D(bid if direction=='LONG' else ask))
+

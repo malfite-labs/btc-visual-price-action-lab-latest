@@ -28,7 +28,7 @@ def test_liquidation_exit_records_one_actual_fill(tmp_path, direction, stop, bid
         research_c_5x=True,
     )["accepted"]
     quote = {
-        "source": "ALPACA_US_BTCUSD_SPOT",
+        "source": "BINANCE_USDM_PERP",
         "age_ms": 0,
         "timestamp_valid": True,
         "bid": bid,
@@ -74,7 +74,7 @@ def test_liquidation_stale_quote_cannot_trigger_or_fill(tmp_path):
         research_c_5x=True,
     )["accepted"]
     quote = {
-        "source": "ALPACA_US_BTCUSD_SPOT",
+        "source": "BINANCE_USDM_PERP",
         "age_ms": 60001,
         "timestamp_valid": True,
         "bid": "70",
@@ -109,7 +109,7 @@ def test_liquidation_pending_survives_restart_and_keeps_reason(tmp_path):
         research_c_5x=True,
     )["accepted"]
     quote = {
-        "source": "ALPACA_US_BTCUSD_SPOT",
+        "source": "BINANCE_USDM_PERP",
         "age_ms": 0,
         "timestamp_valid": True,
         "bid": "70",
@@ -155,7 +155,7 @@ def test_liquidation_and_model_close_cannot_both_create_fills(tmp_path):
         research_c_5x=True,
     )["accepted"]
     quote = {
-        "source": "ALPACA_US_BTCUSD_SPOT",
+        "source": "BINANCE_USDM_PERP",
         "age_ms": 0,
         "timestamp_valid": True,
         "bid": "70",
@@ -191,3 +191,4 @@ def test_liquidation_and_model_close_cannot_both_create_fills(tmp_path):
             future.result()
     assert ledger.account("C")["state"] == "FLAT"
     assert len(ledger.fills("C")) == 2
+

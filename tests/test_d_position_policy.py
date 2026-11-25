@@ -11,7 +11,7 @@ def pos(**kw):
 
 def decide(p,bid,minute=1,seconds=0):
     at=BASE+timedelta(minutes=minute,seconds=seconds)
-    q={'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','timestamp_valid':True,
+    q={'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','timestamp_valid':True,
        'bid':str(bid),'ask':str(float(bid)+.01),'event_at':at.isoformat()}
     return plan_position_event(p,q,at)
 
@@ -34,6 +34,7 @@ def test_time_limit_and_stop_have_priority_over_target():
 
 def test_unfresh_quote_never_triggers_exit():
     at=BASE+timedelta(minutes=10)
-    q={'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','timestamp_valid':True,
+    q={'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','timestamp_valid':True,
        'bid':'90','ask':'91','event_at':BASE.isoformat()}
     assert plan_position_event(pos(),q,at)['reason']=='QUOTE_STALE'
+

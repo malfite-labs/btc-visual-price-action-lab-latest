@@ -36,7 +36,7 @@ def prepare_entry(
         or quote.get("timestamp_valid", True) is not True
     ):
         return {"accepted": False, "reason": "QUOTE_STALE"}
-    if quote.get("source") != "ALPACA_US_BTCUSD_SPOT":
+    if quote.get("source") != "BINANCE_USDM_PERP":
         return {"accepted": False, "reason": "SOURCE_MISMATCH"}
     bid, ask = Decimal(str(quote['bid'])), Decimal(str(quote['ask']))
     if not bid.is_finite() or not ask.is_finite() or bid <= 0 or ask < bid:
@@ -126,7 +126,7 @@ def handle_confirmed_stop(
     trigger_price = Decimal(position["stop_price"])
     if quote is None:
         return {"accepted": False, "reason": "TRIGGER_QUOTE_UNAVAILABLE"}
-    if quote.get("source") != "ALPACA_US_BTCUSD_SPOT":
+    if quote.get("source") != "BINANCE_USDM_PERP":
         return {"accepted": False, "reason": "SOURCE_MISMATCH"}
     age = int(quote.get("age_ms", 10**9))
     if not 0 <= age <= cost.max_quote_age_ms or quote.get("timestamp_valid", True) is not True:
@@ -190,7 +190,7 @@ def recover_pending_stop(
     pending = json.loads(account["pending_stop_json"]) if account.get("pending_stop_json") else {}
     if not pending.get("trigger_price") or not pending.get("quote_event_id"):
         return {"accepted": False, "reason": "STOP_TRIGGER_EVIDENCE_MISSING"}
-    if not quote or quote.get("source") != "ALPACA_US_BTCUSD_SPOT":
+    if not quote or quote.get("source") != "BINANCE_USDM_PERP":
         return {"accepted": False, "reason": "QUOTE_UNAVAILABLE_REMAINS_PENDING"}
     if (
         not 0 <= int(quote.get("age_ms", 10**9)) <= cost.max_quote_age_ms
@@ -251,7 +251,7 @@ def handle_research_liquidation(
         return {"accepted": False, "reason": "NO_OPEN_POSITION"}
     if (
         not quote
-        or quote.get("source") != "ALPACA_US_BTCUSD_SPOT"
+        or quote.get("source") != "BINANCE_USDM_PERP"
         or quote.get("timestamp_valid", True) is not True
         or not 0 <= int(quote.get("age_ms", 10**9)) <= cost.max_quote_age_ms
     ):
@@ -295,3 +295,4 @@ def handle_research_liquidation(
         event_id=event_id,
         reason="STOP_LIQUIDATION",
     )
+

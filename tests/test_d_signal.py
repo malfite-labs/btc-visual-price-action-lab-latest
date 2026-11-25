@@ -5,7 +5,7 @@ from backend import d_signal
 
 def make_bars(count=964):
     start = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    return [dict(symbol='BTC/USD', source='ALPACA_US_BTCUSD_SPOT', open='99.9', high='100.5', low='99.5', close='100', volume='1',
+    return [dict(symbol='BTC/USD', source='BINANCE_USDM_PERP', open='99.9', high='100.5', low='99.5', close='100', volume='1',
                  open_at=(start + timedelta(minutes=15*i)).isoformat(),
                  close_at=(start + timedelta(minutes=15*(i+1))).isoformat(),
                  is_closed=True) for i in range(count)]
@@ -13,7 +13,7 @@ def make_bars(count=964):
 
 def test_data_gate_never_creates_a_signal():
     bars = make_bars()
-    assert d_signal.evaluate(bars[:959])['reason'] == 'INSUFFICIENT_15M_HISTORY'
+    assert d_signal.evaluate(bars[:d_signal.MIN_15M_BARS - 1])['reason'] == 'INSUFFICIENT_15M_INDICATOR_HISTORY'
     bars[-5]['volume'] = '0'
     result = d_signal.evaluate(bars)
     assert result['status'] == 'DATA_NOT_READY'
@@ -71,14 +71,21 @@ def test_candidate_invalidation_takes_priority(monkeypatch):
 
 
 
-def test_utc_hour_warmup_requires_240_full_hours():
-    bars = make_bars(960)
+def test_utc_hour_warmup_uses_indicator_minimum_not_240_hours():
+    bars = make_bars(d_signal.MIN_COMPLETED_HOURS * 4 + 4)
     for b in bars:
         for key in ('open_at', 'close_at'):
             b[key] = (datetime.fromisoformat(b[key]) + timedelta(minutes=15)).isoformat()
     result = d_signal.evaluate(bars)
-    assert result['status'] == 'DATA_NOT_READY'
-    assert result['reason'] == 'INSUFFICIENT_1H_HISTORY'
+    assert result['status'] == 'IDLE'
+    assert result['reason'] == 'NO_SETUP'
+
+
+def test_current_binance_archive_depth_is_enough_for_d_indicators():
+    bars = make_bars(383)
+    result = d_signal.evaluate(bars)
+    assert result['status'] == 'IDLE'
+    assert result['reason'] == 'NO_SETUP'
 
 
 def test_candidate_expiry_after_sixth_bar():
@@ -128,3 +135,4 @@ def test_zero_range_watch_still_invalidates_or_expires():
     result = d_signal.evaluate(bars, state)
     assert result['reason'] == 'CANDIDATE_EXPIRED_ZERO_RANGE'
     assert result['state']['remaining'] == 4
+

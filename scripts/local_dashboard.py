@@ -38,6 +38,36 @@ RULE_DETAIL_IDS = ('A', 'B', 'C', 'D', 'E', 'G', *PA_STRATEGY_IDS)
 BEIJING = timezone(timedelta(hours=8), name='Asia/Shanghai')
 
 
+def _apply_persistent_user_proxy(env):
+    """Use the Windows user's durable proxy when recovering the local API.
+
+    Codex may inject a per-command proxy that is gone after the command exits.
+    Reading HKCU Environment keeps GUI-triggered recovery independent of that
+    temporary process environment.
+    """
+    if os.name != 'nt':
+        return env
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, 'Environment') as key:
+            values = {}
+            for name in ('HTTPS_PROXY', 'HTTP_PROXY', 'ALL_PROXY'):
+                try:
+                    values[name] = winreg.QueryValueEx(key, name)[0]
+                except FileNotFoundError:
+                    pass
+        proxy = values.get('HTTPS_PROXY') or values.get('HTTP_PROXY') or values.get('ALL_PROXY')
+        if proxy:
+            for name in ('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'WS_PROXY', 'WSS_PROXY',
+                         'http_proxy', 'https_proxy', 'all_proxy', 'ws_proxy', 'wss_proxy'):
+                env[name] = proxy
+            env['NO_PROXY'] = 'localhost,127.0.0.1,::1'
+            env['no_proxy'] = env['NO_PROXY']
+    except (OSError, ImportError):
+        pass
+    return env
+
+
 def rule_detail_target(row_id):
     """Keep detail actions bound to stable strategy IDs, never visual row indices."""
     if row_id not in RULE_DETAIL_IDS:
@@ -128,6 +158,8 @@ def money_label(value):
 
 def pa_status_label(item):
     status = item.get('status')
+    if status == 'ENABLED_NOT_RUNNING' and 'GAP' in str(item.get('last_status')):
+        return '周期滞后'
     if status == 'RUNNING':
         return '运行中'
     if status == 'ENABLED_NOT_RUNNING':
@@ -139,11 +171,31 @@ def pa_status_label(item):
     return str(status or '状态未知')
 
 
-def console_rows(decisions, pa_items=(), pa_error=None, g_status=None, g_error=None):
+def cycle_health(processed, confirmed, *, now, blocked=False):
+    if blocked:
+        return '周期滞后'
+    try:
+        latest = datetime.fromisoformat(str(confirmed).replace('Z', '+00:00'))
+        last = datetime.fromisoformat(str(processed).replace('Z', '+00:00')) if processed else None
+        if latest.utcoffset() is None or (last and last.utcoffset() is None):
+            return '等待数据'
+        if last == latest:
+            return '正常'
+        if last and last > latest:
+            return '等待数据'
+        return '处理中' if now - latest <= timedelta(minutes=2) else '周期滞后'
+    except (ValueError, TypeError):
+        return '等待数据'
+
+
+def console_rows(decisions, pa_items=(), pa_error=None, g_status=None, g_error=None, *, confirmed_cycle=None, now=None):
     rows = {}
+    now = now or datetime.now(timezone.utc)
     control_names = {
         'RUNNING': '运行中', 'PAUSING': '未完成', 'PAUSED': '已暂停',
         'OBSERVE_ONLY': '观察中', 'PROTECTION_UNCERTAIN': '保护待确认',
+        'D_OBSERVE_ONLY': '执行未接通', 'E_OBSERVE_ONLY': '观察中',
+        'E_NOT_INITIALIZED': '账户未初始化',
     }
     for agent in ('A', 'B', 'C', 'D', 'E'):
         row = dict(decisions.get(agent) or {})
@@ -154,7 +206,12 @@ def console_rows(decisions, pa_items=(), pa_error=None, g_status=None, g_error=N
             'control_label': control_names.get(row.get('control'), '未知'),
             'strategy_id': None,
         })
-        row['cycle'] = cycle_label(row.get('cycle'))
+        cycle = row.get('cycle')
+        if confirmed_cycle and row.get('control') == 'RUNNING':
+            row['cycle_health'] = cycle_health(cycle, confirmed_cycle, now=now)
+        elif row.get('control') in ('PAUSED','PAUSING','PROTECTION_UNCERTAIN'):
+            row['cycle_health'] = '已暂停'
+        row['cycle'] = cycle_label(cycle)
         rows[agent] = row
 
     items_by_id = {item.get('id'): item for item in pa_items if item.get('id')}
@@ -165,7 +222,7 @@ def console_rows(decisions, pa_items=(), pa_error=None, g_status=None, g_error=N
                 'id': strategy_id, 'strategy_id': strategy_id,
                 'name': display_name, 'status_label': '读取失败',
                 'control_label': '错误', 'control': 'UNKNOWN', 'state': '—',
-                'amount': '—', 'leverage': '—', 'equity': None, 'realized': None,
+                'amount': '—', 'leverage': '\u672a\u77e5', 'equity': None, 'realized': None,
                 'unrealized': None, 'fees': None, 'action': f'策略池读取失败：{pa_error}',
                 'cycle': '—', 'enabled': False, 'raw': None,
             }
@@ -174,7 +231,7 @@ def console_rows(decisions, pa_items=(), pa_error=None, g_status=None, g_error=N
                 'id': strategy_id, 'strategy_id': strategy_id,
                 'name': display_name, 'status_label': '未登记',
                 'control_label': '不可用', 'control': 'UNKNOWN', 'state': '—',
-                'amount': '—', 'leverage': '—', 'equity': None, 'realized': None,
+                'amount': '—', 'leverage': '\u672a\u77e5', 'equity': None, 'realized': None,
                 'unrealized': None, 'fees': None, 'action': '策略池未返回该ID',
                 'cycle': '—', 'enabled': False, 'raw': None,
             }
@@ -194,18 +251,26 @@ def console_rows(decisions, pa_items=(), pa_error=None, g_status=None, g_error=N
                 'control': item.get('status'),
                 'state': position_labels.get(direction, direction),
                 'amount': money_label(item.get('position_amount') if direction not in ('FLAT', 'PENDING_LONG', 'PENDING_SHORT') else '0'),
-                'leverage': item.get('leverage') if direction not in ('FLAT', 'PENDING_LONG', 'PENDING_SHORT') else '上限5x',
+                'leverage': leverage_label(item.get('leverage'), direction),
                 'equity': money_label(item.get('equity')), 'realized': money_label(item.get('realized')),
                 'unrealized': money_label(item.get('unrealized')), 'fees': money_label(item.get('fees')),
-                'action': item.get('last_action') or item.get('action') or '—',
+                'action': item.get('last_action') or item.get('action') or 'WAIT',
                 'cycle': cycle_label(item.get('last_cycle')),
                 'enabled': enabled, 'raw': item,
             }
+            if enabled and confirmed_cycle:
+                reason = str(item.get('last_status') or '')
+                row['cycle_health'] = cycle_health(item.get('last_cycle'),confirmed_cycle,now=now,
+                    blocked='GAP' in reason)
+                if row['cycle_health'] == '正常' and reason.startswith('BLOCKED'):
+                    row['cycle_health'] = '等待数据'
+            elif not enabled and item.get('paused_at'):
+                row['cycle_health'] = '已暂停'
         rows[strategy_id] = row
     if g_error:
         rows['G'] = {'id': 'G', 'strategy_id': 'G', 'name': 'C反向镜像', 'status_label': '异常',
                      'control_label': '只读', 'control': 'G_MIRROR', 'state': '—', 'amount': '—',
-                     'leverage': '—', 'equity': None, 'realized': None, 'unrealized': None,
+                     'leverage': '\u672a\u77e5', 'equity': None, 'realized': None, 'unrealized': None,
                      'fees': None, 'action': f'G状态读取失败：{g_error}', 'cycle': '—', 'enabled': True,
                      'raw': None, 'category': '镜像策略'}
     else:
@@ -217,10 +282,11 @@ def console_rows(decisions, pa_items=(), pa_error=None, g_status=None, g_error=N
                      'control_label': '只读', 'control': 'G_MIRROR',
                      'state': {'LONG': '做多', 'SHORT': '做空'}.get(direction, '空仓'),
                      'amount': money_label(g_status.get('position_amount') or '0'),
-                     'leverage': (str(g_status.get('leverage')) + 'x') if direction and g_status.get('leverage') else ('上限5x' if not direction else '—'),
+                     'leverage': leverage_label(g_status.get('leverage'), direction or 'FLAT'),
                      'equity': money_label(g_status.get('equity')), 'realized': money_label(g_status.get('realized')),
                      'unrealized': money_label(g_status.get('unrealized')), 'fees': money_label(g_status.get('fees')),
-                     'action': g_status.get('last_action') or follow or '—', 'cycle': cycle_label(g_status.get('last_cycle')),
+                     'action': g_status.get('last_action') or follow or 'WAIT', 'cycle': '—',
+                     'cycle_health': '事件驱动', 'sync_at': cycle_label(g_status.get('last_cycle')),
                      'enabled': bool(g_status.get('enabled')), 'raw': g_status, 'category': '镜像策略'}
     ordered = ('A', 'B', 'C', 'D', 'E', 'G', *PA_STRATEGY_IDS)
     return {key: rows[key] for key in ordered if key in rows}
@@ -240,7 +306,7 @@ def strategy_view(row_id, row):
     return {
         'strategy_id': display_id, 'name': name,
         'status': row.get('status_label') or '状态未知',
-        'position': position, 'action': action_label(row.get('action')),
+        'position': position, 'action': action_label(row.get('action') or 'WAIT'),
     }
 
 
@@ -252,12 +318,21 @@ def console_control_state(row_id, row):
             return 'disabled'
         return 'on' if row.get('enabled') else 'off'
     if row_id == 'D':
-        return 'disabled'
+        if 'enabled' not in row or row.get('control') == 'UNKNOWN':
+            return 'disabled'
+        return 'on' if row.get('enabled') else 'off'
     if row.get('control') in ('RUNNING', 'PAUSING'):
         return 'on'
     if row.get('control') == 'PAUSED':
         return 'off'
     return 'disabled'
+
+
+def cycle_display(row):
+    if row.get('cycle_health') == '事件驱动':
+        return f"事件同步 {row['sync_at']}"
+    when = row.get('cycle') or '—'
+    return f"{row['cycle_health']} · {when}" if row.get('cycle_health') else when
 
 
 STATUS_TONES = {
@@ -313,7 +388,7 @@ def operations_status_summary(system, health, pool_items, inventory, secondary_c
                           else '具备基础恢复条件' if base_ready
                           else 'BLOCKED：调度、行情、持仓监控或备份门槛未全部满足')
     return {
-        '8011版本': (health or {}).get('version', '未知'),
+        '8012版本': (health or {}).get('version', '未知'),
         '纸盘调度': (system or {}).get('scheduler', '未知'),
         '行情 / 报价 / WebSocket': ' / '.join(str((system or {}).get(k, '未知')) for k in ('feed_health', 'quote_health', 'websocket_recovery_state')),
         'ABC影子账本': ((system or {}).get('shadow_evolution') or {}).get('state', '未知'),
@@ -334,7 +409,7 @@ def strategy_status_appearance(status):
     if label == '等待C开仓': return {'icon': '◷', 'tone': 'warning'}
     if label in ('已暂停', '未启用'): return {'icon': 'Ⅱ', 'tone': 'neutral'}
     if label in ('异常', '故障', '读取失败'): return {'icon': '!', 'tone': 'danger'}
-    if label in ('已启用待周期', '等待数据', '保护待确认'): return {'icon': '◷', 'tone': 'warning'}
+    if label in ('已启用待周期', '等待数据', '保护待确认', '周期滞后'): return {'icon': '◷', 'tone': 'warning'}
     if label == '数据过期': return {'icon': '!', 'tone': 'neutral'}
     return {'icon': '·', 'tone': 'neutral'}
 
@@ -450,30 +525,85 @@ def set_pa_enabled(strategy_id, version, enabled):
                     payload={'version': version, 'enabled': bool(enabled)})
 
 
+def set_d_enabled(enabled):
+    return api_json('/api/v1/d/control', method='POST', payload={'enabled': bool(enabled)})
+
+
 def position_label(state):
     return {'FLAT': '空仓', 'OPEN_LONG': '做多', 'OPEN_SHORT': '做空'}.get(state, state if state is not None else '—')
 
 
 def action_label(action):
-    return {
-        'WAIT': '等待', 'HOLD': '持有', 'OPEN_LONG': '开多信号', 'OPEN_SHORT': '开空信号',
+    if action is None or action == '':
+        return '等待'
+    raw = str(action).strip()
+    code = raw.upper()
+    labels = {
+        'WAIT': '等待', 'IDLE': '等待', 'NO_SETUP': '等待', 'NO_PENDING_SIGNAL': '等待',
+        'OTHER': '等待', 'OTHER_STATE': '等待',
+        'CYCLE_ALREADY_SEEN': '等待', 'WAITING': '等待', 'READY': '等待',
+        'HOLD': '持有', 'OPEN_LONG': '开多信号', 'OPEN_SHORT': '开空信号',
         'CLOSE_LONG': '平多决策', 'CLOSE_SHORT': '平空决策',
-        'NO_SETUP': '无交易形态', 'SETUP_DETECTED': '检测到形态', 'CONFLICT_SKIP': '信号冲突，跳过',
+        'SETUP_DETECTED': '检测到形态', 'CONFLICT_SKIP': '信号冲突，跳过',
         'REJECTED': '未通过检查', 'PAPER_FILLED': '模拟成交', 'POSITION_MANAGED': '持仓管理',
         'PENDING': '处理中', 'EXECUTING': '执行中', 'CYCLE_ERROR': '周期异常',
         'OBSERVE_ONLY': '观察中', 'DATA_NOT_READY': '数据未就绪',
+        'INSUFFICIENT_15M_HISTORY': '等待15分钟K线预热',
+        'INSUFFICIENT_1H_HISTORY': '等待1小时K线预热',
+        'EXECUTION_NOT_IMPLEMENTED': '模拟执行未接通',
+        'E_NOT_INITIALIZED': '账户未初始化',
+        'INSUFFICIENT_15M_HISTORY': '\u7b49\u5f8515\u5206\u949fK\u7ebf\u9884\u70ed',
+        'INSUFFICIENT_1H_HISTORY': '\u7b49\u5f851\u5c0f\u65f6K\u7ebf\u9884\u70ed',
+        'EXECUTION_NOT_IMPLEMENTED': '\u6a21\u62df\u6267\u884c\u672a\u63a5\u901a',
+        'E_NOT_INITIALIZED': '\u8d26\u6237\u672a\u521d\u59cb\u5316',
         'SIGNAL_LONG': '待开多', 'SIGNAL_SHORT': '待开空',
         'CLOSE_STOP': '止损平仓', 'CLOSE_TARGET': '止盈平仓',
-        'CLOSE_TIME': '到时平仓', 'CENSOR_POSITION_AT_GAP': '缺口删失',
-        'WAIT_FOR_C_NEXT_OPEN': '等待C下一笔开仓', 'MIRROR_OPEN': '反向镜像开仓',
-        'MIRROR_CLOSE': '同步平仓', 'MIRROR_PARTIAL_CLOSE': '同步部分平仓',
-        'MIRROR_RISK_EXIT': '镜像风控紧急退出', 'C_EVENT_REJECTED': '跟单被拒绝',
-    }.get(action, action if action is not None else '—')
+        'CLOSE_TIME': '到时平仓', 'CENSOR_POSITION_AT_GAP': '数据缺口，仓位已截断',
+        'WAIT_FOR_C_NEXT_OPEN': '等待C下一笔开仓', 'PAIR_CLOSED': '同步平仓', 'MIRROR_OPEN': '反向镜像开仓',
+        'REVERSE_MIRROR_OPEN': '反向镜像开仓', 'MIRROR_CLOSE': '同步平仓',
+        'MIRROR_PARTIAL_CLOSE': '同步部分平仓', 'MIRROR_RISK_EXIT': '镜像风控紧急退出',
+        'BLOCKED_GAP_RECONCILIATION_REQUIRED': '持仓周期缺口待对账',
+        'BLOCKED_GAP_RECONCILED_AWAITING_NATURAL_CYCLE': '缺口已核对，等待周期',
+        'BLOCKED:QUOTE_UNAVAILABLE_OR_STALE': '报价不可用或已过期',
+        'D_RAW_QUOTE_INVALID': '保护：原始报价无效',
+        'C_EVENT_REJECTED': '跟单被拒绝', 'WAIT_STOP_DIST': '等待止损距离条件',
+        'WAIT_STOP_DISTANCE': '等待止损距离条件', 'WAIT_TRIGGER': '等待触发条件',
+        'WAIT_ENTRY': '等待开仓条件', 'WAIT_NEXT_BAR': '等待下一根K线',
+    }
+    if code in labels:
+        return labels[code]
+    if code.startswith('WAIT_STOP_DIST'):
+        return '等待止损距离条件'
+    if code.startswith('WAIT_'):
+        return '等待条件满足'
+    if raw.isascii() and any(char.isalpha() for char in raw):
+        if any(token in code for token in ('ERROR', 'FAILED', 'FAULT', 'INVALID')):
+            return '需检查'
+        return '需检查'
+    return raw
+
+
+def leverage_label(value, position_state=None):
+    state = str(position_state or '').strip().upper()
+    if state in ('FLAT', 'NONE', 'EMPTY'):
+        return '\u7a7a\u4ed3'
+    if state in ('PENDING', 'PENDING_LONG', 'PENDING_SHORT'):
+        return '\u5f85\u5f00\u4ed3'
+    if value is None or str(value).strip() in ('', '\u2014', '-', '\u672a\u77e5'):
+        return '\u672a\u77e5'
+    raw = str(value).strip().lower().removesuffix('x').strip()
+    try:
+        leverage = Decimal(raw)
+        if not leverage.is_finite() or leverage <= 0:
+            return '\u672a\u77e5'
+        return f'{leverage:.2f}x'
+    except (InvalidOperation, TypeError, ValueError):
+        return '\u672a\u77e5'
 
 
 def position_details(account):
     if account.get('state') == 'FLAT':
-        return '0.00', '—'
+        return '0.00', leverage_label(None, 'FLAT')
     try:
         position = account.get('position_json') or account.get('position')
         if isinstance(position, str): position = json.loads(position)
@@ -481,14 +611,14 @@ def position_details(account):
         quantity, price = Decimal(str(position['quantity'])), Decimal(str(position['entry_price']))
         if not quantity.is_finite() or not price.is_finite() or quantity <= 0 or price <= 0: return '—', '—'
         leverage = position.get('leverage') or account.get('leverage')
-        return f'{quantity * price:.2f}', f'{leverage}x' if leverage is not None else '—'
+        return f'{quantity * price:.2f}', leverage_label(leverage, 'OPEN')
     except (KeyError, TypeError, ValueError, InvalidOperation):
         return '—', '—'
 
 
-def fetch(path, port=8011):
+def fetch(path, port=8012):
     with OPENER.open(f'http://127.0.0.1:{port}{path}', timeout=5) as response:
-        return json.load(response) if port == 8011 else response.status
+        return json.load(response) if port == 8012 else response.status
 
 
 def trade_fills(agent, account='formal'):
@@ -837,7 +967,7 @@ def account_detail_metrics(strategy_id, row, account, fills):
         'stop': _detail_number((position or {}).get('stop_price') or (position or {}).get('stop'), 2),
         'target': _detail_number((position or {}).get('target_price') or (position or {}).get('target'), 2),
         'bars': f'{bars_held}/{max_bars} 根' if bars_held is not None else '—',
-        'leverage': row.get('leverage') or (position or {}).get('leverage') or '—',
+        'leverage': leverage_label(row.get('leverage') or (position or {}).get('leverage'), direction),
         'cycle': row.get('cycle') or row.get('last_cycle') or '—',
         'action': row.get('action') or row.get('last_action') or '—',
         'error': row.get('last_error') or row.get('error') or account.get('last_error') or '无',
@@ -924,6 +1054,8 @@ def cumulative_fees(fills):
 
 
 def d_control_state(status):
+    if status.get('enabled') is False or status.get('status') == 'PAUSED':
+        return 'PAUSED'
     if status.get('status') == 'AUTO_PAPER':
         return 'RUNNING' if status.get('execution_ready') is True else 'PROTECTION_UNCERTAIN'
     if status.get('status') == 'PROTECTION_UNCERTAIN':
@@ -931,6 +1063,14 @@ def d_control_state(status):
     if status.get('status') == 'OBSERVE_ONLY':
         return 'OBSERVE_ONLY'
     return 'UNKNOWN'
+
+
+def e_control_state(formal, runtime, configured_control):
+    if not isinstance(formal, dict) or formal.get('status') != 'READY':
+        return 'E_NOT_INITIALIZED'
+    if not isinstance(runtime, dict) or runtime.get('mode') != 'AUTO_PAPER':
+        return 'E_OBSERVE_ONLY'
+    return configured_control if configured_control in ('RUNNING', 'PAUSED', 'PAUSING') else 'UNKNOWN'
 
 
 def snapshot():
@@ -959,21 +1099,53 @@ def snapshot():
                 cycles = db.execute('select close_at,status from e_quant_cycles order by close_at desc limit 1').fetchall()
         finally:
             db.close()
-    decisions['E'] = {'state': (formal.get('account') or {}).get('state'), 'equity': formal.get('equity'),
-                      'realized': formal.get('realized_pnl'), 'unrealized': formal.get('unrealized_pnl'),
-                      'action': cycles[0][1] if cycles else None, 'cycle': cycles[0][0] if cycles else None}
+    e_status = formal.get('status') if isinstance(formal, dict) else None
+    e_runtime = e.get('runtime') if isinstance(e, dict) else None
+    e_observation_cycle = None
+    observation_db = ROOT / 'data/e-observations.sqlite3'
+    if observation_db.exists():
+        try:
+            with sqlite3.connect(observation_db.resolve().as_uri() + '?mode=ro', uri=True, timeout=3) as db:
+                if db.execute("select count(*) from sqlite_master where type='table' and name='e_observations'").fetchone()[0]:
+                    e_observation_cycle = db.execute('select close_at,status from e_observations order by close_at desc limit 1').fetchone()
+        except sqlite3.Error:
+            e_observation_cycle = None
+    if e_status != 'READY':
+        e_action = 'E_NOT_INITIALIZED'
+    elif cycles:
+        e_action = cycles[0][1]
+    elif e_observation_cycle:
+        e_action = e_observation_cycle[1]
+    else:
+        e_action = 'WAIT_NEXT_BAR'
+    decisions['E'] = {'state': (formal.get('account') or {}).get('state') if isinstance(formal, dict) else None,
+                      'equity': formal.get('equity') if isinstance(formal, dict) else None,
+                      'realized': formal.get('realized_pnl') if isinstance(formal, dict) else None,
+                      'unrealized': formal.get('unrealized_pnl') if isinstance(formal, dict) else None,
+                      'action': e_action,
+                      'cycle': cycles[0][0] if cycles else e_observation_cycle[0] if e_observation_cycle else None}
     decisions['E']['amount'], decisions['E']['leverage'] = position_details(formal.get('account') or {})
     decisions['E']['fees'] = cumulative_fees(formal.get('fills')) if formal.get('status') == 'READY' else None
-    for agent, row in decisions.items(): row['control'] = controls.get(agent, {}).get('state', 'UNKNOWN')
+    for agent, row in decisions.items():
+        configured_control = controls.get(agent, {}).get('state', 'UNKNOWN')
+        row['control'] = e_control_state(formal, e_runtime, configured_control) if agent == 'E' else configured_control
     try:
         d_status = fetch('/api/v1/d/status')
         d_account = d_status.get('account') or {}
         d_decision = d_status.get('decision') or {}
+        d_reason = d_decision.get('reason') or d_status.get('reason')
+        d_action = d_reason if d_decision.get('action') == 'DATA_NOT_READY' else (d_decision.get('action') or d_reason or 'WAIT')
+        d_control = d_control_state(d_status)
+        if d_control == 'PROTECTION_UNCERTAIN' and d_status.get('reason'):
+            d_action = d_status['reason']
+        if d_status.get('status') == 'OBSERVE_ONLY' and d_status.get('execution_ready') is not True:
+            d_control = 'D_OBSERVE_ONLY'
         decisions['D'] = {
             'state': d_account.get('state'), 'equity': d_status.get('equity'),
             'realized': d_status.get('realized_pnl'), 'unrealized': d_status.get('unrealized_pnl'),
-            'action': d_decision.get('action') or d_status.get('reason') or d_status.get('status'),
-            'cycle': d_decision.get('candle_close'), 'control': d_control_state(d_status),
+            'action': d_action,
+            'cycle': d_decision.get('candle_close'), 'control': d_control,
+            'enabled': d_status.get('enabled') is True,
             'fees': cumulative_fees(d_status.get('fills')) if d_status.get('account') is not None else None,
         }
         decisions['D']['amount'], decisions['D']['leverage'] = position_details(d_account)
@@ -995,145 +1167,95 @@ def snapshot():
         g_error = None
     except Exception as exc:
         g_status, g_error = None, str(exc)
-    return system, console_rows(decisions, pa_items, pa_error, g_status, g_error)
+    return system, console_rows(decisions, pa_items, pa_error, g_status, g_error,
+                                confirmed_cycle=system.get('last_candle_at'))
+
+
+def _tracked_pid(name):
+    path = ROOT / '.run' / f'{name}.pid'
+    try:
+        return int(path.read_text(encoding='ascii').strip())
+    except (OSError, ValueError):
+        return None
+
+
+def _tracked_process_info(name):
+    pid = _tracked_pid(name)
+    pid_path = ROOT / '.run' / f'{name}.pid'
+    if pid is None or not pid_path.exists():
+        return None
+    command = (
+        f"$p=Get-Process -Id {pid} -ErrorAction SilentlyContinue; "
+        "if($p){[pscustomobject]@{pid=$p.Id;name=$p.ProcessName;started=$p.StartTime.ToUniversalTime().ToString('o')}|ConvertTo-Json -Compress}"
+    )
+    try:
+        raw = subprocess.check_output(
+            ['powershell.exe', '-NoProfile', '-Command', command],
+            creationflags=NO_WINDOW, timeout=10, stderr=subprocess.DEVNULL,
+        ).decode('utf-8-sig').strip()
+        if not raw:
+            return None
+        info = json.loads(raw)
+        started = datetime.fromisoformat(info['started'].replace('Z', '+00:00')).timestamp()
+        if int(info['pid']) != pid or abs(pid_path.stat().st_mtime - started) > 180:
+            return None
+        info['pid'] = pid
+        return info
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+        return None
 
 
 def listeners():
-    command = "Get-NetTCPConnection -State Listen -LocalPort 8011,5174 -ErrorAction SilentlyContinue | ForEach-Object { $p=Get-CimInstance Win32_Process -Filter \"ProcessId=$($_.OwningProcess)\"; [pscustomobject]@{port=$_.LocalPort;pid=$p.ProcessId;exe=$p.ExecutablePath;cmd=$p.CommandLine} } | ConvertTo-Json -Compress; exit 0"
-    raw = subprocess.check_output(['powershell.exe', '-NoProfile', '-Command', command], creationflags=NO_WINDOW, timeout=20)
-    result = json.loads(raw.decode('utf-8-sig') or '[]')
-    return result if isinstance(result, list) else [result]
+    active = []
+    probes = (
+        ('backend', 8012, lambda: fetch('/api/v1/health').get('status') == 'ok'),
+        ('frontend', 5175, lambda: fetch('/', 5175) == 200),
+    )
+    for name, port, probe in probes:
+        try:
+            if not probe():
+                continue
+        except Exception:
+            continue
+        pid = _tracked_pid(name)
+        active.append({'port': port, 'pid': pid,
+                       'exe': 'python' if name == 'backend' else 'node', 'cmd': name})
+    return active
 
 
 def recover():
-    ports = listeners()
-    for p in ports:
-        if p['port'] == 8011 and not str(p.get('exe') or '').lower().startswith(str(ROOT).lower() + '\\'):
-            raise RuntimeError('8011 被非本仓进程占用，已停止操作')
-        if p['port'] == 5174 and str(ROOT / 'frontend').lower() not in str(p.get('cmd') or '').lower():
-            raise RuntimeError('5174 被非本仓前端占用，已停止操作')
-    active = {p['port'] for p in ports}
-    if 8011 in active:
-        health = fetch('/api/v1/health')
-        if health.get('status') != 'ok' or health.get('live_trading_disabled') is not True:
-            raise RuntimeError('现有后端健康或身份检查未通过，未重启')
-    if 8011 not in active:
-        check = "@(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'uvicorn backend\\.app:app' }).Count"
-        count = subprocess.check_output(['powershell.exe', '-NoProfile', '-Command', check], creationflags=NO_WINDOW, text=True, timeout=20).strip()
-        if int(count) != 0:
-            raise RuntimeError('检测到未监听的后端进程，未重复启动')
-        from backend.market import _StreamLease
-        held = []
-        try:
-            for name in ('paper-scheduler.lock', 'alpaca-stream.lock'):
-                lease = _StreamLease(ROOT / '.run' / name)
-                if not lease.acquire():
-                    raise RuntimeError('运行锁被占用：' + name)
-                held.append(lease)
-            backup = ROOT / 'logs' / ('quick-recovery-' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ'))
-            backup.mkdir(parents=True)
-            for rel, name in [('data/paper.sqlite3', 'paper.sqlite3'), ('data/e/formal.sqlite3', 'e-formal.sqlite3'), ('data/e/shadow.sqlite3', 'e-shadow.sqlite3')]:
-                path = ROOT / rel
-                if not path.exists():
-                    raise RuntimeError('账本缺失：' + rel)
-                source = sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True, timeout=10)
-                try:
-                    if source.execute('pragma quick_check').fetchone()[0] != 'ok':
-                        raise RuntimeError('账本完整性检查失败：' + rel)
-                    if rel == 'data/paper.sqlite3':
-                        if source.execute("select count(*) from scheduler_cycles where status='RUNNING'").fetchone()[0]:
-                            raise RuntimeError('存在未完成周期，请检查后恢复')
-                        if source.execute("select count(*) from decisions where outcome in ('PENDING','PENDING_EXECUTION')").fetchone()[0]:
-                            raise RuntimeError('存在未完成决策，请检查后恢复')
-                    dest = sqlite3.connect(backup / name)
-                    try:
-                        source.backup(dest)
-                        if dest.execute('pragma quick_check').fetchone()[0] != 'ok':
-                            raise RuntimeError('备份校验失败：' + rel)
-                    finally:
-                        dest.close()
-                finally:
-                    source.close()
-        finally:
-            for lease in reversed(held):
-                lease.release()
-        if json.loads((ROOT / 'data/formal-mode.json').read_text(encoding='utf-8-sig')).get('mode') != 'RULE_DRIVEN':
-            raise RuntimeError('正式纸盘模式不是 RULE_DRIVEN，未启动')
-        env = os.environ.copy()
-        env.update(PAPER_AUTOMATION_ENABLED='true', VISION_ENABLED='false', VISION_CALLS_AUTHORIZED='false',
-                   VISION_MAX_CALLS_PER_UTC_DAY='0', VISION_MAX_CALL_COST_USD='0', VISION_DAILY_BUDGET_USD='0',
-                   BTC_REQUIRE_STARTUP_MONITOR='true', ALPACA_CREDENTIALS_FILE=str(ROOT / 'data/alpaca-market-new.env'))
-        stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
-        with (ROOT / 'logs' / ('quick-backend-' + stamp + '.log')).open('ab') as out, (ROOT / 'logs' / ('quick-backend-error-' + stamp + '.log')).open('ab') as err:
-            proc = subprocess.Popen([str(ROOT / '.venv/Scripts/python.exe'), '-m', 'uvicorn', 'backend.app:app', '--host', '127.0.0.1', '--port', '8011'], cwd=ROOT, env=env, stdout=out, stderr=err, creationflags=NO_WINDOW)
-        (ROOT / '.run/backend.pid').write_text(str(proc.pid), encoding='ascii')
-        for _ in range(40):
-            try:
-                if fetch('/api/v1/health').get('status') == 'ok':
-                    break
-            except Exception:
-                time.sleep(0.5)
-        else:
-            raise RuntimeError('后端启动后健康检查超时，请检查日志')
-    if 5174 not in active:
-        node = subprocess.check_output(['where.exe', 'node.exe'], creationflags=NO_WINDOW, text=True).splitlines()[0]
-        stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
-        env = os.environ.copy(); env['VITE_API_BASE'] = 'http://127.0.0.1:8011/api/v1'
-        with (ROOT / 'logs' / ('quick-frontend-' + stamp + '.log')).open('ab') as out, (ROOT / 'logs' / ('quick-frontend-error-' + stamp + '.log')).open('ab') as err:
-            proc = subprocess.Popen([node, str(ROOT / 'frontend/node_modules/vite/bin/vite.js'), '--host', '127.0.0.1', '--port', '5174'], cwd=ROOT / 'frontend', env=env, stdout=out, stderr=err, creationflags=NO_WINDOW)
-        (ROOT / '.run/frontend.pid').write_text(str(proc.pid), encoding='ascii')
-        for _ in range(30):
-            try:
-                if fetch('/', 5174) == 200:
-                    break
-            except Exception:
-                time.sleep(0.5)
-        else:
-            raise RuntimeError('前端启动后检查超时，请检查日志')
-    return '服务已检查；已启动缺失的组件。'
-
+    """Use the same serialized, ownership-aware launcher as the desktop shortcut."""
+    launcher = ROOT / 'scripts' / 'start_lab.ps1'
+    result = subprocess.run(
+        ['powershell.exe', '-NoProfile', '-NonInteractive', '-File', str(launcher)],
+        cwd=ROOT, capture_output=True, text=True, creationflags=NO_WINDOW, timeout=120,
+    )
+    if result.returncode != 0:
+        raise RuntimeError('V3 启动失败：' + (result.stderr or result.stdout or '请检查日志').strip())
+    return '后端8012和前端5175均已运行，未重复启动'
 
 def node_label():
-    current = ROOT / 'data/alpaca-market-new.env'
-    for number, name in ((1, 'alpaca-market-node1.env'), (2, 'alpaca-market-before-replacement.env')):
-        path = ROOT / 'data' / name
-        if path.exists() and current.read_bytes() == path.read_bytes():
-            return number
-    return 0
+    # This deployment uses Binance public market data. Do not infer Binance
+    # node state from archived Alpaca credential files.
+    return 1
 
 
 def switch_node(number):
-    source = ROOT / 'data' / ({1: 'alpaca-market-node1.env', 2: 'alpaca-market-before-replacement.env'}[number])
-    current = ROOT / 'data/alpaca-market-new.env'
-    from backend.market import load_market_credentials
-    if not load_market_credentials(source):
-        raise RuntimeError('目标节点凭据缺失或不完整')
-    for port in listeners():
-        if port['port'] == 8011 and not str(port.get('exe') or '').lower().startswith(str(ROOT).lower() + '\\'):
-            raise RuntimeError('后端不属于本仓，停止切换')
-        if port['port'] == 5174 and str(ROOT / 'frontend').lower() not in str(port.get('cmd') or '').lower():
-            raise RuntimeError('前端不属于本仓，停止切换')
-    subprocess.run(['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(ROOT / 'scripts/stop_lab.ps1')], cwd=ROOT, creationflags=NO_WINDOW, timeout=30, check=True, capture_output=True)
-    if listeners():
-        raise RuntimeError('端口仍在监听，请手动恢复服务')
-    temp = current.with_suffix('.tmp')
-    shutil.copyfile(source, temp)
-    os.replace(temp, current)
-    recover()
-    for _ in range(90):
-        status = fetch('/api/v1/system/status')
-        if status.get('websocket_recovery_state') == 'HEALTHY' and status.get('websocket_quote_health') == 'FRESH' and status.get('scheduler') == 'ENABLED_INTERNAL_PAPER':
-            return f'节点 {number} 已连接，实时行情正常。'
-        if status.get('websocket_recovery_state') == 'LONG_PROTECTION':
-            break
-        time.sleep(1)
-    raise RuntimeError(f'节点 {number} 已选择，但行情未恢复，请检查状态。')
+    if number == 1:
+        return 'V3 uses Binance public USDⓈ-M market data on node 1.'
+    if number == 2:
+        raise RuntimeError(
+            'Binance public-market backup node URL is not configured. '
+            'The supplied file contains API credentials, not a REST/WebSocket endpoint. '
+            'Legacy Alpaca node profiles are not used by this deployment.'
+        )
+    raise ValueError('Unsupported Binance market node.')
 
 
 def api_json(path, method='GET', payload=None, raw=None):
     data=raw if raw is not None else (json.dumps(payload,ensure_ascii=False).encode('utf-8') if payload is not None else None)
     headers={'Content-Type':'application/json'} if data is not None else {}
-    request=urllib.request.Request(f'http://127.0.0.1:8011{path}',data=data,headers=headers,method=method)
+    request=urllib.request.Request(f'http://127.0.0.1:8012{path}',data=data,headers=headers,method=method)
     try:
         with OPENER.open(request,timeout=15) as response:return json.load(response)
     except urllib.error.HTTPError as exc:
@@ -1168,7 +1290,7 @@ def open_strategy_pool(root):
                 position=('做多 '+str(pos.get('qty')) if pos else '空仓')
                 version=item.get('active_version') or (pos or {}).get('version') or '—'
                 grid.insert('', 'end',iid=item['id'],values=(item['id'],version,status_text.get(item.get('status'),item.get('status')),
-                    position,item.get('position_amount','0'),(str(item.get('leverage'))+'x') if item.get('leverage') else '—',
+                    position,item.get('position_amount','0'),leverage_label(item.get('leverage'), item.get('position_direction')),
                     item.get('equity','—'),item.get('realized','0'),item.get('unrealized','0'),item.get('fees','0'),item.get('action','—'),item.get('last_cycle') or '—'))
             info.set(f'共 {len(items)} 条策略。暂停只阻止新开仓；已有仓位仍由开仓版本管理，并继续由共享新鲜报价止损。')
         except Exception as exc:info.set('读取策略池失败：'+str(exc))
@@ -1799,21 +1921,24 @@ def open_strategy_details(root, strategy_id, row):
                         bg='#111827', fg='#64748b', font=('Microsoft YaHei UI', 8), anchor='w', wraplength=680)
         foot.pack(fill='x', padx=14, pady=(0, 10))
         def choose_day(day):
-            selected_date['value'] = day; render_calendar()
+            selected_date['value'] = day
+            month.update(year=day.year, month=day.month)
+            render_calendar()
+
+        def show_day(day):
             date_key = day.isoformat(); entry = day_details.get(date_key)
             for iid in day_grid.get_children(): day_grid.delete(iid)
             day_fill_map.clear()
+            event_detail_var.set('选择下方成交可查看原始账本字段。')
+            day_fills = calendar_data['transaction_fills'].get(date_key, [])
             if not entry:
-                day_fills = calendar_data['transaction_fills'].get(date_key, [])
-                selected_summary.set(f"{date_key}｜" + ('有成交但无已实现平仓盈亏；浮动盈亏不计。' if day_fills else '无成交记录；当日已实现净盈亏：—'))
-                for idx, fill in enumerate(sorted(day_fills, key=lambda f: str(f.get('occurred_at') or f.get('created_at') or f.get('cycle') or ''))):
-                    values = detail_fill_values(fill); iid = str(idx); day_fill_map[iid] = fill
-                    day_grid.insert('', 'end', iid=iid, values=(values[0], values[1], values[3], values[4], values[5], values[6], values[9], values[10]))
-                return
-            summary_text = (f"{date_key}｜已实现净盈亏：{entry['net']:+,.2f} USD｜完整闭合交易：{entry.get('closed_count',0)}｜"
-                            f"盈利：{entry.get('wins',0)}｜亏损：{entry.get('losses',0)}｜手续费（归属平仓日）：{entry['fees']:,.2f} USD")
-            selected_summary.set(summary_text)
-            source_fills = sorted(entry['fill_events'], key=lambda f: str(f.get('occurred_at') or f.get('cycle') or f.get('created_at') or ''))
+                selected_summary.set(f"{date_key}｜" + ('有成交；无可确认的已实现净盈亏。' if day_fills else '无成交记录；当日已实现净盈亏：—'))
+            else:
+                selected_summary.set(
+                    f"{date_key}｜已实现净盈亏：{entry['net']:+,.2f} USD｜完整闭合交易：{entry.get('closed_count',0)}｜"
+                    f"盈利：{entry.get('wins',0)}｜亏损：{entry.get('losses',0)}｜手续费（归属平仓日）：{entry['fees']:,.2f} USD"
+                )
+            source_fills = sorted(day_fills, key=_calendar_timestamp)
             for idx, fill in enumerate(source_fills):
                 values = detail_fill_values(fill)
                 iid = str(idx); day_fill_map[iid] = fill
@@ -1876,9 +2001,11 @@ def open_strategy_details(root, strategy_id, row):
             else:
                 foot.configure(text='净盈亏 = 实际执行价差 − 开仓及平仓手续费；成交价已包含滑点，滑点不重复扣除。未平仓浮盈不计。')
             if selected_date['value'] and selected_date['value'].year == year and selected_date['value'].month == mon:
-                choose_day(selected_date['value'])
+                show_day(selected_date['value'])
             else:
                 for iid in day_grid.get_children(): day_grid.delete(iid)
+                day_fill_map.clear()
+                event_detail_var.set('选择下方成交可查看原始账本字段。')
                 selected_summary.set('点击日期查看当日真实成交与已实现盈亏。')
         render_calendar()
 
@@ -2080,15 +2207,15 @@ def main():
         def set_enabled(value): state['enabled'] = bool(value); draw()
         def enter(event): state['hover'] = True; draw()
         def leave(event): state['hover'] = False; state['pressed'] = False; draw()
-        def press(event):
-            if state['enabled']:
-                state['pressed'] = True; draw()
-        def release(event):
-            invoke = state['enabled'] and state['pressed'] and 0 <= event.x <= width and 0 <= event.y <= 38
+        def activate(event):
+            if not state['enabled']:
+                return
+            state['pressed'] = True; draw()
             state['pressed'] = False; draw()
-            if invoke and command: command()
+            if command:
+                command()
         canvas.bind('<Configure>', draw); canvas.bind('<Enter>', enter); canvas.bind('<Leave>', leave)
-        canvas.bind('<ButtonPress-1>', press); canvas.bind('<ButtonRelease-1>', release)
+        canvas.bind('<Button-1>', activate)
         canvas.set_text = set_text; canvas.set_kind = set_kind; canvas.set_enabled = set_enabled
         return canvas
 
@@ -2111,7 +2238,7 @@ def main():
               font=('Microsoft YaHei UI', 9)).pack(side='left', padx=(13, 5))
     status_combo = ttk.Combobox(filterbar, textvariable=status_filter, state='readonly', width=15,
                                 style='Light.TCombobox', font=('Microsoft YaHei UI', 9),
-                                values=('全部状态', '运行中', '等待C开仓', '已启用待周期', '已暂停', '未启用', '观察中', '保护待确认', '异常', '故障', '数据过期', '读取失败', '未知'))
+                                values=('全部状态', '运行中', '等待C开仓', '已启用待周期', '周期滞后', '已暂停', '未启用', '观察中', '保护待确认', '异常', '故障', '数据过期', '读取失败', '未知'))
     status_combo.pack(side='left'); status_combo.bind('<<ComboboxSelected>>', lambda event: render_rows())
     ttk.Label(filterbar, text='搜索', background='white', foreground='#64748b',
               font=('Microsoft YaHei UI', 9)).pack(side='left', padx=(13, 5))
@@ -2129,8 +2256,8 @@ def main():
     table_frame = tk.Frame(content, bg='white'); table_frame.grid(row=1, column=0, sticky='ew', padx=9, pady=(0, 9))
     table_frame.grid_rowconfigure(0, weight=1); table_frame.grid_columnconfigure(0, weight=1)
     table = ttk.Treeview(table_frame, columns=cols, show='headings', height=8, style='Strategy.Treeview')
-    titles = ('启停', '策略ID', '策略名称', '状态', '持仓', '持仓金额', '杠杆', '权益', '已实现盈亏', '未实现盈亏', '手续费', '最近动作', '周期时间（本地）', '策略详情')
-    widths = (72, 68, 125, 100, 55, 92, 58, 86, 90, 90, 78, 105, 128, 82)
+    titles = ('启停', '策略ID', '策略名称', '状态', '持仓', '持仓金额', '杠杆', '权益', '已实现盈亏', '未实现盈亏', '手续费', '最近动作', '处理周期 / 同步时间（本地）', '策略详情')
+    widths = (72, 68, 125, 100, 55, 92, 58, 86, 90, 90, 78, 146, 204, 82)
     for col, title, col_width in zip(cols, titles, widths):
         table.heading(col, text=title)
         table.column(col, width=col_width, minwidth=40 if col not in ('name', 'action', 'cycle') else 70,
@@ -2171,9 +2298,9 @@ def main():
             stripe = 'stripe-even' if index % 2 == 0 else 'stripe-odd'
             row_stripes[row_id] = stripe
             vals = ('', view['strategy_id'], view['name'], '', view['position'],
-                    row.get('amount') or '0.00', row.get('leverage') or '—', money_label(row.get('equity')),
+                    row.get('amount') or '0.00', row.get('leverage') or '\u672a\u77e5', money_label(row.get('equity')),
                     '', '',
-                    money_label(row.get('fees')), view['action'], row.get('cycle') or '—', '')
+                    money_label(row.get('fees')), view['action'], cycle_display(row), '')
             table.insert('', 'end', iid=row_id, tags=(stripe,), values=vals)
         root.after_idle(draw_overlays)
         summary = console_summary(rows)
@@ -2316,20 +2443,28 @@ def main():
     table.bind('<Leave>', update_hover_from_pointer)
     table.bind('<<TreeviewSelect>>', lambda event: root.after_idle(draw_overlays))
 
+    refreshing = {'value': False}
     def refresh():
+        if refreshing['value']:
+            return
+        refreshing['value'] = True
+        status.set('\u6b63\u5728\u5237\u65b0\u72b6\u6001\u2026')
+        status_label.configure(fg='#2563eb')
         def worker():
             try:
                 s, rows = snapshot()
                 rows = keep_cached_rows(cached_rows['value'], rows)
-                try: front = fetch('/', 5174)
+                try: front = fetch('/', 5175)
                 except Exception: front = '不可用'
                 node = node_label()
                 def show():
+                    updated = datetime.now().strftime('%H:%M:%S')
                     state_snapshot.update({'system': s, 'front': front, 'node': node,
-                                           'updated': datetime.now().strftime('%H:%M:%S')})
+                                           'updated': updated})
                     draw_system_bar()
-                    status.set('')
-                    status_label.configure(fg='#64748b')
+                    status.set(f'\u72b6\u6001\u5df2\u66f4\u65b0 \u00b7 {updated}')
+                    status_label.configure(fg='#166534')
+                    refreshing['value'] = False
                     cached_rows['value'] = rows
                     controls.clear()
                     table.state(['!disabled'])
@@ -2341,6 +2476,7 @@ def main():
                 def failed():
                     status.set(f"状态读取失败 · 保留上次成功数据（{datetime.now().strftime('%H:%M:%S')}）：{msg}")
                     status_label.configure(fg='#b42318')
+                    refreshing['value'] = False
                 root.after(0, failed)
         threading.Thread(target=worker, daemon=True).start()
     def launch():
@@ -2363,11 +2499,20 @@ def main():
             try:
                 ports = listeners()
                 for p in ports:
-                    if p['port'] == 8011 and not str(p.get('exe') or '').lower().startswith(str(ROOT).lower() + '\\'):
-                        raise RuntimeError('8011 被非本仓进程占用，未停止')
-                    if p['port'] == 5174 and str(ROOT / 'frontend').lower() not in str(p.get('cmd') or '').lower():
-                        raise RuntimeError('5174 被非本仓前端占用，未停止')
-                subprocess.run(['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(ROOT / 'scripts/stop_lab.ps1')], cwd=ROOT, creationflags=NO_WINDOW, timeout=30, check=True, capture_output=True)
+                    if p['port'] == 8012 and (p.get('pid') != _tracked_pid('backend') or str(p.get('exe') or '').lower() != 'python'):
+                        raise RuntimeError('8012由非V3进程占用，未停止')
+                    if p['port'] == 5175 and (p.get('pid') != _tracked_pid('frontend') or str(p.get('exe') or '').lower() != 'node'):
+                        raise RuntimeError('5175由非V3前端进程占用，未停止')
+                stopped = subprocess.run(
+                    ['powershell.exe', '-NoProfile', '-File', str(ROOT / 'scripts/stop_lab.ps1')],
+                    cwd=ROOT, creationflags=NO_WINDOW, timeout=45,
+                    capture_output=True, text=True, encoding='utf-8', errors='replace',
+                )
+                if stopped.returncode != 0:
+                    detail = (stopped.stderr or stopped.stdout or '').strip()
+                    if not detail:
+                        detail = f'停止脚本退出码：{stopped.returncode}'
+                    raise RuntimeError(detail[-1200:])
                 for _ in range(20):
                     if not listeners(): break
                     time.sleep(0.5)
@@ -2386,6 +2531,29 @@ def main():
         threading.Thread(target=worker, daemon=True).start()
     def strategy_click(agent):
         row = controls.get(agent)
+        if agent == 'D':
+            if not row or busy['value']:
+                return
+            enabled = bool(row.get('enabled'))
+            title = '暂停D策略' if enabled else '启动D策略'
+            action = ('停止新增开仓，并继续监控已有持仓退出' if enabled
+                      else '允许D策略从后续自然周期开始判断和模拟开仓')
+            if not messagebox.askyesno(title, f'D策略：{action}。确定继续？'):
+                return
+            busy['value'] = True
+            def d_worker():
+                try:
+                    result = set_d_enabled(not enabled)
+                    if result.get('enabled') is not (not enabled):
+                        raise RuntimeError('D策略状态未能确认，请刷新状态')
+                    msg = 'D策略已启动' if not enabled else 'D策略已暂停；已有持仓继续监控退出'
+                    root.after(0, lambda: messagebox.showinfo('D策略控制', msg))
+                except Exception as exc:
+                    msg = str(exc); root.after(0, lambda: messagebox.showerror('操作未完成', msg))
+                finally:
+                    busy['value'] = False; root.after(0, refresh)
+            threading.Thread(target=d_worker, daemon=True).start()
+            return
         if agent in PA_STRATEGY_IDS:
             if not row or row.get('status_label') in ('读取失败', '数据过期', '未登记') or busy['value']:
                 return
@@ -2420,7 +2588,7 @@ def main():
                 latest = fetch('/api/v1/strategy-control').get(agent, {}).get('state')
                 if latest != current:
                     raise RuntimeError('策略状态已变化，请刷新后重试')
-                req = urllib.request.Request(f'http://127.0.0.1:8011/api/v1/strategy-control/{agent}/{action}', method='POST')
+                req = urllib.request.Request(f'http://127.0.0.1:8012/api/v1/strategy-control/{agent}/{action}', method='POST')
                 with OPENER.open(req, timeout=30) as response: result = json.load(response)
                 msg = f"{agent} 状态：{result.get('state')}；正式：{result.get('formal')}；影子：{result.get('shadow')}"
                 root.after(0, lambda: messagebox.showinfo('策略控制', msg))
@@ -2473,32 +2641,45 @@ def main():
     make_canvas_button(button_group, '暂停前后端', pause, 154, 'secondary', 'pause').pack(side='left', padx=5)
     node_buttons = {}
     def choose_node(number):
-        if busy['value']:
+        if number == 1:
+            messagebox.showinfo('行情节点', '当前使用 Binance USDⓈ-M BTCUSDT 公开行情节点1。')
             return
-        if number == node_label():
-            messagebox.showinfo('行情节点', f'当前已选择节点 {number}。')
-            return
-        if not messagebox.askyesno('切换行情节点', f'切换至节点 {number} 将短暂重启前后端，期间持仓止损监控中断。继续吗？'):
-            return
-        busy['value'] = True
-        status.set(f'正在切换节点 {number}…')
-        def worker():
-            try:
-                result = switch_node(number)
-                root.after(0, lambda: messagebox.showinfo('行情节点', result))
-            except Exception as exc:
-                message = str(exc)
-                root.after(0, lambda: messagebox.showerror('切换未完成', message))
-            finally:
-                busy['value'] = False
-                root.after(0, refresh)
-        threading.Thread(target=worker, daemon=True).start()
+        messagebox.showwarning(
+            '备用行情节点未配置',
+            'V3部署副本没有第二个Binance REST/WebSocket节点地址；配置前不会切换旧Alpaca凭证或中断当前服务。',
+        )
+    node_buttons[1] = make_canvas_button(button_group, '节点 1', lambda: choose_node(1), 83, 'segment')
+    node_buttons[2] = make_canvas_button(button_group, '备用未配置', lambda: choose_node(2), 110, 'segment')
+    node_buttons[1] = make_canvas_button(button_group, '节点 1', lambda: choose_node(1), 83, 'segment')
+    node_buttons[2] = make_canvas_button(button_group, '备用未配置', lambda: choose_node(2), 110, 'segment')
     node_buttons[1] = make_canvas_button(button_group, '节点 1', lambda: choose_node(1), 83, 'segment')
     node_buttons[2] = make_canvas_button(button_group, '节点 2', lambda: choose_node(2), 83, 'segment')
     node_buttons[1].pack(side='left', padx=(12, 2)); node_buttons[2].pack(side='left', padx=2)
     make_canvas_button(button_group, '策略池', lambda: open_strategy_pool(root), 112, 'outline', 'pool').pack(side='left', padx=5)
+    make_canvas_button(button_group, '策略研究', lambda: __import__('scripts.research_v2_window', fromlist=['open_research_center']).open_research_center(root), 116, 'outline', 'pool').pack(side='left', padx=5)
     make_canvas_button(button_group, '刷新状态', refresh, 126, 'outline', 'refresh').pack(side='left', padx=5)
-    make_canvas_button(button_group, '打开前端', lambda: os.startfile('http://127.0.0.1:5174/'), 124, 'outline', 'external').pack(side='left', padx=5)
+    make_canvas_button(button_group, '打开K线', lambda: __import__('scripts.kline_window',fromlist=['open_kline']).open_kline(root), 124, 'outline', 'external').pack(side='left', padx=5)
+    def live_paper_rows():
+        import sqlite3
+        from contextlib import closing
+        data = Path(__file__).resolve().parents[1] / 'data'
+        ids = set(cached_rows['value'])
+        for filename, query in (
+            ('paper.sqlite3','SELECT agent FROM accounts'),
+            ('strategy-pool.sqlite3','SELECT id FROM strategies WHERE archived_at IS NULL'),
+        ):
+            try:
+                with closing(sqlite3.connect((data/filename).as_uri()+'?mode=ro',uri=True)) as db:
+                    ids.update(row[0] for row in db.execute(query))
+            except sqlite3.Error:
+                continue
+        ids.update(path.stem for path in (data/'pa-v1-extensions').glob('PA-*.sqlite3'))
+        for strategy, ledger in (('D','d/trading.sqlite3'),('E','e/formal.sqlite3'),('G','g/mirror.sqlite3')):
+            if (data/ledger).is_file():
+                ids.add(strategy)
+        return {sid: dict(PA_STRATEGIES).get(sid,sid) for sid in sorted(ids)}
+
+    make_canvas_button(button_group, '实盘跟单', lambda: __import__('scripts.live_copy_window', fromlist=['main']).main(root, paper_rows=live_paper_rows), 108, 'primary', 'external').pack(side='left', padx=5)
     def refresh_node_buttons():
         selected = node_label()
         for number, button in node_buttons.items():
@@ -2524,7 +2705,7 @@ def main():
                                                     bool(os.getenv('BTC_LAB_BACKUP_SECONDARY')))
                 content = '\n'.join(f'{key}：{value}' for key, value in summary.items())
             except Exception as exc:
-                content = f'状态读取失败：{exc}\n本地数据保留；请检查8011及备份清单。'
+                content = f'状态读取失败：{exc}\n本地数据保留；请检查8012及备份清单。'
             def render():
                 if not popup.winfo_exists(): return
                 text.configure(state='normal'); text.delete('1.0', 'end'); text.insert('end', content); text.configure(state='disabled')
@@ -2544,3 +2725,4 @@ if __name__ == '__main__':
         s, rows = snapshot(); print(json.dumps({'scheduler': s.get('scheduler'), 'strategies': rows}, ensure_ascii=False))
     else:
         main()
+

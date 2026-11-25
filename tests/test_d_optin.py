@@ -11,6 +11,7 @@ from pathlib import Path
 from backend import app
 root = Path(os.environ['D_TEST_ROOT'])
 app.ROOT = root
+app.DATA_ROOT = root / 'data'
 app.formal_mode = 'RULE_DRIVEN'
 app.paper_automation_enabled = True
 os.environ.pop('D_AUTO_PAPER_ENABLED', None)

@@ -25,7 +25,7 @@ def test_shared_quote_monitor_prioritizes_liquidation_and_is_idempotent(tmp_path
         tmp_path / "test.sqlite", SimpleNamespace(ledger=ledger), c_maintenance_rate=D("0.005")
     )
     quote = {
-        "source": "ALPACA_US_BTCUSD_SPOT",
+        "source": "BINANCE_USDM_PERP",
         "age_ms": 0,
         "timestamp_valid": True,
         "bid": "70",
@@ -61,7 +61,7 @@ def test_stale_quote_never_triggers_exit_and_fresh_quote_triggers_stop(tmp_path)
         tmp_path / "test.sqlite", SimpleNamespace(ledger=ledger), c_maintenance_rate=D("0.005")
     )
     quote = {
-        "source": "ALPACA_US_BTCUSD_SPOT",
+        "source": "BINANCE_USDM_PERP",
         "age_ms": 60001,
         "timestamp_valid": True,
         "bid": "99.98",
@@ -84,7 +84,7 @@ def test_separate_c_pending_stops_have_distinct_recovery_keys(tmp_path):
         tmp_path / "test.sqlite", SimpleNamespace(ledger=ledger), c_maintenance_rate=D("0.005")
     )
     quote = {
-        "source": "ALPACA_US_BTCUSD_SPOT",
+        "source": "BINANCE_USDM_PERP",
         "age_ms": 0,
         "timestamp_valid": True,
         "bid": "100",
@@ -117,3 +117,4 @@ def test_separate_c_pending_stops_have_distinct_recovery_keys(tmp_path):
         assert scheduler.recover_stops(quote=quote, cost=CostModel())["C"]["accepted"]
         assert ledger.account("C")["state"] == "FLAT"
     assert len(ledger.fills("C")) == 4
+

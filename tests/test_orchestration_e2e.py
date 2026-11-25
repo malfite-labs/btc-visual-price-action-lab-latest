@@ -74,7 +74,7 @@ class SlowParallelAdapter(FakeVisionAdapter):
 
 def books():
     return {
-        "source": "ALPACA_US_BTCUSD_SPOT",
+        "source": "BINANCE_USDM_PERP",
         "age_ms": 20,
         "bids": [{"p": "99999", "s": "1"}],
         "asks": [{"p": "100001", "s": "1"}],
@@ -83,7 +83,7 @@ def books():
 
 def quote(bid="99999", ask="100001", age=20):
     return {
-        "source": "ALPACA_US_BTCUSD_SPOT",
+        "source": "BINANCE_USDM_PERP",
         "currency": "USD_RESEARCH",
         "bid": bid,
         "ask": ask,
@@ -452,3 +452,4 @@ def test_two_configured_agents_decide_concurrently_while_c_stays_blocked(tmp_pat
     assert result["A"]["status"] == result["B"]["status"] == "VALID"
     assert result["C"]["status"] == "STRATEGY_NOT_CONFIGURED"
     assert ledger.fills() == []
+

@@ -9,7 +9,7 @@ from backend.ledger import Ledger
 
 @pytest.mark.parametrize(("direction", "stop"), [("LONG", "99.9"), ("SHORT", "100.1")])
 def test_leveraged_preflight_rechecks_post_fill_risk_and_margin(direction, stop):
-    quote = {"source": "ALPACA_US_BTCUSD_SPOT", "bid": "100", "ask": "100"}
+    quote = {"source": "BINANCE_USDM_PERP", "bid": "100", "ask": "100"}
     book = {"bids": [{"p": "100", "s": "100"}], "asks": [{"p": "100", "s": "100"}]}
     result = prepare_entry(
         equity=D("1000"),
@@ -31,7 +31,7 @@ def test_leveraged_preflight_rechecks_post_fill_risk_and_margin(direction, stop)
 
 @pytest.mark.parametrize(("direction", "stop"), [("LONG", "99.9"), ("SHORT", "100.1")])
 def test_preflight_fill_commits_to_isolated_c_ledger(tmp_path, direction, stop):
-    quote = {"source": "ALPACA_US_BTCUSD_SPOT", "bid": "100", "ask": "100"}
+    quote = {"source": "BINANCE_USDM_PERP", "bid": "100", "ask": "100"}
     book = {"bids": [{"p": "100", "s": "1000"}], "asks": [{"p": "100", "s": "1000"}]}
     result = prepare_entry(
         equity=D("10000"),
@@ -64,7 +64,7 @@ def test_preflight_fill_commits_to_isolated_c_ledger(tmp_path, direction, stop):
 
 
 def test_preflight_rejects_long_stop_crossed_by_actual_fill():
-    quote = {"source": "ALPACA_US_BTCUSD_SPOT", "bid": "100", "ask": "100"}
+    quote = {"source": "BINANCE_USDM_PERP", "bid": "100", "ask": "100"}
     book = {"bids": [{"p": "99", "s": "100"}], "asks": [{"p": "99", "s": "100"}]}
     result = prepare_entry(
         equity=D("1000"),
@@ -79,3 +79,4 @@ def test_preflight_rejects_long_stop_crossed_by_actual_fill():
         leverage=D("5"),
     )
     assert not result["accepted"]
+

@@ -45,7 +45,7 @@ class TestOnlyPaperCycleRunner:
     def _fresh(quote: dict | None, book: dict | None, cost: CostModel) -> bool:
         return bool(
             quote
-            and quote.get("source") == "ALPACA_US_BTCUSD_SPOT"
+            and quote.get("source") == "BINANCE_USDM_PERP"
             and quote.get("currency") == "USD_RESEARCH"
             and quote.get("timestamp_valid", True) is True
             and 0 <= int(quote.get("age_ms", 10**9)) <= cost.max_quote_age_ms
@@ -378,3 +378,4 @@ class PaperCycleRunner(TestOnlyPaperCycleRunner):
             enable_c_5x=enable_c_5x,
             c_maintenance_rate=c_maintenance_rate,
         )
+

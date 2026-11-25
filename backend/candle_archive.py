@@ -18,7 +18,7 @@ class CandleArchive:
         for r in rows:
             try:
                 start=utc(r['open_at']);end=utc(r['close_at']);o,h,l,c=(Decimal(str(r[k])) for k in ('open','high','low','close'))
-                if r.get('symbol')!='BTC/USD' or str(r.get('interval','')).lower() not in ('15min','15m') or r.get('source')!='ALPACA_US_BTCUSD_SPOT' or r.get('currency')!='USD_RESEARCH' or r.get('is_closed') is not True or end>now or end-start!=timedelta(minutes=15) or start.minute%15 or start.second or start.microsecond or not all(x.is_finite() and x>0 for x in (o,h,l,c)) or l>min(o,c) or h<max(o,c):continue
+                if r.get('symbol')!='BTC/USD' or str(r.get('interval','')).lower() not in ('15min','15m') or r.get('source')!='BINANCE_USDM_PERP' or r.get('currency')!='USD_RESEARCH' or r.get('is_closed') is not True or end>now or end-start!=timedelta(minutes=15) or start.minute%15 or start.second or start.microsecond or not all(x.is_finite() and x>0 for x in (o,h,l,c)) or l>min(o,c) or h<max(o,c):continue
                 payload={**r,'open_at':start.isoformat(),'close_at':end.isoformat()};valid.append(('BTC/USD',start.isoformat(),end.isoformat(),json.dumps(payload,ensure_ascii=False,default=str)))
             except (KeyError,TypeError,ValueError,ArithmeticError):continue
         with sqlite3.connect(self.path,timeout=10) as c:
@@ -27,3 +27,4 @@ class CandleArchive:
         with sqlite3.connect(self.path,timeout=10) as c:
             rows=c.execute('select payload from candles where symbol=? and open_at>=? and open_at<? order by open_at',('BTC/USD',start.astimezone(timezone.utc).isoformat(),end.astimezone(timezone.utc).isoformat())).fetchall()
         return [json.loads(row[0]) for row in rows]
+

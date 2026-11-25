@@ -266,6 +266,19 @@ class DRuntime:
                                (result['signal']['signal_close'], now.astimezone(timezone.utc).isoformat()))
             return result
 
+    def cancel_pending_entry(self):
+        """Expire an unfilled candidate when the operator pauses new entries."""
+        with self.lock:
+            self._require_open()
+            state = self.status()['state']
+            signal = state.get('signal') if state.get('phase') == 'PENDING' else None
+            signal_id = signal.get('signal_close') if isinstance(signal, dict) else None
+            for item in self.intents.pending():
+                self.intents.resolve(item['signal_id'], 'PENDING', 'EXPIRED')
+            if signal_id:
+                self._finish_candidate(signal_id, 'STRATEGY_PAUSED')
+            return {'status': 'PAUSED', 'cancelled_signal': signal_id}
+
     def _signal_bar(self, signal_id):
         end = datetime.fromisoformat(signal_id.replace('Z', '+00:00'))
         if end.tzinfo is None:

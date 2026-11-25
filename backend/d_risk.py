@@ -60,7 +60,7 @@ def preflight_entry(signal, quote, equity, available_cash, prior_bar_volume, now
             return {'accepted': False, 'reason': 'CANDIDATE_EXPIRED'}
         if not close_at <= now < close_at + timedelta(minutes=15):
             return {'accepted': False, 'reason': 'CANDIDATE_EXPIRED'}
-        if quote.get('source') != 'ALPACA_US_BTCUSD_SPOT' or quote.get('currency') != 'USD_RESEARCH':
+        if quote.get('source') != 'BINANCE_USDM_PERP' or quote.get('currency') != 'USD_RESEARCH':
             return {'accepted': False, 'reason': 'SOURCE_MISMATCH'}
         if quote.get('timestamp_valid') is not True:
             return {'accepted': False, 'reason': 'QUOTE_STALE'}
@@ -125,3 +125,4 @@ def preflight_entry(signal, quote, equity, available_cash, prior_bar_volume, now
                 'leverage': str(LEVERAGE), 'fee': str(fee), 'signal_close': close_at.isoformat()}
     except (KeyError, TypeError, ValueError, ArithmeticError, InvalidOperation):
         return {'accepted': False, 'reason': 'INVALID_INPUT'}
+

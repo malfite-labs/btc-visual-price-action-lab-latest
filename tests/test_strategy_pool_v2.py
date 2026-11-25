@@ -156,7 +156,7 @@ def test_v2_cycle_registers_signal_then_opens_on_next_cycle(tmp_path):
     doc=v2_document();doc["entry"]["long"]={"op":"gt","args":[{"op":"close","args":[0]},100]};doc["entry"]["short"]={"op":"gt","args":[1,2]}
     pool=StrategyPool(tmp_path/"pool.sqlite3");pool.upload(doc);pool.enable("f-v2-test","1.0.0")
     bars=rising_bars(40);bars[-1].update(open="138",high="140",low="137",close="139")
-    quote={"source":"ALPACA_US_BTCUSD_SPOT","symbol":"BTC/USD","currency":"USD_RESEARCH","timestamp_valid":True,"bid":"138.9","ask":"139.1","event_at":datetime.now(timezone.utc).isoformat(),"received_at":datetime.now(timezone.utc).isoformat(),"age_ms":5}
+    quote={"source":"BINANCE_USDM_PERP","symbol":"BTC/USD","currency":"USD_RESEARCH","timestamp_valid":True,"bid":"138.9","ask":"139.1","event_at":datetime.now(timezone.utc).isoformat(),"received_at":datetime.now(timezone.utc).isoformat(),"age_ms":5}
     assert pool.cycle(bars,datetime.fromisoformat(bars[-1]["timestamp"]),quote_age_ms=10,quote=quote)[0]["status"]=="SIGNAL_LONG"
     following=dict(bars[-1]);following.update(timestamp=(datetime.fromisoformat(bars[-1]["timestamp"])+timedelta(minutes=15)).isoformat(),open="140",high="141",low="139",close="140")
     quote.update(bid="139.9",ask="140.1",event_at=(datetime.fromisoformat(bars[-1]["timestamp"])+timedelta(minutes=15,seconds=1)).isoformat(),received_at=datetime.now(timezone.utc).isoformat())
@@ -177,7 +177,7 @@ def test_v2_cycle_blocks_entry_on_stale_or_invalid_quote(tmp_path):
     bars = rising_bars(40)
     close = datetime.fromisoformat(bars[-1]["timestamp"])
     quote = {
-        "source": "ALPACA_US_BTCUSD_SPOT", "symbol": "BTC/USD", "currency": "USD_RESEARCH",
+        "source": "BINANCE_USDM_PERP", "symbol": "BTC/USD", "currency": "USD_RESEARCH",
         "timestamp_valid": True, "bid": "138.9", "ask": "139.1", "age_ms": 1,
         "event_at": datetime.now(timezone.utc).isoformat(), "received_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -206,7 +206,7 @@ def test_v2_cycle_records_insufficient_warmup_without_entry(tmp_path):
     bars = rising_bars(19)
     close = datetime.fromisoformat(bars[-1]["timestamp"])
     quote = {
-        "source": "ALPACA_US_BTCUSD_SPOT", "symbol": "BTC/USD", "currency": "USD_RESEARCH",
+        "source": "BINANCE_USDM_PERP", "symbol": "BTC/USD", "currency": "USD_RESEARCH",
         "timestamp_valid": True, "bid": "118.9", "ask": "119.1", "age_ms": 1,
         "event_at": datetime.now(timezone.utc).isoformat(), "received_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -227,7 +227,7 @@ def test_v2_cycle_records_signal_stop_rejection_as_wait(tmp_path):
     close = datetime.fromisoformat(bars[-1]["timestamp"])
     now = datetime.now(timezone.utc)
     quote = {
-        "source": "ALPACA_US_BTCUSD_SPOT", "symbol": "BTC/USD", "currency": "USD_RESEARCH",
+        "source": "BINANCE_USDM_PERP", "symbol": "BTC/USD", "currency": "USD_RESEARCH",
         "timestamp_valid": True, "bid": "120", "ask": "120.1", "age_ms": 1,
         "event_at": now.isoformat(), "received_at": now.isoformat(),
     }
@@ -244,7 +244,7 @@ def test_v2_short_quote_target_uses_ask_and_records_buy_to_close(tmp_path):
     pool=StrategyPool(tmp_path/"pool.sqlite3");pool.upload(v2_document())
     pos={"version":"1.0.0","direction":"SHORT","entry":"100","stop":"110","target":"90","qty":"1","entry_fee":"0.05","fee_rate":"0.0005","slippage_rate":"0.0002"}
     with pool_module._database(pool.path) as conn:conn.execute("update accounts set position=? where strategy_id=?",(json.dumps(pos),"f-v2-test"))
-    now=datetime.now(timezone.utc);quote={"source":"ALPACA_US_BTCUSD_SPOT","symbol":"BTC/USD","currency":"USD_RESEARCH","timestamp_valid":True,"bid":"89.9","ask":"90","event_at":now.isoformat(),"received_at":now.isoformat(),"age_ms":1}
+    now=datetime.now(timezone.utc);quote={"source":"BINANCE_USDM_PERP","symbol":"BTC/USD","currency":"USD_RESEARCH","timestamp_valid":True,"bid":"89.9","ask":"90","event_at":now.isoformat(),"received_at":now.isoformat(),"age_ms":1}
     assert pool.monitor_quote(quote)==[{"id":"f-v2-test","status":"CLOSE_TARGET"}]
     assert pool.fills("f-v2-test")[0]["side"]=="BUY"
 
@@ -261,7 +261,7 @@ def test_f_candidate_documents_validate_and_preserve_frozen_parameters(filename,
 def _gap_bar(close_at, *, high="67200", low="67000"):
     opened = close_at - timedelta(minutes=15)
     return {
-        "symbol": "BTC/USD", "interval": "15Min", "source": "ALPACA_US_BTCUSD_SPOT",
+        "symbol": "BTC/USD", "interval": "15Min", "source": "BINANCE_USDM_PERP",
         "currency": "USD_RESEARCH", "is_closed": True,
         "open_at": opened.isoformat(), "close_at": close_at.isoformat(),
         "open": "67100", "high": high, "low": low, "close": "67150", "volume": "0.001",
@@ -325,6 +325,27 @@ def test_candle_gap_reconciliation_preserves_trade_and_waits_for_next_real_cycle
     assert pool.fills("gap-audit-test") == before_fills
 
 
+def test_automatic_gap_recovery_requires_healthy_contiguous_data(tmp_path):
+    pool, position, last, through, gap = _pool_with_gap_position(tmp_path)
+    next_close = through + timedelta(minutes=15)
+    bars = gap + [_gap_bar(next_close)]
+    assert pool.recover_gaps(bars, next_close, healthy=False) == []
+    assert pool.recover_gaps(bars[1:], next_close, healthy=True)[0]["status"] == "BLOCKED"
+    result = pool.recover_gaps(bars, next_close, healthy=True)
+    assert result[0]["status"] == "AWAITING_NEXT_NATURAL_CYCLE"
+    assert json.loads(pool.list()[0]["position"])["bars_held"] == 35
+    assert len(pool.fills("gap-audit-test")) == 2
+
+
+def test_automatic_gap_recovery_does_not_fabricate_exit(tmp_path):
+    pool, position, last, through, gap = _pool_with_gap_position(tmp_path)
+    gap[4] = _gap_bar(last + timedelta(minutes=75), high="67728")
+    result = pool.recover_gaps(gap + [_gap_bar(through + timedelta(minutes=15))],
+                               through + timedelta(minutes=15), healthy=True)
+    assert result[0]["status"] == "BLOCKED"
+    assert pool.list()[0]["last_status"] == "BLOCKED_GAP_RECONCILIATION_REQUIRED"
+    assert len(pool.fills("gap-audit-test")) == 2
+
 def test_candle_gap_reconciliation_rejects_triggered_exit_and_time_limit(tmp_path):
     pool, position, last, through, gap = _pool_with_gap_position(tmp_path / "stop")
     gap[4] = _gap_bar(last + timedelta(minutes=15*5), high="67728")
@@ -348,3 +369,4 @@ def test_candle_gap_reconciliation_rejects_triggered_exit_and_time_limit(tmp_pat
             expected_position=position, accepted_standard="CANDLE_OHLC_PROXY_V1",
         )
     assert pool.gap_reconciliations("gap-audit-test") == []
+

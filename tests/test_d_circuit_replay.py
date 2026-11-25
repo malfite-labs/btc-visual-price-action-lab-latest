@@ -16,7 +16,7 @@ def test_closed_trades_replay_after_cross_database_interruption(tmp_path):
     circuit.record_day_start(midnight=midnight,equity='10000',provenance='D_LEDGER_FLAT_MIDNIGHT_V1')
     assert str(proven_flat_midnight_equity(ledger,now)[1]) == '10000.00'
     def event(at, ident, price):
-        return {'symbol':'BTC/USD','source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH',
+        return {'symbol':'BTC/USD','source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH',
                 'timestamp_valid':True,'event_at':at.isoformat(),'received_at':at.isoformat(),
                 'bid':str(price),'ask':str(price),'event_id':ident}
     for i in range(3):
@@ -70,7 +70,7 @@ def test_guard_denies_invalid_quote_and_proves_new_account_baseline(tmp_path):
     ledger=DLedger(tmp_path/'ledger.sqlite')
     circuit=DCircuit(tmp_path/'circuit.sqlite')
     now=datetime.now(timezone.utc)
-    quote={'symbol':'BTC/USD','source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH',
+    quote={'symbol':'BTC/USD','source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH',
            'timestamp_valid':True,'event_at':now.isoformat(),'received_at':now.isoformat(),
            'bid':'100','ask':'100.01','event_id':'q'}
     assert assess_from_committed_ledger(ledger,circuit,quote,now)['reason']=='READY'
@@ -86,7 +86,7 @@ def test_runtime_daily_flatten_and_stop_priority(tmp_path,bid,expected):
     midnight=now.replace(hour=0,minute=0,second=0)
     assert rt.circuit.record_day_start(midnight=midnight,equity='10150',provenance='D_LEDGER_FLAT_MIDNIGHT_V1')['accepted']
     def event(at,event_id,price):
-        return {'symbol':'BTC/USD','source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH',
+        return {'symbol':'BTC/USD','source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH',
                 'timestamp_valid':True,'event_at':at.isoformat(),'received_at':at.isoformat(),
                 'bid':price,'ask':price,'event_id':event_id}
     entry=event(now,'entry','100')
@@ -101,3 +101,4 @@ def test_runtime_daily_flatten_and_stop_priority(tmp_path,bid,expected):
     assert rt.ledger.fills()[-1]['reason']==expected
     assert rt.circuit.assess(now=at,equity='10000')['reason']=='DAILY_LOSS_LIMIT'
     rt.close()
+

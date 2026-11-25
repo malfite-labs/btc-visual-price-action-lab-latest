@@ -55,7 +55,7 @@ def test_context_has_fresh_quote_currency_account_and_explicit_gate():
         "ask": "102",
         "event_at": close.isoformat(),
         "age_ms": 20,
-        "source": "ALPACA_US_BTCUSD_SPOT",
+        "source": "BINANCE_USDM_PERP",
         "currency": "USD_RESEARCH",
     }
     context = app._cycle_decision_context(
@@ -96,7 +96,7 @@ def test_candle_market_and_interval_must_match_chart_context():
     from backend import app
 
     row = {
-        "source": "ALPACA_US_BTCUSD_SPOT",
+        "source": "BINANCE_USDM_PERP",
         "currency": "USD_RESEARCH",
         "symbol": "BTC/USD",
         "interval": "15Min",
@@ -145,7 +145,7 @@ def test_context_reports_open_position_and_rejects_old_quote():
         "ask": "102",
         "event_at": close.isoformat(),
         "age_ms": 20,
-        "source": "ALPACA_US_BTCUSD_SPOT",
+        "source": "BINANCE_USDM_PERP",
         "currency": "USD_RESEARCH",
     }
     ctx = app._cycle_decision_context(
@@ -246,3 +246,4 @@ def test_mock_vision_provider_preserves_snapshot_through_decision_gate(tmp_path,
     assert output[0]["status"] == "VALID"
     assert output[0]["snapshot_sha256"] == hashlib.sha256(PNG).hexdigest()
     assert output[0]["mode"] == "TEST_TRANSPORT_ONLY"
+

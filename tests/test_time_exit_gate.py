@@ -20,7 +20,7 @@ def test_time_exit_survives_entry_gate_and_bad_quote(tmp_path, monkeypatch):
         'direction': 'LONG', 'stop': '99', 'setup': 'T3', 'obstacle': None})
     monkeypatch.setattr(rules, 'json_signal', lambda *x: None)
     start = datetime(2026, 10, 31, 9, 30, tzinfo=timezone.utc)
-    q = dict(source='ALPACA_US_BTCUSD_SPOT', currency='USD_RESEARCH', timestamp_valid=True,
+    q = dict(source='BINANCE_USDM_PERP', currency='USD_RESEARCH', timestamp_valid=True,
              age_ms=0, event_at=(start+timedelta(seconds=1)).isoformat(), bid='100', ask='100.1',
              bid_qty='1000', ask_qty='1000', event_id='test')
     book = dict(source=q['source'], timestamp_valid=True, age_ms=0,
@@ -157,3 +157,4 @@ def test_worker_exit_does_not_require_parent_exit(tmp_path):
             child.kill()
             child.wait(timeout=5)
         child.stdout.close()
+

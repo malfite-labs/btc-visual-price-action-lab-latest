@@ -299,7 +299,7 @@ class GMirror:
             now = datetime.now(UTC)
             quote_age_ms = (now-at.astimezone(UTC)).total_seconds()*1000
             return (at.tzinfo is not None and 0 <= quote_age_ms <= self.cost.max_quote_age_ms
-                    and quote.get("source") == "ALPACA_US_BTCUSD_SPOT" and quote.get("symbol") == "BTC/USD" and quote.get("currency") == "USD_RESEARCH"
+                    and quote.get("source") == "BINANCE_USDM_PERP" and quote.get("symbol") == "BTC/USD" and quote.get("currency") == "USD_RESEARCH"
                     and quote.get("timestamp_valid") is True and 0 <= int(quote.get("age_ms", 10**9)) <= self.cost.max_quote_age_ms
                     and D(str(quote["bid"])) > 0 and D(str(quote["ask"])) >= D(str(quote["bid"])))
         except (ValueError, TypeError, KeyError): return False
@@ -312,3 +312,4 @@ class GMirror:
         if not pos: return cash
         mark = D(str(quote["bid"] if pos["direction"] == "LONG" else quote["ask"]))
         return cash + (mark-D(pos["entry_price"]))*D(pos["quantity"])*(1 if pos["direction"] == "LONG" else -1)
+

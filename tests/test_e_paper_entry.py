@@ -10,7 +10,7 @@ def test_unverified_mapping_blocks_but_verified_test_signal_uses_existing_prefli
     decision={'action':'OPEN','side':'LONG','setup':'E1','confidence':'HIGH','reasons':['reclaim'],
         'stop_anchor':{'candle':'K01','field':'low'},'reward_anchor':{'candle':'K48','field':'high'}}
     window=bars();window[-1]['high']='130'
-    quote={'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','timestamp_valid':True,
+    quote={'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','timestamp_valid':True,
         'age_ms':0,'bid':'99.9','ask':'100','event_id':'q1'}
     rejected=submit_e_entry(ledger=ledger,decision=decision,bars=window,quote=quote,cycle_id='x',mapping_validated=False,cost=CostModel())
     assert rejected['reason']=='VISUAL_MAPPING_NOT_VALIDATED'
@@ -26,7 +26,7 @@ def test_entry_stop_and_performance_chain(tmp_path):
     decision={'action':'OPEN','side':'LONG','setup':'E1','confidence':'HIGH','reasons':['reclaim'],
         'stop_anchor':{'candle':'K01','field':'low'},'reward_anchor':{'candle':'K48','field':'high'}}
     window=bars();window[-1]['high']='130'
-    quote={'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','timestamp_valid':True,
+    quote={'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','timestamp_valid':True,
         'age_ms':0,'bid':'99.9','ask':'100','event_id':'q1'}
     assert submit_e_entry(ledger=ledger,decision=decision,bars=window,quote=quote,cycle_id='x',mapping_validated=True,cost=CostModel())['accepted']
     stop_quote={**quote,'bid':'89','ask':'89.1','event_id':'q2'}
@@ -34,3 +34,4 @@ def test_entry_stop_and_performance_chain(tmp_path):
     snapshot=read_e_store(path)
     assert snapshot['closed_trades']==1 and snapshot['win_rate']==0
     assert D(snapshot['realized_pnl'])<0 and len(snapshot['fills'])==2
+

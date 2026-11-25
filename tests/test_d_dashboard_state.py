@@ -14,3 +14,4 @@ def test_d_control_state_requires_explicit_execution_readiness():
     assert dashboard.d_control_state({'status': 'PROTECTION_UNCERTAIN'}) == 'PROTECTION_UNCERTAIN'
     assert dashboard.d_control_state({'status': 'OBSERVE_ONLY'}) == 'OBSERVE_ONLY'
     assert dashboard.d_control_state({'status': 'UNAVAILABLE'}) == 'UNKNOWN'
+    assert dashboard.d_control_state({'status': 'PAUSED', 'enabled': False}) == 'PAUSED'

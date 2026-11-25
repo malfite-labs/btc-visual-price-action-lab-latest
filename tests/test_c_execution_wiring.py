@@ -22,7 +22,7 @@ def test_c_decision_preflight_and_ledger_use_guarded_leverage(tmp_path, action, 
         "stop_loss": stop,
     }
     quote = {
-        "source": "ALPACA_US_BTCUSD_SPOT",
+        "source": "BINANCE_USDM_PERP",
         "currency": "USD_RESEARCH",
         "bid": "100",
         "ask": "100",
@@ -65,7 +65,7 @@ def test_protective_exit_precedes_model_close(tmp_path, bid, expected):
         "decision_id": "model",
     }
     quote = {
-        "source": "ALPACA_US_BTCUSD_SPOT",
+        "source": "BINANCE_USDM_PERP",
         "currency": "USD_RESEARCH",
         "bid": bid,
         "ask": "100",
@@ -93,3 +93,4 @@ def test_production_runner_can_be_explicitly_configured_but_is_disabled_by_defau
         ledger, None, CostModel(), enable_c_5x=True, c_maintenance_rate=D("0.005")
     )
     assert configured.enable_c_5x and configured.c_maintenance_rate == D("0.005")
+

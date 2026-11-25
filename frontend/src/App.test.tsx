@@ -47,10 +47,10 @@ describe('workbench safeguards', () => {
     fireEvent.click(screen.getByRole('button', { name: '交易工作台' }))
     expect(screen.getByRole('heading', { name: '市场工作台' })).toBeInTheDocument()
   })
-  it('renders an explicit research spot label and disables live trading', () => {
+  it('renders an explicit Binance research market label and disables live trading', () => {
     render(<App />)
     expect(screen.getByText(/LIVE TRADING DISABLED/)).toBeInTheDocument()
-    expect(screen.getByText(/ALPACA · BTC\/USD 现货 · USD研究计价/)).toBeInTheDocument()
+    expect(screen.getByText(/BINANCE USD.*BTCUSDT.*USD/)).toBeInTheDocument()
   })
 
   it('keeps all six work views navigable when the test backend has empty accounts and data', async () => {

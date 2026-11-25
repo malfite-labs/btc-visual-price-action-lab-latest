@@ -20,7 +20,7 @@ def test_gap_loss_is_not_capped_and_negative_account_cannot_reopen(tmp_path):
         research_c_5x=True,
     )["accepted"]
     quote = {
-        "source": "ALPACA_US_BTCUSD_SPOT",
+        "source": "BINANCE_USDM_PERP",
         "age_ms": 0,
         "timestamp_valid": True,
         "bid": "50",
@@ -56,3 +56,4 @@ def test_gap_loss_is_not_capped_and_negative_account_cannot_reopen(tmp_path):
     with ledger._session() as db:
         events = db.execute("SELECT amount FROM ledger_events WHERE agent='C'").fetchall()
     assert D("10000") + sum((D(r["amount"]) for r in events), D("0")) == D(account["cash"])
+

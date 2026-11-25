@@ -14,7 +14,7 @@ def test_strategy_profile_retains_existing_limits_and_versions():
 
 
 def test_independent_risk_fraction_survives_depth_and_fee_revalidation():
-    q = {'source':'ALPACA_US_BTCUSD_SPOT','bid':'100','ask':'100','timestamp_valid':True}
+    q = {'source':'BINANCE_USDM_PERP','bid':'100','ask':'100','timestamp_valid':True}
     book = {'bids':[{'p':'100','s':'10000'}], 'asks':[{'p':'100','s':'10000'}]}
     args = dict(equity=D('10000'),available_cash=D('10000'),direction='SHORT',stop=D('110'),
                 quote=q,orderbook=book,cost=CostModel(),quote_age_ms=0,book_age_ms=0,leverage=D('5'))
@@ -24,3 +24,4 @@ def test_independent_risk_fraction_survives_depth_and_fee_revalidation():
     assert D(one['planned_loss']) <= D('100')
     assert D(two['planned_loss']) <= D('200')
     assert D(one['quantity']) < D(two['quantity'])
+

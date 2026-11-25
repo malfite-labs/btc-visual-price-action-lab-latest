@@ -4,7 +4,7 @@ from backend.d_executor import validate_quote
 
 def test_quote_validation_rejects_untrusted_stale_future_and_bad_prices():
     now = datetime.now(timezone.utc)
-    quote = {'symbol':'BTC/USD', 'source': 'ALPACA_US_BTCUSD_SPOT', 'currency': 'USD_RESEARCH',
+    quote = {'symbol':'BTC/USD', 'source': 'BINANCE_USDM_PERP', 'currency': 'USD_RESEARCH',
              'timestamp_valid': True, 'event_at': now.isoformat(), 'received_at': now.isoformat(),
              'bid': '100', 'ask': '101', 'event_id': 'q1'}
     assert validate_quote(quote, now)
@@ -19,7 +19,7 @@ def test_intent_capture_persists_first_quote_and_is_idempotent(tmp_path):
     from backend.d_executor import IntentStore
     now = datetime.now(timezone.utc)
     signal = {'signal_close': (now-timedelta(seconds=4)).isoformat(), 'setup': 'D_CONFIRM'}
-    q = {'symbol':'BTC/USD', 'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','timestamp_valid':True,
+    q = {'symbol':'BTC/USD', 'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','timestamp_valid':True,
          'event_at':now.isoformat(),'received_at':now.isoformat(),'bid':'100','ask':'101','event_id':'first'}
     path = tmp_path/'intent.sqlite3'
     store = IntentStore(path)
@@ -35,7 +35,7 @@ def test_intent_recovery_and_terminal_state_cas(tmp_path):
     from backend.d_executor import IntentStore
     now = datetime.now(timezone.utc)
     signal = {'signal_close': (now-timedelta(seconds=1)).isoformat(), 'setup':'D_CONFIRM'}
-    quote = {'symbol':'BTC/USD', 'source':'ALPACA_US_BTCUSD_SPOT', 'currency':'USD_RESEARCH', 'timestamp_valid':True,
+    quote = {'symbol':'BTC/USD', 'source':'BINANCE_USDM_PERP', 'currency':'USD_RESEARCH', 'timestamp_valid':True,
              'event_at':now.isoformat(), 'received_at':now.isoformat(), 'bid':'100', 'ask':'101', 'event_id':'event'}
     path = tmp_path/'intent.sqlite3'
     assert IntentStore(path).capture(signal, quote, now)['accepted']
@@ -52,7 +52,7 @@ def test_reconcile_committed_trade_and_expire_stale_quote(tmp_path):
     from backend.d_executor import IntentStore
     now = datetime.now(timezone.utc)
     signal = {'signal_close':(now-timedelta(seconds=1)).isoformat()}
-    quote = {'symbol':'BTC/USD', 'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','timestamp_valid':True,
+    quote = {'symbol':'BTC/USD', 'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','timestamp_valid':True,
              'event_at':now.isoformat(),'received_at':now.isoformat(),'bid':'100','ask':'101','event_id':'q'}
     path=tmp_path/'ledger.sqlite3'
     store=IntentStore(path)
@@ -76,7 +76,7 @@ def test_handoff_survives_restart_without_mutating_observation(tmp_path):
     now = datetime.now(timezone.utc)
     signal = {'signal_close': (now-timedelta(seconds=2)).isoformat(),
               'direction':'LONG','setup':'D_CONFIRM'}
-    quote = {'symbol':'BTC/USD', 'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','timestamp_valid':True,
+    quote = {'symbol':'BTC/USD', 'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','timestamp_valid':True,
              'event_at':now.isoformat(),'received_at':now.isoformat(),'bid':'100','ask':'101','event_id':'q'}
     observed = tmp_path/'observe.sqlite3'
     intents = tmp_path/'ledger.sqlite3'
@@ -94,7 +94,7 @@ def test_verified_quote_persistence_and_stale_recovery(tmp_path):
     from backend.d_executor import enqueue_verified_quote, pending_verified_quote
     from backend.d_ledger import DLedger
     now = datetime.now(timezone.utc)
-    quote = {'symbol':'BTC/USD', 'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','timestamp_valid':True,
+    quote = {'symbol':'BTC/USD', 'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','timestamp_valid':True,
              'event_at':now.isoformat(),'received_at':now.isoformat(),'bid':'100','ask':'101','event_id':'event'}
     ledger = DLedger(tmp_path/'ledger.sqlite3')
     assert enqueue_verified_quote(ledger,quote,now)['accepted']
@@ -118,7 +118,7 @@ def test_quote_queue_tampering_fails_closed(tmp_path):
     from backend.d_executor import enqueue_verified_quote, pending_verified_quote
     from backend.d_ledger import DLedger
     now=datetime.now(timezone.utc)
-    quote={'symbol':'BTC/USD', 'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','timestamp_valid':True,
+    quote={'symbol':'BTC/USD', 'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','timestamp_valid':True,
            'event_at':now.isoformat(),'received_at':now.isoformat(),'bid':'100','ask':'101','event_id':'q'}
     ledger=DLedger(tmp_path/'ledger.sqlite3')
     assert enqueue_verified_quote(ledger,quote,now)['accepted']
@@ -130,7 +130,7 @@ def test_quote_queue_tampering_fails_closed(tmp_path):
 def test_position_protection_uses_fresh_quote_and_persisted_stop_due():
     from backend.d_executor import plan_verified_position_event
     now=datetime.now(timezone.utc)
-    quote={'symbol':'BTC/USD', 'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','timestamp_valid':True,
+    quote={'symbol':'BTC/USD', 'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','timestamp_valid':True,
            'event_at':now.isoformat(),'received_at':now.isoformat(),'bid':'101','ask':'101.1','event_id':'q'}
     pos={'quantity':'1','entry_price':'100','leverage':'5','stop_due':{'event_id':'old'}}
     assert plan_verified_position_event({'cash':'1000','position':pos},quote,now)['action']=='STOP_DUE'
@@ -144,7 +144,7 @@ def test_verified_quote_drives_both_targets_in_isolated_ledger(tmp_path):
     now=datetime.now(timezone.utc).replace(microsecond=0)
     bar=now.replace(minute=(now.minute//15)*15,second=0)+timedelta(minutes=15)
     def quote(event_id,bid,at):
-        return {'symbol':'BTC/USD', 'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','timestamp_valid':True,
+        return {'symbol':'BTC/USD', 'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','timestamp_valid':True,
                 'event_at':at.isoformat(),'received_at':at.isoformat(),'bid':str(bid),'ask':str(bid+0.01),'event_id':event_id}
     ledger=DLedger(tmp_path/'paper.sqlite3')
     initial=quote('open',100,now-timedelta(seconds=2))
@@ -167,7 +167,7 @@ def test_stale_stop_evidence_survives_restart_and_exits_on_new_quote(tmp_path):
     now = datetime.now(timezone.utc).replace(microsecond=0)
     bar = now.replace(minute=now.minute // 15 * 15, second=0) + timedelta(minutes=15)
     def quote(identifier, bid, at):
-        return {'symbol':'BTC/USD', 'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','timestamp_valid':True,
+        return {'symbol':'BTC/USD', 'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','timestamp_valid':True,
                 'event_at':at.isoformat(),'received_at':at.isoformat(),'bid':str(bid),'ask':str(bid + .01),'event_id':identifier}
     path = tmp_path/'ledger.sqlite3'
     ledger = DLedger(path)
@@ -192,7 +192,7 @@ def test_stale_non_trigger_quote_is_discarded_without_filling(tmp_path):
     from backend.d_ledger import DLedger
     now = datetime.now(timezone.utc).replace(microsecond=0)
     ledger = DLedger(tmp_path/'ledger.sqlite3')
-    q = {'symbol':'BTC/USD', 'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','timestamp_valid':True,
+    q = {'symbol':'BTC/USD', 'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','timestamp_valid':True,
          'event_at':now.isoformat(),'received_at':now.isoformat(),'bid':'100','ask':'100.01','event_id':'old'}
     assert enqueue_verified_quote(ledger,q,now)['accepted']
     assert process_verified_quote(DLedger(ledger.path),now+timedelta(seconds=61))['status'] == 'EMPTY'
@@ -206,9 +206,9 @@ def test_pending_entry_uses_durable_signal_preflight_and_is_idempotent(tmp_path)
     close = now.replace(minute=(now.minute//15)*15)
     signal = {'signal_close':close.isoformat(),'direction':'LONG','setup':'D_CONFIRM',
               'atr':'2','low':'98','neckline':'100','stop':'98.9','close':'100'}
-    quote = {'symbol':'BTC/USD', 'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','timestamp_valid':True,
+    quote = {'symbol':'BTC/USD', 'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','timestamp_valid':True,
              'event_at':now.isoformat(),'received_at':now.isoformat(),'bid':'100.08','ask':'100.1','event_id':'entry-q'}
-    bar = {'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','symbol':'BTC/USD',
+    bar = {'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','symbol':'BTC/USD',
            'interval':'15Min','is_closed':True,'open_at':(close-timedelta(minutes=15)).isoformat(),
            'close_at':close.isoformat(),'close':'100','volume':'4000'}
     ledger = DLedger(tmp_path/'trade.sqlite3')
@@ -231,9 +231,9 @@ def test_pending_entry_rejects_untrusted_bar_and_expired_quote(tmp_path):
     close = now.replace(minute=now.minute//15*15)
     signal = {'signal_close':close.isoformat(),'direction':'LONG','setup':'D_CONFIRM',
               'atr':'2','low':'98','neckline':'100','stop':'98.9','close':'100'}
-    quote = {'symbol':'BTC/USD', 'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','timestamp_valid':True,
+    quote = {'symbol':'BTC/USD', 'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','timestamp_valid':True,
              'event_at':now.isoformat(),'received_at':now.isoformat(),'bid':'100.08','ask':'100.1','event_id':'entry-q'}
-    bar = {'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','symbol':'BTC/USD',
+    bar = {'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','symbol':'BTC/USD',
            'interval':'15Min','is_closed':True,'open_at':(close-timedelta(minutes=15)).isoformat(),
            'close_at':close.isoformat(),'close':'100','volume':'4000'}
     ledger=DLedger(tmp_path/'trade.sqlite3'); intents=IntentStore(ledger.path)
@@ -249,7 +249,7 @@ def test_verified_quote_redelivery_ignores_received_time_without_mutating_eviden
     from backend.d_executor import enqueue_verified_quote
     from backend.d_ledger import DLedger
     now=datetime.now(timezone.utc).replace(microsecond=0)
-    q={'symbol':'BTC/USD','source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH',
+    q={'symbol':'BTC/USD','source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH',
        'timestamp_valid':True,'event_at':now.isoformat(),'received_at':now.isoformat(),
        'bid':'100','ask':'100.01','event_id':'quote-1'}
     ledger=DLedger(tmp_path/'ledger.sqlite')
@@ -261,3 +261,4 @@ def test_verified_quote_redelivery_ignores_received_time_without_mutating_eviden
         evidence=json.loads(db.execute('select payload from d_quote_evidence where event_id=?',('quote-1',)).fetchone()[0])
     assert evidence==q
     assert not enqueue_verified_quote(ledger,{**redelivery,'bid':'99'},now+timedelta(seconds=1))['accepted']
+

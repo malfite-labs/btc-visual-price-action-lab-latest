@@ -47,8 +47,8 @@ class CostModel:
         )
         return {
             "model": "BINANCE_FUTURES_REFERENCE_RESEARCH_V1" if frozen else "CUSTOM_RESEARCH_MODEL",
-            "market": "ALPACA_BTC_USD_SPOT",
-            "reference": "BINANCE_USDT_M_FUTURES" if frozen else "CUSTOM",
+            "market": "BINANCE_USDM_BTCUSDT_PERPETUAL",
+            "reference": "BINANCE_USDT_M_FUTURES_STANDARD_TAKER" if frozen else "CUSTOM",
             "execution": "MARKET_TAKER",
             "fill_model": "QUOTE_SIDE_FULL_FILL_V1",
             "maker_reference_rate": str(self.maker_reference_rate),
@@ -211,3 +211,4 @@ def stop_triggered(
             return False, None, "ASK_UNAVAILABLE"
         return ask >= stop_price, ask, "ALPACA_SPOT_ASK"
     return False, None, "INVALID_DIRECTION"
+

@@ -35,7 +35,7 @@ def bars(close, low=None, *, start="2026-01-01T00:00:00+00:00"):
 
 def fresh_quote(bid=109,ask=110):
     now=datetime.now(timezone.utc)
-    return {"source":"ALPACA_US_BTCUSD_SPOT","symbol":"BTC/USD","currency":"USD_RESEARCH","timestamp_valid":True,
+    return {"source":"BINANCE_USDM_PERP","symbol":"BTC/USD","currency":"USD_RESEARCH","timestamp_valid":True,
             "bid":str(bid),"ask":str(ask),"event_at":(now-timedelta(seconds=1)).isoformat(),"received_at":now.isoformat(),"age_ms":5}
 
 
@@ -196,7 +196,7 @@ def test_quote_stop_monitor_is_idempotent_and_uses_fresh_validated_shared_quote(
     pool.upload(document());pool.enable("isolated-test","1.0.0")
     initial=current_bars(110);pool.cycle(initial,cycle_of(initial),quote_age_ms=20,quote=fresh_quote())
     now=datetime.now(timezone.utc)
-    quote={"source":"ALPACA_US_BTCUSD_SPOT","symbol":"BTC/USD","currency":"USD_RESEARCH","timestamp_valid":True,"bid":"108","ask":"109","event_at":(now-timedelta(seconds=1)).isoformat(),"received_at":now.isoformat(),"age_ms":5}
+    quote={"source":"BINANCE_USDM_PERP","symbol":"BTC/USD","currency":"USD_RESEARCH","timestamp_valid":True,"bid":"108","ask":"109","event_at":(now-timedelta(seconds=1)).isoformat(),"received_at":now.isoformat(),"age_ms":5}
     assert pool.monitor_quote(quote)==[{"id":"isolated-test","status":"CLOSE_STOP"}]
     assert pool.monitor_quote(quote)==[]
     assert pool.list()[0]["position"] is None
@@ -318,7 +318,7 @@ def test_bad_position_does_not_block_peer_quote_stop(tmp_path):
         conn.execute("update accounts set position='not-json' where strategy_id='isolated-test'")
         conn.execute("update accounts set position=? where strategy_id='peer-strategy'",(json.dumps(position),))
     now=datetime.now(timezone.utc)
-    quote={"source":"ALPACA_US_BTCUSD_SPOT","symbol":"BTC/USD","currency":"USD_RESEARCH","timestamp_valid":True,"bid":"104","ask":"105","event_at":(now-timedelta(seconds=1)).isoformat(),"received_at":now.isoformat(),"age_ms":5}
+    quote={"source":"BINANCE_USDM_PERP","symbol":"BTC/USD","currency":"USD_RESEARCH","timestamp_valid":True,"bid":"104","ask":"105","event_at":(now-timedelta(seconds=1)).isoformat(),"received_at":now.isoformat(),"age_ms":5}
     result=pool.monitor_quote(quote)
     assert {row['id']:row['status'] for row in result}=={'isolated-test':'FAULTED','peer-strategy':'CLOSE_STOP'}
     assert next(row for row in pool.list() if row['id']=='peer-strategy')['position'] is None
@@ -344,3 +344,4 @@ def test_concurrent_enable_pause_operations_leave_a_valid_serialized_state(tmp_p
     row=pool.list()[0]
     assert row['status'] in ('PAUSED','ENABLED_NOT_RUNNING')
     assert row['active_version']=='1.0.0'
+

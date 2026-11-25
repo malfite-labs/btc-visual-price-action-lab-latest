@@ -8,7 +8,7 @@ internal static class Launcher
     [STAThread]
     private static void Main()
     {
-        string root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "btc-visual-price-action-lab");
+        string root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "量化升级版", "btc-paper-lab-v3", "windows-binance-deploy");
         string python = Path.Combine(root, @".venv\Scripts\pythonw.exe");
         string dashboard = Path.Combine(root, @"scripts\local_dashboard.py");
         if (!File.Exists(python) || !File.Exists(dashboard))

@@ -136,14 +136,14 @@ def test_scheduler_drives_three_isolated_decisions_into_isolated_ledger(tmp_path
         "cycle_deadline": close + timedelta(minutes=15),
         "strategies": {agent: (f"{agent}-v1", f"{agent}-only-MD") for agent in "ABC"},
         "quote": {
-            "source": "ALPACA_US_BTCUSD_SPOT",
+            "source": "BINANCE_USDM_PERP",
             "currency": "USD_RESEARCH",
             "bid": "99999",
             "ask": "100001",
             "age_ms": 20,
         },
         "orderbook": {
-            "source": "ALPACA_US_BTCUSD_SPOT",
+            "source": "BINANCE_USDM_PERP",
             "age_ms": 20,
             "bids": [{"p": "99999", "s": "1"}],
             "asks": [{"p": "100001", "s": "1"}],
@@ -184,14 +184,14 @@ def test_production_paper_runner_is_inert_without_approval_and_rejects_test_mode
         "cycle_deadline": close + timedelta(minutes=15),
         "strategies": {agent: ("v1", "agent md") for agent in "ABC"},
         "quote": {
-            "source": "ALPACA_US_BTCUSD_SPOT",
+            "source": "BINANCE_USDM_PERP",
             "currency": "USD_RESEARCH",
             "bid": "99999",
             "ask": "100001",
             "age_ms": 20,
         },
         "orderbook": {
-            "source": "ALPACA_US_BTCUSD_SPOT",
+            "source": "BINANCE_USDM_PERP",
             "age_ms": 20,
             "bids": [{"p": "99999", "s": "1"}],
             "asks": [{"p": "100001", "s": "1"}],
@@ -239,3 +239,4 @@ def test_stop_monitor_calls_stop_handler_without_running_decision_cycle(tmp_path
     assert result["A"]["reason"] == "STOP_PENDING"
     assert calls[0]["agent"] == "A" and calls[0]["quote"] is None
     assert runner.calls == []
+

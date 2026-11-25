@@ -8,7 +8,7 @@ def test_forward_uses_only_whole_bars_after_freeze():
  assert eligible(a,'2026-10-28T09:15:00+00:00',datetime(2026,10,28,9,30,tzinfo=timezone.utc))
 
 def test_fresh_quote_must_be_after_signal():
- q={'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','timestamp_valid':True,'age_ms':200,'bid':'100','ask':'101','bid_qty':'1','ask_qty':'1','event_at':'2026-10-28T09:29:59+00:00'}
+ q={'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','timestamp_valid':True,'age_ms':200,'bid':'100','ask':'101','bid_qty':'1','ask_qty':'1','event_at':'2026-10-28T09:29:59+00:00'}
  assert not quote_fresh(q,'2026-10-28T09:30:00+00:00')
  q['event_at']='2026-10-28T09:30:02+00:00';assert quote_fresh(q,'2026-10-28T09:30:00+00:00')
 
@@ -28,8 +28,8 @@ def test_new_full_bar_generates_three_isolated_decisions_once(tmp_path):
  start=datetime(2026,10,28,9,15,tzinfo=timezone.utc);config={'earliest_forward_open_utc':start.isoformat(),'risk_execution_hashes':{n:h(project/n) for n in names},'A':{'file':'A-rule.json','sha256':h(folder/'A-rule.json'),'version':'A'},'B':{'file':'v3-signals.py','sha256':h(folder/'v3-signals.py'),'version':'B'},'C':{'file':'v3-signals.py','sha256':h(folder/'v3-signals.py'),'version':'C','archive_sha256':h(folder/'C-v24-archived-rule.json')}}
  (folder/'freeze.json').write_text(json.dumps(config),encoding='utf8');bars=[]
  for i in range(288):
-  opening=start-timedelta(minutes=15*(287-i));bars.append({'open_at':opening.isoformat(),'close_at':(opening+timedelta(minutes=15)).isoformat(),'is_closed':True,'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','open':'100','high':'101','low':'99','close':'100'})
- q={'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','timestamp_valid':True,'age_ms':100,'bid':'100','ask':'101','bid_qty':'1','ask_qty':'1','event_at':(start+timedelta(minutes=15,seconds=1)).isoformat()};engine=Forward(project,folder);now=start+timedelta(minutes=15,seconds=3);engine.process(bars,q,now);engine.process(bars,q,now)
+  opening=start-timedelta(minutes=15*(287-i));bars.append({'open_at':opening.isoformat(),'close_at':(opening+timedelta(minutes=15)).isoformat(),'is_closed':True,'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','open':'100','high':'101','low':'99','close':'100'})
+ q={'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','timestamp_valid':True,'age_ms':100,'bid':'100','ask':'101','bid_qty':'1','ask_qty':'1','event_at':(start+timedelta(minutes=15,seconds=1)).isoformat()};engine=Forward(project,folder);now=start+timedelta(minutes=15,seconds=3);engine.process(bars,q,now);engine.process(bars,q,now)
  with sqlite3.connect(folder/'shadow-ledger.sqlite3') as db:
   assert db.execute('select count(*) from forward_cycles').fetchone()[0]==1
   assert db.execute('select count(*) from forward_bars').fetchone()[0]==1
@@ -49,8 +49,8 @@ def test_open_and_stop_use_isolated_simulation(tmp_path):
  h=lambda p:hashlib.sha256(p.read_bytes()).hexdigest();start=datetime(2026,10,28,9,15,tzinfo=timezone.utc);cfg={'earliest_forward_open_utc':start.isoformat(),'risk_execution_hashes':{n:h(project/n) for n in names},'A':{'file':'A-rule.json','sha256':h(folder/'A-rule.json'),'version':'A'},'B':{'file':'v3-signals.py','sha256':h(folder/'v3-signals.py'),'version':'B'},'C':{'file':'v3-signals.py','sha256':h(folder/'v3-signals.py'),'version':'C','archive_sha256':h(folder/'C-v24-archived-rule.json')}};(folder/'freeze.json').write_text(json.dumps(cfg),encoding='utf8')
  bars=[]
  for i in range(288):
-  op=start-timedelta(minutes=15*(287-i));vals=('98','100','95','99') if i<286 else ('99','103','98','102') if i==286 else ('100','104','99','103');bars.append({'open_at':op.isoformat(),'close_at':(op+timedelta(minutes=15)).isoformat(),'is_closed':True,'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH',**dict(zip(('open','high','low','close'),vals))})
- q={'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','timestamp_valid':True,'age_ms':100,'bid':'103','ask':'104','bid_qty':'1','ask_qty':'1','event_at':(start+timedelta(minutes=15,seconds=1)).isoformat()};e=Forward(project,folder);e.process(bars,q,start+timedelta(minutes=15,seconds=3));assert e.ledger.account('A')['state']=='OPEN_LONG'
+  op=start-timedelta(minutes=15*(287-i));vals=('98','100','95','99') if i<286 else ('99','103','98','102') if i==286 else ('100','104','99','103');bars.append({'open_at':op.isoformat(),'close_at':(op+timedelta(minutes=15)).isoformat(),'is_closed':True,'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH',**dict(zip(('open','high','low','close'),vals))})
+ q={'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','timestamp_valid':True,'age_ms':100,'bid':'103','ask':'104','bid_qty':'1','ask_qty':'1','event_at':(start+timedelta(minutes=15,seconds=1)).isoformat()};e=Forward(project,folder);e.process(bars,q,start+timedelta(minutes=15,seconds=3));assert e.ledger.account('A')['state']=='OPEN_LONG'
  q.update({'bid':'90','ask':'91','event_at':(start+timedelta(minutes=15,seconds=5)).isoformat()});e.monitor(q);assert e.ledger.account('A')['state']=='FLAT'
  with sqlite3.connect(folder/'shadow-ledger.sqlite3') as db:
   assert db.execute("select count(*) from fills where agent='A'").fetchone()[0]==2
@@ -66,7 +66,7 @@ def test_bad_source_and_broken_ohlc_are_rejected():
  from scripts.forward_v26_core import valid_context
  b={'open_at':'2026-10-28T09:15:00+00:00','close_at':'2026-10-28T09:30:00+00:00','is_closed':True,'open':'100','high':'101','low':'99','close':'100','source':'OTHER','currency':'USD_RESEARCH'}
  assert not valid_context([b],1)
- b['source']='ALPACA_US_BTCUSD_SPOT';b['high']='98';assert not valid_context([b],1)
+ b['source']='BINANCE_USDM_PERP';b['high']='98';assert not valid_context([b],1)
 
 def test_review_uses_40_closed_records_and_schedules_future_rule(tmp_path,monkeypatch):
  import json,sqlite3,types
@@ -164,3 +164,4 @@ def test_multiple_missing_bars_are_distinct_after_legacy_halt_resolved(tmp_path)
   c.execute("insert into forward_gap_resolutions values('2026-10-30T07:00:00+00:00','now','{}')")
   assert c.execute('select count(*) from forward_gap_events').fetchone()[0]==2
  assert e.is_halted()
+

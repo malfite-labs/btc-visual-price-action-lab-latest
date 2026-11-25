@@ -149,6 +149,12 @@ class Ledger:
         with self._mirror_dispatch_lock:
             if self._mirror_dispatch_thread is not None and self._mirror_dispatch_thread.is_alive():
                 return
+            # Quote protection calls this scheduler on every fresh market tick.
+            # Avoid creating a short-lived OS thread for an empty outbox.
+            with self._lock, self._connect() as db:
+                pending = db.execute("SELECT 1 FROM mirror_outbox WHERE status='PENDING' LIMIT 1").fetchone()
+            if pending is None:
+                return
             worker = Thread(target=self._drain_mirror_outbox, name="g-mirror-outbox", daemon=True)
             self._mirror_dispatch_thread = worker
             worker.start()
@@ -580,7 +586,7 @@ class Ledger:
         pos = json.loads(row["position_json"])
         if (
             not quote
-            or quote.get("source") != "ALPACA_US_BTCUSD_SPOT"
+            or quote.get("source") != "BINANCE_USDM_PERP"
             or quote.get("timestamp_valid", True) is not True
             or not 0 <= int(quote.get("age_ms", 10**9)) <= cost_model.max_quote_age_ms
         ):
@@ -620,3 +626,4 @@ class Ledger:
             "mark_price": str(mark),
             "mark_basis": "ALPACA_SPOT_BID" if pos["direction"] == "LONG" else "ALPACA_SPOT_ASK",
         }
+

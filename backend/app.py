@@ -22,7 +22,7 @@ from backend.candle_archive import CandleArchive, utc as archive_utc
 from backend.evolution import ReviewCoordinator
 from backend.ledger import Ledger
 from backend.market import (
-    AlpacaMarketData,
+    BinanceMarketData,
     _StreamLease,
     candle_hash,
     claim_closed_bar_for_dispatch,
@@ -41,6 +41,7 @@ from backend.settings import (
     PAPER_CURRENCY,
 )
 from backend.strategy import StrategyRegistry, present_e_runtime
+from backend.pa_extension import PAExtension, NAMES as PA_EXTENSION_NAMES
 from backend.vision import (
     AgentOrchestrator,
     VisionProviderConfig,
@@ -53,6 +54,20 @@ DATA_ROOT = Path(os.getenv("BTC_LAB_DATA_DIR", str(ROOT / "data"))).resolve()
 if os.getenv("BTC_LAB_TEST_MODE", "false").lower() == "true" and not os.getenv("BTC_LAB_DATA_DIR"):
     raise RuntimeError("TEST_DATA_ROOT_REQUIRED")
 DB_PATH = os.getenv("BTC_LAB_DB", str(DATA_ROOT / "paper.sqlite3"))
+
+# Acquire ownership before constructing any database-backed component.
+# Test subprocesses use their isolated data root; production copies must run
+# from the one designated deployment directory and share its OS file lock.
+if os.getenv('BTC_LAB_TEST_MODE', 'false').lower() == 'true':
+    _runtime_lock_path = DATA_ROOT / 'v3-backend-instance.lock'
+else:
+    _official_root = (Path.home() / 'Documents' / '量化升级版' / 'btc-paper-lab-v3' / 'windows-binance-deploy').resolve()
+    if ROOT.resolve() != _official_root:
+        raise RuntimeError('V3_OFFICIAL_DEPLOYMENT_REQUIRED')
+    _runtime_lock_path = _official_root / '.run' / 'v3-backend-instance.lock'
+_runtime_lease = _StreamLease(_runtime_lock_path)
+if not _runtime_lease.acquire():
+    raise RuntimeError('V3_BACKEND_ALREADY_RUNNING: ' + _runtime_lease.failure_reason)
 
 
 def _load_project_deepseek_key() -> None:
@@ -100,9 +115,9 @@ strategies = StrategyRegistry(
     ROOT / "strategies", activate_c=True, c_expected_sha256=C_APPROVED_STRATEGY_SHA256
 )
 evolution = ReviewCoordinator(DB_PATH)
-market = AlpacaMarketData(
-    stream_lock_path=ROOT / ".run" / "alpaca-stream.lock",
-    recovery_history_path=ROOT / ".run" / "alpaca-stream-recovery.jsonl",
+market = BinanceMarketData(
+    stream_lock_path=ROOT / ".run" / "binance-stream.lock",
+    recovery_history_path=ROOT / ".run" / "binance-stream-recovery.jsonl",
 )
 vision_config = VisionProviderConfig.from_env()
 vision_adapter = ConfigurableVisionAdapter(vision_config)
@@ -192,7 +207,7 @@ market_status = {
     "rest": "NOT_TESTED",
     "websocket": "NOT_TESTED",
     "feed_health": "UNKNOWN",
-    "source": "ALPACA_US_BTCUSD_SPOT",
+    "source": "BINANCE_USDM_PERP",
     "currency": "USD_RESEARCH",
     "model": "MODEL_NOT_CONFIGURED",
     "mode": "INTERNAL_PAPER_LEDGER",
@@ -222,6 +237,11 @@ _e_market_tasks: set[asyncio.Task] = set()
 
 async def market_loop():
     global candles
+    retry_close = None
+    retryable_guards = {
+        'MARKET_STREAM_DISCONNECTED', 'MARKET_RECOVERY_NOT_VALIDATED',
+        'MARKET_STREAM_QUOTE_STALE', 'BINANCE_EXECUTABLE_DATA_UNAVAILABLE',
+    }
     if not market.credentials:
         market_status["feed_health"] = "CREDENTIALS_NOT_CONFIGURED"
         return
@@ -293,9 +313,19 @@ async def market_loop():
                 dispatchable, dispatch_reason = claim_closed_bar_for_dispatch(
                     last_close, ROOT / ".run" / "market-decision-watermark.json"
                 )
-                market_status["decision_dispatch"] = dispatch_reason
-                if dispatchable:
-                    await process_closed_bar(last_close)
+                retrying = (dispatch_reason == 'CYCLE_ALREADY_SEEN' and retry_close == last_close
+                            and timedelta(0) <= datetime.now(UTC)-last_close < timedelta(minutes=15))
+                market_status["decision_dispatch"] = 'RETRY_LATEST_PRE_DISPATCH_BLOCK' if retrying else dispatch_reason
+                retry_close = None
+                if dispatchable or retrying:
+                    outcome = await process_closed_bar(last_close)
+                    # Only guard outcomes returned before the scheduler ran
+                    # can be retried. Never replay a previous 15-minute close.
+                    if isinstance(outcome, dict) and set(outcome) == set('ABC') and all(
+                        isinstance(row, dict) and row.get('status') in retryable_guards
+                        for row in outcome.values()
+                    ):
+                        retry_close = last_close
         except Exception as exc:
             market_status["rest"] = "FAIL"
             market_status["feed_health"] = "STALE"
@@ -352,7 +382,7 @@ async def stream_events(event: dict):
                 ),
                 "received_at": received.isoformat(),
                 **timing,
-                "source": "ALPACA_US_BTCUSD_SPOT",
+                "source": "BINANCE_USDM_PERP",
                 "currency": "USD_RESEARCH",
             }
             market_status["quote"] = quote
@@ -363,7 +393,7 @@ async def stream_events(event: dict):
                 try:
                     bid, ask = Decimal(str(event['bp'])), Decimal(str(event['ap']))
                     raw_valid = (event.get('S') == 'BTC/USD'
-                                 and event.get('source') == 'ALPACA_US_BTCUSD_SPOT'
+                                 and event.get('source') == 'BINANCE_USDM_PERP'
                                  and event.get('currency') == 'USD_RESEARCH'
                                  and event.get('timestamp_valid') is True
                                  and timing['timestamp_valid'] is True
@@ -407,6 +437,11 @@ async def process_stop_quote(quote: dict) -> None:
     except Exception:
         # Pool failures must not block the existing ABC/E protective quote path.
         logging.getLogger(__name__).exception('Isolated strategy-pool stop monitor failed')
+    for sid in pa_extension.ledgers:
+        try:
+            await asyncio.to_thread(pa_extension.ledger_quote, sid, _quote_with_live_age(quote), _pa_quote_entries_allowed)
+        except Exception:
+            logging.getLogger(__name__).exception('%s isolated quote monitor failed', sid)
     event_material = "|".join(
         str(quote.get(key, "")) for key in ("event_at", "bid", "ask", "source")
     )
@@ -441,7 +476,7 @@ def _valid_cycle_candle(row: dict) -> bool:
         opened = datetime.fromisoformat(str(row["open_at"]).replace("Z", "+00:00"))
         ended = datetime.fromisoformat(str(row["close_at"]).replace("Z", "+00:00"))
         return bool(
-            row.get("source") == "ALPACA_US_BTCUSD_SPOT"
+            row.get("source") == "BINANCE_USDM_PERP"
             and row.get("currency") == "USD_RESEARCH"
             and row.get("symbol") == "BTC/USD"
             and str(row.get("interval", "")).lower() in {"15min", "15m"}
@@ -590,7 +625,7 @@ def _cycle_decision_context(account, metrics, quote, close, image_hash, candle_d
     except (InvalidOperation, ValueError, TypeError):
         funds_ok = False
     quote_ok = (
-        quote.get("source") == "ALPACA_US_BTCUSD_SPOT"
+        quote.get("source") == "BINANCE_USDM_PERP"
         and quote.get("currency") == "USD_RESEARCH"
         and quote.get("timestamp_valid", True) is True
         and 0 <= int(quote.get("age_ms", -1)) <= COST_MODEL.max_quote_age_ms
@@ -716,7 +751,7 @@ async def _run_e_auto_observation(closed, close, observer, adapter,allow_short=F
             logging.getLogger(__name__).warning('E auto cycle blocked: %s',gate)
             return
         quote=await market.latest_quote()
-        quote['event_id']='alpaca-quote:'+str(quote.get('event_at',''))
+        quote['event_id']='binance-quote:'+str(quote.get('event_at',''))
         shadow_task=asyncio.create_task(shadow_baseline(quote))
         _e_observation_tasks.add(shadow_task)
         shadow_task.add_done_callback(_e_observation_tasks.discard)
@@ -765,7 +800,7 @@ async def process_closed_bar(
     now: datetime | None = None,
     snapshot_path: str | Path | None = None,
 ) -> dict:
-    """Create one shared chart and dispatch an eligible closed Alpaca candle to the paper gate."""
+    """Create one shared chart and dispatch an eligible closed Binance candle to the paper gate."""
     if not paper_scheduler.enabled or not paper_runner.enabled:
         return {agent: {"status": "PAPER_AUTOMATION_DISABLED"} for agent in "ABC"}
     current = now or datetime.now(UTC)
@@ -793,7 +828,7 @@ async def process_closed_bar(
         None,
     )
     if candle is None:
-        return blocked("CLOSED_ALPACA_CANDLE_NOT_FOUND")
+        return blocked("CLOSED_BINANCE_CANDLE_NOT_FOUND")
     if market_status.get("feed_health") != "LIVE" or market_status.get("gap_count_288") != 0:
         return blocked("MARKET_DATA_INCOMPLETE")
     try:
@@ -806,6 +841,8 @@ async def process_closed_bar(
         return blocked("CANDLE_NOT_CLOSED")
     if formal_mode == 'RULE_DRIVEN' and isinstance(paper_runner, RuleCycleRunner):
         paper_runner.mark_time_exits(close)
+    if current.astimezone(UTC) >= close + timedelta(minutes=15):
+        return blocked("CYCLE_EXPIRED")
     stream_quote = market.status.get("last_quote")
     stream_health = websocket_quote_health(
         market.status.get("websocket", "UNKNOWN"),
@@ -842,11 +879,11 @@ async def process_closed_bar(
             if not timing['timestamp_valid']:
                 raise ValueError('QUOTE_TIMESTAMP_INVALID')
             quote['age_ms'] = max(int(quote.get('age_ms', 10**9)), timing['age_ms'])
-            quote['event_id'] = 'alpaca-quote:' + quote['event_at']
+            quote['event_id'] = 'binance-quote:' + quote['event_at']
             book = None  # Quote-side full-fill model does not require orderbook depth.
             quote['age_ms'] += max(0, int((monotonic() - quote_observed) * 1000))
         except Exception as exc:
-            return blocked('ALPACA_EXECUTABLE_DATA_UNAVAILABLE', type(exc).__name__)
+            return blocked('BINANCE_EXECUTABLE_DATA_UNAVAILABLE', type(exc).__name__)
         result = await paper_scheduler.run_closed_cycle(
             candle_close=close, candle_is_closed=True, now=datetime.now(UTC),
             candles=closed, quote=quote, orderbook=book,
@@ -873,15 +910,15 @@ async def process_closed_bar(
         if not timing["timestamp_valid"]:
             raise ValueError("QUOTE_TIMESTAMP_INVALID")
         quote["age_ms"] = max(int(quote.get("age_ms", 10**9)), timing["age_ms"])
-        quote["event_id"] = "alpaca-quote:" + quote["event_at"]
-        book = {}
+        quote["event_id"] = "binance-quote:" + quote["event_at"]
+        book = await market.orderbook()
         book_observed = monotonic()
         quote["age_ms"] += max(0, int((monotonic() - quote_observed) * 1000))
         book["age_ms"] = int(book.get("age_ms", 10**9)) + max(
             0, int((monotonic() - book_observed) * 1000)
         )
     except Exception as exc:
-        return blocked("ALPACA_EXECUTABLE_DATA_UNAVAILABLE", type(exc).__name__)
+        return blocked("BINANCE_EXECUTABLE_DATA_UNAVAILABLE", type(exc).__name__)
     strategies_for_cycle = {agent: strategies.current_strategy(agent) for agent in "ABC"}
     account_states = {}
     try:
@@ -961,7 +998,7 @@ async def process_closed_bar(
         updated_quote["age_ms"] = max(
             int(updated_quote.get("age_ms", 10**9)), updated_timing["age_ms"]
         )
-        updated_quote["event_id"] = "alpaca-quote:" + updated_quote["event_at"]
+        updated_quote["event_id"] = "binance-quote:" + updated_quote["event_at"]
         return updated_quote, updated_book
 
     result = await paper_scheduler.run_closed_cycle(
@@ -1001,6 +1038,10 @@ async def _dispatch_strategy_pool_cycle(closed, close, quote):
     try:
         pool_bars = [dict(x) for x in closed[-1000:]]
         pool_quote = _quote_with_live_age(quote) or {}
+        recovery = await asyncio.to_thread(
+            strategy_pool.recover_gaps, pool_bars, close, healthy=_pa_quote_entries_allowed())
+        if recovery:
+            logging.getLogger(__name__).info('Strategy pool gap recovery: %s', recovery)
         outcomes = await asyncio.to_thread(
             strategy_pool.cycle, pool_bars, close,
             max_age_ms=COST_MODEL.max_quote_age_ms,
@@ -1021,6 +1062,27 @@ async def _dispatch_strategy_pool_cycle(closed, close, quote):
             'Isolated strategy-pool cycle failed close=%s', close.isoformat(),
         )
 
+    for sid in pa_extension.ledgers:
+        try:
+            action = await asyncio.to_thread(
+                pa_extension.ledger_cycle, sid, closed, close, _pa_quote_entries_allowed)
+            logging.getLogger(__name__).info('%s cycle close=%s action=%s', sid, close.isoformat(), action)
+        except Exception:
+            logging.getLogger(__name__).exception('%s isolated cycle failed', sid)
+
+
+def _pa_quote_entries_allowed():
+    quote = _quote_with_live_age(market_status.get('quote')) or {}
+    return bool(
+        market_status.get('feed_health') == 'LIVE'
+        and market_status.get('gap_count_288') == 0
+        and market_status.get('startup_position_monitor_checked') is True
+        and market.status.get('websocket_recovery_state') == 'HEALTHY'
+        and quote.get('source') == 'BINANCE_USDM_PERP'
+        and quote.get('timestamp_valid') is True
+        and 0 <= int(quote.get('age_ms', 10**9)) <= COST_MODEL.max_quote_age_ms
+    )
+
 
 def _d_auto_paper_requested():
     """Use explicit opt-in and the existing paper automation gate."""
@@ -1035,7 +1097,8 @@ def _d_auto_paper_requested():
         return (isinstance(config, dict) and set(config) == {'mode', 'enabled'}
                 and config['mode'] == 'AUTO_PAPER' and config['enabled'] is True)
     except (OSError, ValueError, TypeError):
-        return False
+        value = os.getenv('D_AUTO_PAPER_ENABLED')
+        return value is not None and value.lower() == 'true'
 
 
 @asynccontextmanager
@@ -1045,6 +1108,19 @@ async def lifespan(app: FastAPI):
         yield
         return
     lifespan_active = True
+    import sys
+    logging.getLogger('uvicorn.error').info(
+        'V3 startup app_file=%s cwd=%s python=%s data_root=%s paper_db=%s strategy_pool_db=%s version=%s',
+        Path(__file__).resolve(), Path.cwd(), sys.executable, DATA_ROOT, DB_PATH,
+        strategy_pool.path, app.version,
+    )
+    global pa_extension
+    pa_extension = PAExtension(
+        DATA_ROOT / 'pa-v1-extensions',
+        register=os.getenv('BTC_PA_EXTENSION_REGISTER', 'true').lower() == 'true',
+        enabled={item.strip().upper() for item in os.getenv('BTC_PA_EXTENSION_ENABLED', 'PA-09,PA-10').split(',') if item.strip()},
+        cost=COST_MODEL,
+    )
     stop_event.clear()
     try:
         try:
@@ -1117,6 +1193,12 @@ app = FastAPI(title="BTC Visual Price Action Lab", version="1.0.4", lifespan=lif
 # initialized from ABCDE's paper database and remain disabled after upload.
 from backend.strategy_pool import StrategyPool, StrategyValidationError
 strategy_pool = StrategyPool(os.getenv('BTC_LAB_STRATEGY_POOL_DB', str(DATA_ROOT / 'strategy-pool.sqlite3')))
+pa_extension = PAExtension(
+    DATA_ROOT / 'pa-v1-extensions',
+    register=False,
+    enabled=(),
+    cost=COST_MODEL,
+)
 
 @app.get('/api/v1/g-mirror/status')
 async def g_mirror_status():
@@ -1151,7 +1233,7 @@ async def g_mirror_fills(limit: int = 500):
 
 @app.get('/api/v1/strategy-pool')
 async def strategy_pool_list():
-    return {'items': strategy_pool.list()}
+    return {'items': strategy_pool.list() + pa_extension.list()}
 
 @app.get('/api/v1/strategy-pool/{strategy_id}/versions')
 async def strategy_pool_versions(strategy_id: str):
@@ -1173,6 +1255,25 @@ async def strategy_pool_upload(request: Request):
 
 @app.post('/api/v1/strategy-pool/{strategy_id}/enable')
 async def strategy_pool_enable(strategy_id: str, request: Request):
+    if strategy_id.upper() in PA_EXTENSION_NAMES:
+        import hmac
+        token = os.getenv('BTC_LAB_RECOVERY_TOKEN', '').encode()
+        supplied = request.headers.get('x-btc-recovery-token', '').encode()
+        if not token or len(token) < 32 or not hmac.compare_digest(token, supplied):
+            raise HTTPException(403, 'PA_EXTENSION_NOT_AUTHORIZED')
+        if strategy_id not in pa_extension.ledgers:
+            raise HTTPException(404, 'PA_EXTENSION_NOT_REGISTERED')
+        body = await request.json()
+        if not isinstance(body, dict) or body.get('version') != '1.0.0' or type(body.get('enabled')) is not bool:
+            raise HTTPException(422, 'PA_EXTENSION_ENABLE_INPUT_INVALID')
+        def ready():
+            return _pa_quote_entries_allowed() and pa_extension.exit_recent(strategy_id)
+        try:
+            action = await asyncio.to_thread(
+                pa_extension.set_enabled, strategy_id, body['enabled'], datetime.now(UTC), ready)
+        except (ValueError, sqlite3.Error, OSError) as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return {'ok': True, 'id': strategy_id, 'enabled': body['enabled'], 'action': action}
     body=await request.json()
     try: result=strategy_pool.enable(strategy_id,body.get('version'),body.get('enabled') is True)
     except StrategyValidationError as exc: raise HTTPException(status_code=409,detail=str(exc)) from exc
@@ -1202,8 +1303,16 @@ async def strategy_pool_diff(strategy_id: str, old: str, new: str):
 
 @app.get('/api/v1/strategy-pool/{strategy_id}/fills')
 async def strategy_pool_fills(strategy_id: str, limit: int = 500):
+    if strategy_id in pa_extension.ledgers:
+        if not 1 <= limit <= 2000: raise HTTPException(400, 'LIMIT_INVALID')
+        return {'items': pa_extension.ledgers[strategy_id].fills()[-limit:][::-1]}
     if not 1 <= limit <= 2000: raise HTTPException(400,'LIMIT_INVALID')
     return {'items':strategy_pool.fills(strategy_id,limit)}
+
+@app.get('/api/v1/strategy-pool/{strategy_id}/decisions')
+async def strategy_pool_decisions(strategy_id: str, limit: int = 100):
+    if not 1 <= limit <= 1000: raise HTTPException(400,'LIMIT_INVALID')
+    return {'items':strategy_pool.diagnostics(strategy_id,limit)}
 
 @app.post('/api/v1/strategy-pool/{strategy_id}/backtest')
 async def strategy_pool_backtest(strategy_id: str, request: Request):
@@ -1423,6 +1532,25 @@ async def system_status():
     }
 
 
+# Observation APIs are display-only: no strategy dispatch or ledger writes.
+from backend.kline_observation import CandleReader, EventReader
+observation_candles = CandleReader()
+observation_events = EventReader(ROOT, data_root=DATA_ROOT)
+
+@app.get("/api/v1/observation/candles")
+async def observation_candle_route(interval: str = "15m", limit: int = 500, end_time: int | None = None):
+    try:
+        return await observation_candles.get(interval, limit, end_time)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(503, "PUBLIC_CANDLES_UNAVAILABLE") from exc
+
+@app.get("/api/v1/observation/events")
+async def observation_events_route():
+    items = await asyncio.to_thread(observation_events.read)
+    return {"source":"FORMAL_PAPER_LEDGERS", "items":items, "errors":list(observation_events.errors)}
+
 @app.get("/api/v1/market/candles")
 async def get_candles(limit: int = 672):
     if not 1 <= limit <= 1000:
@@ -1431,7 +1559,7 @@ async def get_candles(limit: int = 672):
     return {
         "symbol": "BTC/USD",
         "interval": "15m",
-        "source": "ALPACA_US_BTCUSD_SPOT",
+        "source": "BINANCE_USDM_PERP",
         "currency": "USD_RESEARCH",
         "items": data,
         "count": len(data),
@@ -1456,22 +1584,17 @@ async def candle_history(start: str, end: str, backfill: bool = False):
             candle_archive.store([x.__dict__ for x in fetched if x.is_closed and begin<=archive_utc(x.open_at)<finish])
             rows=candle_archive.read(begin,finish)
         except Exception as exc:error=type(exc).__name__
-    return {'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','items':rows,'expected':expected,'missing':max(0,expected-len(rows)),'backfill_error':error}
+    return {'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','items':rows,'expected':expected,'missing':max(0,expected-len(rows)),'backfill_error':error}
 
 
 @app.get("/api/v1/market/sources")
 async def market_sources():
     return {
-        "active": "ALPACA_US_BTCUSD_SPOT",
+        "active": "BINANCE_USDM_PERP",
         "currency": "USD_RESEARCH",
         "providers": [
-            {"id": "ALPACA_US_BTCUSD_SPOT", "enabled": True, "market_type": "spot"},
-            {
-                "id": "BINANCE_USDM_PERP",
-                "enabled": False,
-                "market_type": "perpetual",
-                "status": "FUTURE_ADAPTER_NOT_IMPLEMENTED",
-            },
+            {"id": "BINANCE_USDM_PERP", "enabled": True, "market_type": "perpetual",
+             "symbol": "BTCUSDT", "quote_currency": "USDT"},
         ],
     }
 
@@ -1480,7 +1603,7 @@ async def market_sources():
 async def get_quote():
     return _quote_with_live_age(market_status.get("quote")) or {
         "status": "UNAVAILABLE",
-        "source": "ALPACA_US_BTCUSD_SPOT",
+        "source": "BINANCE_USDM_PERP",
     }
 
 
@@ -1545,7 +1668,65 @@ async def get_d_status():
             logging.getLogger(__name__).exception('D bridge status failed')
             return {'status':'UNAVAILABLE', 'reason':'D_BRIDGE_STATUS_ERROR', 'execution_ready':False}
     from backend.d_paper import read_status
-    return read_status(DATA_ROOT/'d'/'formal.sqlite3')
+    result = read_status(DATA_ROOT/'d'/'formal.sqlite3')
+    result.update(enabled=False, control_state='PAUSED')
+    return result
+
+
+@app.post('/api/v1/d/control')
+async def set_d_control(request: Request):
+    global d_bridge
+    if request.client is None or request.client.host not in ('127.0.0.1', '::1'):
+        raise HTTPException(status_code=403, detail='LOCAL_ONLY')
+    origin = request.headers.get('origin')
+    if origin and origin not in ('http://127.0.0.1:5175', 'http://localhost:5175'):
+        raise HTTPException(status_code=403, detail='ORIGIN_DENIED')
+    body = await request.json()
+    enabled = body.get('enabled') if isinstance(body, dict) else None
+    if type(enabled) is not bool:
+        raise HTTPException(status_code=422, detail='ENABLED_MUST_BE_BOOLEAN')
+    if formal_mode != 'RULE_DRIVEN' or not paper_automation_enabled:
+        raise HTTPException(status_code=409, detail='PAPER_AUTOMATION_NOT_READY')
+
+    config_path = DATA_ROOT / 'd' / 'auto-paper.json'
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = config_path.with_suffix('.json.tmp')
+    payload = json.dumps({'mode': 'AUTO_PAPER', 'enabled': enabled}, indent=2) + '\n'
+
+    if enabled and d_bridge is None:
+        from backend.d_paper import initialize_store
+        from backend.d_bridge import DBridge
+        await asyncio.to_thread(initialize_store, DATA_ROOT / 'd' / 'formal.sqlite3')
+        bridge = DBridge(DATA_ROOT / 'd' / 'formal.sqlite3', DATA_ROOT / 'd' / 'trading.sqlite3',
+                         candle_archive, feed_healthy=_d_feed_healthy,
+                         candles_complete=_d_candles_complete)
+        await bridge.start()
+        try:
+            temp_path.write_text(payload, encoding='utf-8')
+            temp_path.replace(config_path)
+        except OSError:
+            await bridge.close()
+            raise
+        os.environ['D_AUTO_PAPER_ENABLED'] = 'true'
+        d_bridge = bridge
+    else:
+        try:
+            temp_path.write_text(payload, encoding='utf-8')
+            temp_path.replace(config_path)
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail='D_CONTROL_SAVE_FAILED') from exc
+        os.environ['D_AUTO_PAPER_ENABLED'] = str(enabled).lower()
+        if d_bridge is not None:
+            try:
+                await asyncio.to_thread(d_bridge.set_enabled, enabled)
+            except Exception as exc:
+                raise HTTPException(status_code=409, detail='D_CONTROL_UPDATE_FAILED') from exc
+
+    if d_bridge is None:
+        result = await get_d_status()
+        result.update(enabled=False, control_state='PAUSED')
+        return result
+    return await d_bridge.status(market_status.get('quote'))
 
 
 @app.get("/api/v1/e/quant-observations")
@@ -1786,3 +1967,4 @@ async def events_stream(ws: WebSocket):
             await ws.receive_text()
     except WebSocketDisconnect:
         clients.discard(ws)
+

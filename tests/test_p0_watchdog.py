@@ -50,7 +50,7 @@ def test_pending_stop_survives_ledger_reopen_and_closes_once(tmp_path):
  assert opened['accepted']
  ledger.request_stop_exit(agent='B',trigger_price=D('9900'),event_key='stop',quote_event_id="confirmed-quote",expected_version=1)
  ledger=Ledger(path); assert ledger.account('B')['state']=='STOP_EXIT_PENDING'
- q={'source':'ALPACA_US_BTCUSD_SPOT','timestamp_valid':True,'age_ms':1,'bid':'9850','ask':'9851','bid_qty':'1','ask_qty':'1'}
+ q={'source':'BINANCE_USDM_PERP','timestamp_valid':True,'age_ms':1,'bid':'9850','ask':'9851','bid_qty':'1','ask_qty':'1'}
  assert recover_pending_stop(ledger=ledger,agent='B',quote=q,cost=CostModel(),event_id='event')['accepted']
  ledger=Ledger(path); recover_pending_stop(ledger=ledger,agent='B',quote=q,cost=CostModel(),event_id='event')
  assert ledger.account('B')['state']=='FLAT'
@@ -125,8 +125,9 @@ def test_pending_stop_survives_process_restart_and_duplicate(tmp_path):
  from pathlib import Path
  db=tmp_path/'pending-service.sqlite3'
  setup='''from backend.ledger import Ledger\nfrom decimal import Decimal as D\nimport sys\nl=Ledger(sys.argv[1]);assert l.open_position(agent="B",direction="LONG",quantity=D(".01"),price=D("10000"),stop=D("9900"),fee=D(".05"),slippage=D("0"),idempotency_key="open",expected_version=0)["accepted"];l.request_stop_exit(agent="B",trigger_price=D("9900"),event_key="stop",quote_event_id="confirmed-quote",expected_version=1)'''
- resume='''from backend.ledger import Ledger\nfrom backend.execution import recover_pending_stop\nfrom backend.domain import CostModel\nimport sys\nl=Ledger(sys.argv[1]);assert l.account("B")["state"]=="STOP_EXIT_PENDING"\nq={"source":"ALPACA_US_BTCUSD_SPOT","timestamp_valid":True,"age_ms":1,"bid":"9850","ask":"9851","bid_qty":"1","ask_qty":"1"}\nassert recover_pending_stop(ledger=l,agent="B",quote=q,cost=CostModel(),event_id="event")["accepted"];recover_pending_stop(ledger=l,agent="B",quote=q,cost=CostModel(),event_id="event")'''
+ resume='''from backend.ledger import Ledger\nfrom backend.execution import recover_pending_stop\nfrom backend.domain import CostModel\nimport sys\nl=Ledger(sys.argv[1]);assert l.account("B")["state"]=="STOP_EXIT_PENDING"\nq={"source":"BINANCE_USDM_PERP","timestamp_valid":True,"age_ms":1,"bid":"9850","ask":"9851","bid_qty":"1","ask_qty":"1"}\nassert recover_pending_stop(ledger=l,agent="B",quote=q,cost=CostModel(),event_id="event")["accepted"];recover_pending_stop(ledger=l,agent="B",quote=q,cost=CostModel(),event_id="event")'''
  for code in (setup,resume):subprocess.run([sys.executable,'-c',code,str(db)],cwd=Path(__file__).resolve().parents[1],check=True,timeout=15)
  with sqlite3.connect(db) as c:
   assert c.execute("select state from accounts where agent='B'").fetchone()[0]=='FLAT'
   assert c.execute("select count(*) from fills where agent='B' and position_effect='CLOSE'").fetchone()[0]==1
+

@@ -214,6 +214,32 @@ def evaluate_entry_v2(doc,bars):
     return None
 
 
+def explain_v2(expr,bars,params):
+    """Return a bounded expression tree with each boolean condition's result."""
+    op=expr['op']; args=expr['args']
+    if op in ('and','or'):
+        children=[explain_v2(child,bars,params) for child in args]
+        result=all(x['result'] for x in children) if op=='and' else any(x['result'] for x in children)
+        return {'op':op,'result':result,'children':children}
+    if op=='not':
+        child=explain_v2(args[0],bars,params)
+        return {'op':op,'result':not child['result'],'children':[child]}
+    value=_v2_value(expr,bars,params)
+    return {'op':op,'args':args,'result':bool(value),'value':str(value) if isinstance(value,Decimal) else value}
+
+
+def explain_entry_v2(doc,bars):
+    """Explain both sides so WAIT decisions have actionable rule-level reasons."""
+    long=explain_v2(doc['entry']['long'],bars,doc['parameters'])
+    short=explain_v2(doc['entry']['short'],bars,doc['parameters'])
+    direction=doc.get('position',{}).get('direction','long')
+    reasons=[]
+    if direction in ('long','both') and not long['result']: reasons.append('LONG 条件未全部满足')
+    if direction in ('short','both') and not short['result']: reasons.append('SHORT 条件未全部满足')
+    if long['result'] and short['result']: reasons.append('多空同时触发，拒绝开仓')
+    return {'long':long,'short':short,'reasons':reasons}
+
+
 def build_v2_stop(doc,direction,bars):
     """Return the signal-time swing/ATR stop and an optional stable rejection reason."""
     cfg=doc['position']['stop'];lookback=cfg['lookback'];atr_period=cfg['atr_period']
@@ -272,6 +298,10 @@ class StrategyPool:
                 through_cycle TEXT NOT NULL,state TEXT NOT NULL,evidence_json TEXT NOT NULL,
                 created_at TEXT NOT NULL,completed_at TEXT,processing_cycle TEXT,
                 UNIQUE(strategy_id,from_cycle,through_cycle))''')
+            c.execute('''CREATE TABLE IF NOT EXISTS decision_diagnostics(
+                strategy_id TEXT NOT NULL,cycle TEXT NOT NULL,version TEXT NOT NULL,
+                action TEXT NOT NULL,details TEXT NOT NULL,created_at TEXT NOT NULL,
+                PRIMARY KEY(strategy_id,cycle))''')
             columns = {r[1] for r in c.execute('PRAGMA table_info(accounts)').fetchall()}
             if 'last_status' not in columns: c.execute('ALTER TABLE accounts ADD COLUMN last_status TEXT')
             if 'last_action' not in columns: c.execute('ALTER TABLE accounts ADD COLUMN last_action TEXT')
@@ -445,6 +475,13 @@ class StrategyPool:
             c.row_factory=sqlite3.Row
             return [dict(x) for x in c.execute('select version,cycle,side,qty,price,fee,slippage,reason,idempotency_key,created_at from fills where strategy_id=? order by id desc limit ?',(sid,limit)).fetchall()]
 
+    def diagnostics(self,sid,limit=200):
+        with _database(self.path) as c:
+            c.row_factory=sqlite3.Row
+            return [dict(x) | {'details':json.loads(x['details'])} for x in c.execute(
+                'select strategy_id,cycle,version,action,details,created_at from decision_diagnostics where strategy_id=? order by cycle desc limit ?',
+                (sid,limit)).fetchall()]
+
     def diff(self,sid,old_version,new_version):
         with _database(self.path) as c:
             old=self._doc(c,sid,old_version);new=self._doc(c,sid,new_version)
@@ -515,6 +552,31 @@ class StrategyPool:
             c.row_factory=sqlite3.Row
             return [dict(row) for row in c.execute('select * from gap_reconciliations where strategy_id=? order by created_at',(sid,)).fetchall()]
 
+    def recover_gaps(self, bars, cycle, *, healthy):
+        """Reconcile untouched positions using complete closed candles before this cycle."""
+        if not healthy:
+            return []
+        close = cycle if isinstance(cycle, datetime) else datetime.fromisoformat(str(cycle).replace('Z', '+00:00'))
+        through = close - __import__('datetime').timedelta(minutes=15)
+        results = []
+        for account in self.list():
+            if account.get('last_status') != 'BLOCKED_GAP_RECONCILIATION_REQUIRED' or not account.get('position'):
+                continue
+            sid = account['id']
+            try:
+                start = datetime.fromisoformat(str(account['last_cycle']).replace('Z', '+00:00'))
+                gap = []
+                for bar in bars:
+                    opened = datetime.fromisoformat(str(bar['open_at']).replace('Z', '+00:00'))
+                    if start <= opened < through:
+                        gap.append(bar)
+                audit = self.reconcile_candle_gap(sid, expected_last_cycle=start, through_cycle=through,
+                    bars=gap, expected_position=json.loads(account['position']), accepted_standard='CANDLE_OHLC_PROXY_V1')
+                results.append({'id': sid, 'status': audit['status']})
+            except (KeyError, TypeError, ValueError, StrategyValidationError) as exc:
+                results.append({'id': sid, 'status': 'BLOCKED', 'reason': str(exc)})
+        return results
+
     def reconcile_candle_gap(self,sid,*,expected_last_cycle,through_cycle,bars,expected_position,accepted_standard):
         """Audit an operator-approved OHLC gap proxy without fabricating a processed cycle."""
         if accepted_standard!='CANDLE_OHLC_PROXY_V1':
@@ -532,7 +594,7 @@ class StrategyPool:
         highs=[];lows=[]
         for raw,bar in zip(bars,checked):
             if (raw.get('symbol')!='BTC/USD' or str(raw.get('interval','')).lower() not in ('15min','15m')
-                    or raw.get('source')!='ALPACA_US_BTCUSD_SPOT' or raw.get('currency')!='USD_RESEARCH'
+                    or raw.get('source')!='BINANCE_USDM_PERP' or raw.get('currency')!='USD_RESEARCH'
                     or raw.get('is_closed') is not True):
                 raise StrategyValidationError('缺口K线来源或收盘状态无效')
             opened=parse_time(raw.get('open_at'));closed=parse_time(raw.get('close_at'))
@@ -637,6 +699,7 @@ class StrategyPool:
             strategies=c.execute('select s.*,a.position,a.cash,a.realized,a.last_cycle from strategies s join accounts a on a.strategy_id=s.id order by s.id').fetchall()
             for index,strategy in enumerate(strategies):
                 sid=strategy['id'];savepoint=f'pool_strategy_{index}';c.execute(f'SAVEPOINT {savepoint}')
+                gap_audit=None;diagnostic=None
                 try:
                     if strategy['archived_at']:
                         c.execute(f'RELEASE {savepoint}');results.append({'id':sid,'status':'ARCHIVED'});continue
@@ -692,10 +755,13 @@ class StrategyPool:
                             unrealized=(mark-Decimal(pos['entry']))*Decimal(pos['qty'])*side
                             decision='HOLD'
                     elif doc.get('format')==FORMAT_V2 and (direction:=evaluate_entry_v2(doc,checked)) is None:
+                        diagnostic=explain_entry_v2(doc,checked)
                         c.execute('update accounts set last_cycle=?,last_status=?,last_action=? where strategy_id=?',(key,'OK','WAIT',sid))
                     elif doc.get('format')==FORMAT_V2:
+                        diagnostic=explain_entry_v2(doc,checked)
                         stop,rejection=build_v2_stop(doc,direction,checked)
                         if rejection:
+                            diagnostic['reasons']=[rejection]
                             decision='WAIT_'+rejection
                             c.execute('update accounts set last_cycle=?,last_status=?,last_action=? where strategy_id=?',(key,'OK',decision,sid))
                         else:
@@ -722,6 +788,10 @@ class StrategyPool:
                         encoded=json.dumps(evidence,sort_keys=True,separators=(',',':'),ensure_ascii=False)
                         c.execute("update gap_reconciliations set state='COMPLETED',evidence_json=?,completed_at=?,processing_cycle=? where reconciliation_id=?",
                                   (encoded,datetime.now(timezone.utc).isoformat(),key,gap_audit['reconciliation_id']))
+                    if diagnostic is not None:
+                        c.execute('''INSERT OR REPLACE INTO decision_diagnostics
+                            (strategy_id,cycle,version,action,details,created_at) VALUES(?,?,?,?,?,?)''',
+                            (sid,key,version,decision,json.dumps(diagnostic,sort_keys=True,ensure_ascii=False),datetime.now(timezone.utc).isoformat()))
                     c.execute(f'RELEASE {savepoint}')
                 except Exception as exc:
                     c.execute(f'ROLLBACK TO {savepoint}');c.execute(f'RELEASE {savepoint}')
@@ -741,7 +811,7 @@ class StrategyPool:
             received=datetime.fromisoformat(str(quote['received_at']).replace('Z','+00:00'))
             event=datetime.fromisoformat(str(quote['event_at']).replace('Z','+00:00'))
             now=datetime.now(timezone.utc)
-            return (quote.get('timestamp_valid') is True and quote.get('source')=='ALPACA_US_BTCUSD_SPOT' and quote.get('symbol')=='BTC/USD' and quote.get('currency')=='USD_RESEARCH'
+            return (quote.get('timestamp_valid') is True and quote.get('source')=='BINANCE_USDM_PERP' and quote.get('symbol')=='BTC/USD' and quote.get('currency')=='USD_RESEARCH'
                     and received.tzinfo is not None and event.tzinfo is not None and received<=now and event<=received
                     and bid.is_finite() and ask.is_finite() and 0<bid<=ask)
         except (KeyError,TypeError,ValueError,InvalidOperation): return False

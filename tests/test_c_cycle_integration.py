@@ -35,7 +35,7 @@ def test_isolated_model_decision_through_c_5x_ledger(tmp_path, open_action, clos
         c_maintenance_rate=D("0.01"),
     )
     quote = {
-        "source": "ALPACA_US_BTCUSD_SPOT",
+        "source": "BINANCE_USDM_PERP",
         "currency": "USD_RESEARCH",
         "bid": "100",
         "ask": "100",
@@ -46,7 +46,7 @@ def test_isolated_model_decision_through_c_5x_ledger(tmp_path, open_action, clos
         "event_id": "q1",
     }
     book = {
-        "source": "ALPACA_US_BTCUSD_SPOT",
+        "source": "BINANCE_USDM_PERP",
         "age_ms": 0,
         "bids": [{"p": "100", "s": "1000"}],
         "asks": [{"p": "100", "s": "1000"}],
@@ -75,3 +75,4 @@ def test_isolated_model_decision_through_c_5x_ledger(tmp_path, open_action, clos
     result = cycle(close_action, start + timedelta(minutes=15), None)
     assert result["C"]["execution"]["accepted"] and ledger.account("C")["state"] == "FLAT"
     assert len(ledger.fills("C")) == 2 and not ledger.fills("A") and not ledger.fills("B")
+

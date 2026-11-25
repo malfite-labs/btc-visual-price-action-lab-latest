@@ -38,7 +38,7 @@ async def main():
     rows=[]
     for i,close in enumerate((100,110)):
         opened=start+timedelta(minutes=15*i);closed=opened+timedelta(minutes=15)
-        rows.append({"symbol":"BTC/USD","interval":"15m","source":"ALPACA_US_BTCUSD_SPOT","currency":"USD_RESEARCH","is_closed":True,"open_at":opened.isoformat(),"close_at":closed.isoformat(),"open":close,"high":close+1,"low":close-1,"close":close,"volume":1})
+        rows.append({"symbol":"BTC/USD","interval":"15m","source":"BINANCE_USDM_PERP","currency":"USD_RESEARCH","is_closed":True,"open_at":opened.isoformat(),"close_at":closed.isoformat(),"open":close,"high":close+1,"low":close-1,"close":close,"volume":1})
     app.candle_archive.store(rows)
     report=await app.strategy_pool_backtest("api-isolated",request({"version":"1.0","start":start.isoformat(),"end":end.isoformat()}))
     assert report["strategy_version"]=="1.0"
@@ -64,3 +64,4 @@ asyncio.run(main())
     })
     result=subprocess.run([sys.executable,"-c",code],cwd=ROOT,env=env,text=True,capture_output=True,timeout=30)
     assert result.returncode==0, result.stdout+result.stderr
+

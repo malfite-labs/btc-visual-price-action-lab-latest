@@ -82,7 +82,9 @@ def test_live_closed_bar_dispatch_uses_one_image_and_current_market_evidence(tmp
     decisions = AgentOrchestrator(str(db))
     runner = TestOnlyPaperCycleRunner(ledger, decisions, CostModel())
     scheduler = PaperCycleScheduler(db, runner, enabled=True)
-    close = datetime(2026, 1, 1, 12, 15, tzinfo=UTC)
+    current = datetime.now(UTC)
+    close = current.replace(minute=(current.minute // 15) * 15, second=0, microsecond=0)
+    quote_at = datetime.now(UTC)
     candles = []
     for index in range(288):
         opened = close - timedelta(minutes=15 * (287 - index + 1))
@@ -101,6 +103,8 @@ def test_live_closed_bar_dispatch_uses_one_image_and_current_market_evidence(tmp
                 1,
                 "100.2",
                 True,
+                source="BINANCE_USDM_PERP",
+                currency="USD_RESEARCH",
             ).__dict__
         )
 
@@ -111,10 +115,10 @@ def test_live_closed_bar_dispatch_uses_one_image_and_current_market_evidence(tmp
             "ask": "100.1",
             "bid_qty": "2",
             "ask_qty": "2",
-            "event_at": (close + timedelta(seconds=1)).isoformat(),
-            "received_at": (close + timedelta(seconds=1)).isoformat(),
+            "event_at": quote_at.isoformat(),
+            "received_at": quote_at.isoformat(),
             "age_ms": 1,
-            "source": "ALPACA_US_BTCUSD_SPOT",
+            "source": "BINANCE_USDM_PERP",
             "currency": "USD_RESEARCH",
             "event_id": "quote-1",
         }
@@ -124,14 +128,15 @@ def test_live_closed_bar_dispatch_uses_one_image_and_current_market_evidence(tmp
             "symbol": "BTC/USD",
             "bids": [{"p": "100", "s": "2"}],
             "asks": [{"p": "100.1", "s": "2"}],
-            "event_at": close.isoformat(),
-            "received_at": close.isoformat(),
+            "event_at": quote_at.isoformat(),
+            "received_at": quote_at.isoformat(),
             "age_ms": 1,
-            "source": "ALPACA_US_BTCUSD_SPOT",
+            "source": "BINANCE_USDM_PERP",
         }
 
     monkeypatch.setattr(app, "paper_runner", runner)
     monkeypatch.setattr(app, "paper_scheduler", scheduler)
+    monkeypatch.setattr(app, "formal_mode", "VISUAL")
     adapter = TestModeAdapter()
     monkeypatch.setattr(app, "vision_adapter", adapter)
     monkeypatch.setattr(app, "candles", candles)
@@ -156,10 +161,10 @@ def test_live_closed_bar_dispatch_uses_one_image_and_current_market_evidence(tmp
 
     result = asyncio.run(
         app.process_closed_bar(
-            close, now=close + timedelta(seconds=2), snapshot_path=tmp_path / "chart.png"
+                close, now=datetime.now(UTC), snapshot_path=tmp_path / "chart.png"
         )
     )
-    assert result["A"]["status"] == result["B"]["status"] == "VALID"
+    assert result["A"]["status"] == result["B"]["status"] == "VALID", result
     assert result["C"]["status"] == "STRATEGY_NOT_CONFIGURED"
     assert adapter.seen["A"]["image"] == adapter.seen["B"]["image"]
     assert adapter.seen["A"]["md"] != adapter.seen["B"]["md"]
@@ -210,12 +215,12 @@ def test_quote_stop_monitor_and_recovery_are_separate_from_decisions(tmp_path, m
         "event_at": "2026-01-01T00:00:00+00:00",
         "received_at": "2026-01-01T00:00:00+00:00",
         "age_ms": 1,
-        "source": "ALPACA_US_BTCUSD_SPOT",
+        "source": "BINANCE_USDM_PERP",
         "currency": "USD_RESEARCH",
     }
     asyncio.run(app.process_stop_quote(quote))
     assert len(calls) == 2
-    assert calls[0]["quote"]["source"] == "ALPACA_US_BTCUSD_SPOT"
+    assert calls[0]["quote"]["source"] == "BINANCE_USDM_PERP"
     assert runner.ledger.fills() == []
 
 def test_startup_position_gate_waits_for_fresh_monitored_quote(tmp_path, monkeypatch):
@@ -301,12 +306,12 @@ def test_rule_driven_closed_bar_dispatches_strategy_pool_and_isolates_duplicates
         opened = close - timedelta(minutes=15 * (288 - index))
         ended = opened + timedelta(minutes=15)
         rows.append(Candle('BTC/USD', '15Min', opened.isoformat(), ended.isoformat(),
-                           '100', '101', '99', '100', '1', 1, '100', True).__dict__)
+                           '100', '101', '99', '100', '1', 1, '100', True, source='BINANCE_USDM_PERP', currency='USD_RESEARCH').__dict__)
     quote_time = now
     quote = {
         'symbol': 'BTC/USD', 'bid': '100', 'ask': '100.1', 'bid_qty': '2', 'ask_qty': '2',
         'event_at': quote_time.isoformat(), 'received_at': quote_time.isoformat(), 'age_ms': 0,
-        'timestamp_valid': True, 'source': 'ALPACA_US_BTCUSD_SPOT', 'currency': 'USD_RESEARCH',
+        'timestamp_valid': True, 'source': 'BINANCE_USDM_PERP', 'currency': 'USD_RESEARCH',
     }
     async def latest_quote():
         return dict(quote)
@@ -359,7 +364,7 @@ def test_rule_driven_closed_bar_dispatches_strategy_pool_and_isolates_duplicates
 
     next_close = close + timedelta(minutes=15)
     rows.append(Candle('BTC/USD', '15Min', close.isoformat(), next_close.isoformat(),
-                       '100', '101', '99', '100', '1', 1, '100', True).__dict__)
+                       '100', '101', '99', '100', '1', 1, '100', True, source='BINANCE_USDM_PERP', currency='USD_RESEARCH').__dict__)
     def fail_cycle(*args, **kwargs):
         raise RuntimeError('isolated PA failure fixture')
     monkeypatch.setattr(pool, 'cycle', fail_cycle)
@@ -369,7 +374,7 @@ def test_rule_driven_closed_bar_dispatches_strategy_pool_and_isolates_duplicates
 
     blocked_close = next_close + timedelta(minutes=15)
     rows.append(Candle('BTC/USD', '15Min', next_close.isoformat(), blocked_close.isoformat(),
-                       '100', '101', '99', '100', '1', 1, '100', True).__dict__)
+                       '100', '101', '99', '100', '1', 1, '100', True, source='BINANCE_USDM_PERP', currency='USD_RESEARCH').__dict__)
     monkeypatch.setattr(app, 'market_open_gate_reason', lambda **kwargs: 'MARKET_STREAM_DISCONNECTED')
     blocked = asyncio.run(app.process_closed_bar(blocked_close, now=blocked_close + timedelta(seconds=2)))
     assert all(item['status'] == 'MARKET_STREAM_DISCONNECTED' for item in blocked.values())
@@ -377,9 +382,10 @@ def test_rule_driven_closed_bar_dispatches_strategy_pool_and_isolates_duplicates
 
     incomplete_close = blocked_close + timedelta(minutes=15)
     rows.append(Candle('BTC/USD', '15Min', blocked_close.isoformat(), incomplete_close.isoformat(),
-                       '100', '101', '99', '100', '1', 1, '100', True).__dict__)
+                       '100', '101', '99', '100', '1', 1, '100', True, source='BINANCE_USDM_PERP', currency='USD_RESEARCH').__dict__)
     monkeypatch.setattr(app, 'market_open_gate_reason', lambda **kwargs: None)
     monkeypatch.setattr(app, '_closed_cycle_candles', lambda *args: (_ for _ in ()).throw(ValueError('CLOSED_WINDOW_INCOMPLETE')))
     incomplete = asyncio.run(app.process_closed_bar(incomplete_close, now=incomplete_close + timedelta(seconds=2)))
     assert all(item['status'] == 'CLOSED_WINDOW_INCOMPLETE' for item in incomplete.values())
     assert paper_calls == [close, close, next_close]
+

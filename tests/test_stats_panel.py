@@ -15,7 +15,7 @@ def test_current_open_fee_not_added_to_closed_realized(tmp_path):
  o=l.open_position(agent='B',direction='LONG',quantity=D('1'),price=D('100'),stop=D('99'),fee=D('.05'),slippage=D('0'),idempotency_key='open1',expected_version=0);assert o['accepted']
  z=l.close_position(agent='B',price=D('101'),fee=D('.0505'),slippage=D('0'),idempotency_key='close1',expected_version=1);assert z['accepted']
  o=l.open_position(agent='B',direction='LONG',quantity=D('1'),price=D('100'),stop=D('99'),fee=D('.05'),slippage=D('0'),idempotency_key='open2',expected_version=2);assert o['accepted']
- q={'source':'ALPACA_US_BTCUSD_SPOT','timestamp_valid':True,'age_ms':0,'bid':'100','ask':'100.1'};x=build_stats(l.path,tmp_path,l,q,CostModel(),True)['agents']['B']
+ q={'source':'BINANCE_USDM_PERP','timestamp_valid':True,'age_ms':0,'bid':'100','ask':'100.1'};x=build_stats(l.path,tmp_path,l,q,CostModel(),True)['agents']['B']
  assert x['realized_net_pnl']=='0.89' and x['closed_trades']==1 and x['fees']=='0.16' and x['state']=='OPEN_LONG'
 
 def test_formal_mode_accepts_powershell_utf8_bom(tmp_path,monkeypatch):
@@ -42,3 +42,4 @@ def test_shadow_status_requires_fresh_heartbeat_and_held_worker_lock(tmp_path):
  finally:
   p.stdin.write('\n');p.stdin.flush();p.wait(timeout=10)
  assert shadow_state(tmp_path,fresh)=='OFFLINE'
+

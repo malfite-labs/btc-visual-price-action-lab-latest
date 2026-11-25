@@ -8,7 +8,7 @@ from backend.execution import prepare_entry
 def evaluate_quant_candidate(*,store,bars,candidate,quote,now,cost,_shadow_change=None):
     def reject(reason,**extra):return {'order_eligible':False,'reason':reason,**extra}
     try:
-        if any(b.get('symbol')!='BTC/USD' or b.get('source')!='ALPACA_US_BTCUSD_SPOT'
+        if any(b.get('symbol')!='BTC/USD' or b.get('source')!='BINANCE_USDM_PERP'
                or b.get('currency')!='USD_RESEARCH' or str(b.get('interval','')).lower() not in {'15min','15m'} for b in bars):
             return reject('SNAPSHOT_SOURCE_INVALID')
         result=detect_setups(bars,_shadow_change=_shadow_change)
@@ -18,7 +18,7 @@ def evaluate_quant_candidate(*,store,bars,candidate,quote,now,cost,_shadow_chang
         if now.tzinfo is None or close.tzinfo is None or not close.astimezone(UTC)<=now.astimezone(UTC)<close.astimezone(UTC)+timedelta(minutes=15):
             return reject('SIGNAL_EXPIRED')
         if not quote:return reject('QUOTE_UNAVAILABLE')
-        if quote.get('source')!='ALPACA_US_BTCUSD_SPOT' or quote.get('currency')!='USD_RESEARCH' or quote.get('timestamp_valid') is not True:
+        if quote.get('source')!='BINANCE_USDM_PERP' or quote.get('currency')!='USD_RESEARCH' or quote.get('timestamp_valid') is not True:
             return reject('QUOTE_INVALID')
         quote_time=datetime.fromisoformat(str(quote['event_at']).replace('Z','+00:00'))
         if quote_time.tzinfo is None or quote_time.astimezone(UTC)<close.astimezone(UTC) or quote_time.astimezone(UTC)>now.astimezone(UTC):
@@ -40,3 +40,4 @@ def evaluate_quant_candidate(*,store,bars,candidate,quote,now,cost,_shadow_chang
         return reject('VISUAL_AND_EXECUTION_NOT_VALIDATED',risk_per_unit=str(risk),reward_per_unit=str(net_reward),preflight=pre)
     except (KeyError,ValueError,TypeError,ArithmeticError,InvalidOperation):
         return reject('INVALID_CONTEXT')
+

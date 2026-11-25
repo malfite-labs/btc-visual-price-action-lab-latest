@@ -4,7 +4,7 @@
     "version": "V2.6",
     "label": "突破回踩",
     "file": "A-rule.json",
-    "sha256": "af9ca1ffc97aefc021b2e8f4d041596fca4fa963b6a76dc605dfd2aa644af691",
+    "sha256": "4dd9ff07b4d5806d92b788606b687d65a021887e1227b92c19f04c747231c2fb",
     "risk_fraction": "0.02",
     "max_leverage": "1",
     "require_target_cover_costs": true
@@ -24,7 +24,7 @@
     "version": "V3.1",
     "label": "Tony裸K研究近似（无结构障碍否决）",
     "file": "v3-signals.py",
-    "sha256": "c27eef69cc256444ed7ad0d501cc695adbdeb06867c8ed063db2c6c01a9a69e5",
+    "sha256": "3190328f53fdcd6b55f2e3bae1f13cda540a128dc93551049b834c761a1fdca1",
     "risk_fraction": "0.02",
     "max_leverage": "5",
     "require_target_cover_costs": false,

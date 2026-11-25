@@ -6,7 +6,7 @@ from backend.g_mirror import GMirror, CostModel
 
 def q(bid="99.90", ask="100.10", at=None):
     at = at or datetime.now(timezone.utc).isoformat()
-    return {"source": "ALPACA_US_BTCUSD_SPOT", "symbol": "BTC/USD", "currency": "USD_RESEARCH",
+    return {"source": "BINANCE_USDM_PERP", "symbol": "BTC/USD", "currency": "USD_RESEARCH",
             "timestamp_valid": True, "age_ms": 10, "event_at": at, "received_at": at, "bid": bid, "ask": ask}
 
 
@@ -69,3 +69,4 @@ def test_rejects_unexecutable_exact_quantity_without_resizing(tmp_path):
     assert not result["accepted"]
     assert result["reason"] in {"LEVERAGE_LIMIT", "MARGIN_LIMIT", "RISK_LIMIT"}
     assert len(g.fills()) == 0
+

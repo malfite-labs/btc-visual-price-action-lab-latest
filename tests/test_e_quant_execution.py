@@ -3,14 +3,36 @@ from backend.domain import CostModel
 from backend.e_paper_store import EPaperStore
 from backend.e_quant_execution import run_quant_cycle
 from test_e_quant_v11 import range_window
+import pytest
+
+
+@pytest.mark.parametrize('setup,bid,ask,short', [
+    ('E1', '99.39', '99.40', False),
+    ('E2', '97.79', '97.80', False),
+    ('E3', '100.39', '100.40', False),
+    ('E4', '99.50', '99.51', True),
+])
+def test_each_original_setup_can_execute_without_ai_when_risk_passes(tmp_path, setup, bid, ask, short):
+    from scripts.e_v11_model_smoke import fixture
+    bars = fixture(setup)
+    for bar in bars:
+        bar.update(symbol='BTC/USD', interval='15Min', source='BINANCE_USDM_PERP', currency='USD_RESEARCH')
+    now = datetime.fromisoformat(bars[-1]['close_at']) + timedelta(seconds=3)
+    quote = {'source': 'BINANCE_USDM_PERP', 'currency': 'USD_RESEARCH', 'timestamp_valid': True,
+             'age_ms': 0, 'bid': bid, 'ask': ask, 'event_at': now.isoformat(), 'event_id': setup}
+    store = EPaperStore(tmp_path / (setup + '.sqlite'))
+    result = run_quant_cycle(store=store, bars=bars, quote=quote, now=now, cost=CostModel(), allow_short=short)
+    assert result['status'] == 'PAPER_FILLED', result
+    assert result['candidate']['setup'] == setup
+    assert len(store.fills()) == 1
 
 def sample():
     rows=range_window()
     rows[-2].update(open=99.8,high=100,low=99.4,close=99.5)
     rows[-1].update(open=99.5,high=100.2,low=99.4,close=100)
-    for b in rows:b.update(symbol='BTC/USD',interval='15Min',source='ALPACA_US_BTCUSD_SPOT',currency='USD_RESEARCH')
+    for b in rows:b.update(symbol='BTC/USD',interval='15Min',source='BINANCE_USDM_PERP',currency='USD_RESEARCH')
     now=datetime.fromisoformat(rows[-1]['close_at'])+timedelta(seconds=3)
-    q={'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','timestamp_valid':True,'age_ms':0,'bid':'99.39','ask':'99.4','event_at':now.isoformat(),'event_id':'test'}
+    q={'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','timestamp_valid':True,'age_ms':0,'bid':'99.39','ask':'99.4','event_at':now.isoformat(),'event_id':'test'}
     return rows,now,q
 
 def test_quant_entry_and_dedup_are_independent_of_ai(tmp_path):
@@ -67,9 +89,9 @@ def test_quant_rejects_unaligned_candles(tmp_path):
 def test_e4_does_not_short_without_verified_account_capability(tmp_path):
     from scripts.e_v11_model_smoke import fixture
     bars=fixture('E4')
-    for b in bars:b.update(symbol='BTC/USD',interval='15Min',source='ALPACA_US_BTCUSD_SPOT',currency='USD_RESEARCH')
+    for b in bars:b.update(symbol='BTC/USD',interval='15Min',source='BINANCE_USDM_PERP',currency='USD_RESEARCH')
     now=datetime.fromisoformat(bars[-1]['close_at'])+timedelta(seconds=3)
-    quote={'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','timestamp_valid':True,'age_ms':0,'bid':'99.5','ask':'99.51','event_at':now.isoformat()}
+    quote={'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','timestamp_valid':True,'age_ms':0,'bid':'99.5','ask':'99.51','event_at':now.isoformat()}
     store=EPaperStore(tmp_path/'e.sqlite')
     result=run_quant_cycle(store=store,bars=bars,quote=quote,now=now,cost=CostModel())
     assert result['reason']=='SHORT_UNSUPPORTED' and store.fills()==[]
@@ -99,3 +121,4 @@ def test_failing_explanation_does_not_change_deterministic_cycle(tmp_path):
         await asyncio.sleep(0)
         assert result['status']=='PAPER_FILLED' and len(store.fills())==1
     asyncio.run(verify())
+

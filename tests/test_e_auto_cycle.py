@@ -37,12 +37,13 @@ def test_each_long_setup_reaches_isolated_matcher(tmp_path):
     async def verify():
         for setup in ('E1','E2','E3'):
             rows=fixture(setup)
-            for b in rows:b.update(symbol='BTC/USD',interval='15Min',source='ALPACA_US_BTCUSD_SPOT',currency='USD_RESEARCH')
+            for b in rows:b.update(symbol='BTC/USD',interval='15Min',source='BINANCE_USDM_PERP',currency='USD_RESEARCH')
             candidate=detect_setups(rows)['selected'];assert candidate['setup']==setup
             now=datetime.fromisoformat(rows[-1]['close_at'])+timedelta(seconds=3)
             ask=float(candidate['stop'])+.04
-            quote={'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','timestamp_valid':True,'age_ms':0,'bid':str(ask-.01),'ask':str(ask),'event_at':now.isoformat(),'event_id':'synthetic'}
+            quote={'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','timestamp_valid':True,'age_ms':0,'bid':str(ask-.01),'ask':str(ask),'event_at':now.isoformat(),'event_id':'synthetic'}
             store=EPaperStore(tmp_path/(setup+'.sqlite'))
             result=await run_e_auto_cycle(store=store,bars=rows,close=now,quote=quote,cost=CostModel())
             assert result['status']=='PAPER_FILLED' and store.account('E')['state']=='OPEN_LONG'
     asyncio.run(verify())
+

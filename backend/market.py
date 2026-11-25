@@ -289,6 +289,7 @@ class AlpacaMarketData:
             "websocket": "UNKNOWN",
             "last_error": None,
             "last_quote": None,
+            "rest_last_quote": None,
             "websocket_error_code": None,
             "websocket_failure_reason": None,
             "websocket_last_error_class": None,
@@ -845,6 +846,152 @@ class AlpacaMarketData:
         if stop.is_set():
             self.status["websocket"] = "STOPPED"
 
+
+class BinanceMarketData(AlpacaMarketData):
+    """Binance USDⓈ-M public market data, normalized to the legacy paper contract.
+
+    Strategy and ledger code continue to consume the same BTC/USD quote and Candle
+    fields. Binance's BTCUSDT prices are carried as a USD-equivalent research basis;
+    no Binance order or account endpoint is used.
+    """
+
+    source = "BINANCE_USDM_PERP"
+    symbol = "BTC/USD"
+    provider_symbol = "BTCUSDT"
+    rest_base = "https://fapi.binance.com"
+    stream_url = (
+        "wss://fstream.binance.com/stream?streams="
+        "btcusdt@bookTicker/btcusdt@kline_15m"
+    )
+
+    def __init__(self, *, stream_lock_path=None, recovery_history_path=None):
+        super().__init__(credentials=("public-market-data", "no-auth"),
+                         stream_lock_path=stream_lock_path,
+                         recovery_history_path=recovery_history_path)
+        self.status["provider"] = "Binance USDⓈ-M BTCUSDT public market data"
+        self.status["market_type"] = "USDⓈ-M perpetual"
+
+    async def bars(self, start: datetime, end: datetime, timeframe: str = "15Min") -> list[Candle]:
+        interval = {"1Min": "1m", "5Min": "5m", "15Min": "15m", "1Hour": "1h"}.get(timeframe)
+        if interval is None:
+            raise ValueError(f"UNSUPPORTED_BINANCE_INTERVAL:{timeframe}")
+        step_minutes = {"1m": 1, "5m": 5, "15m": 15, "1h": 60}[interval]
+        cursor = int(start.astimezone(UTC).timestamp() * 1000)
+        finish = int(end.astimezone(UTC).timestamp() * 1000)
+        rows: list[list[Any]] = []
+        async with httpx.AsyncClient(timeout=15) as client:
+            while cursor < finish:
+                response = await client.get(
+                    f"{self.rest_base}/fapi/v1/klines",
+                    params={"symbol": self.provider_symbol, "interval": interval,
+                            "startTime": cursor, "endTime": finish, "limit": 1500},
+                )
+                response.raise_for_status()
+                batch = response.json()
+                if not isinstance(batch, list):
+                    raise RuntimeError("BINANCE_KLINES_BAD_RESPONSE")
+                if not batch:
+                    break
+                rows.extend(batch)
+                next_cursor = int(batch[-1][0]) + step_minutes * 60_000
+                if next_cursor <= cursor:
+                    raise RuntimeError("BINANCE_KLINES_PAGINATION_STALLED")
+                cursor = next_cursor
+                if len(batch) < 1500:
+                    break
+        now_ms = int(datetime.now(UTC).timestamp() * 1000)
+        candles = []
+        for row in rows:
+            opened_ms = int(row[0])
+            close_ms = int(row[6]) + 1
+            opened = datetime.fromtimestamp(opened_ms / 1000, UTC)
+            closed = datetime.fromtimestamp(close_ms / 1000, UTC)
+            candles.append(Candle(
+                self.symbol, timeframe, opened.isoformat(), closed.isoformat(),
+                str(row[1]), str(row[2]), str(row[3]), str(row[4]), str(row[5]),
+                int(row[8]), str(row[7]), close_ms <= now_ms,
+                source=self.source, currency="USD_RESEARCH",
+                data_basis="Binance USDⓈ-M BTCUSDT kline; USDT treated as USD-equivalent for legacy paper ledger",
+            ))
+        self.status["rest"] = "PASS"
+        return candles
+
+    async def latest_quote(self) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(f"{self.rest_base}/fapi/v1/ticker/bookTicker",
+                                        params={"symbol": self.provider_symbol})
+            response.raise_for_status()
+            row = response.json()
+        received = datetime.now(UTC)
+        event_at = received  # REST bookTicker has no exchange event timestamp.
+        timing = quote_timing(event_at, received)
+        item = {"symbol": self.symbol, "provider_symbol": self.provider_symbol,
+                "bid": str(row["bidPrice"]), "ask": str(row["askPrice"]),
+                "bid_qty": str(row["bidQty"]), "ask_qty": str(row["askQty"]),
+                "event_at": event_at.isoformat(), "received_at": received.isoformat(),
+                **timing, "source": self.source, "currency": "USD_RESEARCH",
+                "provider_currency": "USDT", "timestamp_basis": "local_receive_time_rest_bookTicker"}
+        self.status["rest_last_quote"] = item
+        self.status["rest"] = "PASS"
+        return item
+
+    async def orderbook(self) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(f"{self.rest_base}/fapi/v1/depth",
+                                        params={"symbol": self.provider_symbol, "limit": 5})
+            response.raise_for_status()
+            row = response.json()
+        received = datetime.now(UTC)
+        event_at = received  # Binance depth REST snapshot has no exchange event timestamp.
+        return {"symbol": self.symbol, "bids": row.get("bids", []), "asks": row.get("asks", []),
+                "event_at": event_at.isoformat(), "received_at": received.isoformat(),
+                **quote_timing(event_at, received), "source": self.source}
+
+    async def _run_websocket(self, on_event, stop: asyncio.Event) -> None:
+        import websockets
+        self.status["websocket"] = "CONNECTING"
+        while not stop.is_set():
+            try:
+                async with websockets.connect(self.stream_url, ping_interval=20, close_timeout=3) as ws:
+                    self.status["websocket"] = "CONNECTED"
+                    async for raw in ws:
+                        if stop.is_set():
+                            break
+                        envelope = json.loads(raw)
+                        event = envelope.get("data", {})
+                        stream = envelope.get("stream", "")
+                        received = datetime.now(UTC)
+                        self.status["websocket_last_message_received_at"] = received.isoformat()
+                        if "@bookTicker" in stream:
+                            event_at = datetime.fromtimestamp(int(event["E"]) / 1000, UTC)
+                            normalized = {"T": "q", "S": self.symbol, "t": event_at.isoformat(),
+                                          "bp": event["b"], "ap": event["a"],
+                                          "bs": event["B"], "as": event["A"],
+                                          "source": self.source, "currency": "USD_RESEARCH"}
+                            normalized.update(quote_timing(event_at, received))
+                            self.status["last_quote"] = normalized
+                            self.status["websocket_last_quote_received_at"] = received.isoformat()
+                            await on_event(normalized)
+                        elif "@kline_15m" in stream:
+                            k = event.get("k", {})
+                            opened = datetime.fromtimestamp(int(k["t"]) / 1000, UTC)
+                            closed = datetime.fromtimestamp((int(k["T"]) + 1) / 1000, UTC)
+                            await on_event({"T": "b", "S": self.symbol,
+                                "bar": {"symbol": self.symbol, "interval": "15Min",
+                                         "open_at": opened.isoformat(), "close_at": closed.isoformat(),
+                                         "open": k["o"], "high": k["h"], "low": k["l"],
+                                         "close": k["c"], "volume": k["v"],
+                                         "trade_count": int(k["n"]), "vwap": None,
+                                         "is_closed": bool(k["x"]), "source": self.source,
+                                         "currency": "USD_RESEARCH"}})
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self.status["websocket"] = "RECONNECTING"
+                self.status["last_error"] = type(exc).__name__
+                await asyncio.sleep(2)
+        self.status["websocket"] = "STOPPED"
+
     def _enter_long_protection(self, reason: str) -> None:
         self.status["websocket_recovery_state"] = "LONG_PROTECTION"
         self.status["websocket"] = (
@@ -924,3 +1071,4 @@ def _classify_websocket_failure(exc: Exception) -> tuple[str, int | None]:
 def candle_hash(candles: list[Candle]) -> str:
     payload = json.dumps([asdict(c) for c in candles], sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode()).hexdigest()
+

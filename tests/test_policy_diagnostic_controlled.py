@@ -79,7 +79,7 @@ def _scenario(kind):
 def _market(price):
     bid, ask = price - 1, price + 1
     quote = {
-        "source": "ALPACA_US_BTCUSD_SPOT",
+        "source": "BINANCE_USDM_PERP",
         "currency": "USD_RESEARCH",
         "bid": str(bid),
         "ask": str(ask),
@@ -87,7 +87,7 @@ def _market(price):
         "event_id": "synthetic-quote",
     }
     book = {
-        "source": "ALPACA_US_BTCUSD_SPOT",
+        "source": "BINANCE_USDM_PERP",
         "age_ms": 1,
         "bids": [{"p": str(bid), "s": "1"}],
         "asks": [{"p": str(ask), "s": "1"}],
@@ -321,3 +321,4 @@ def test_missing_market_or_account_value_rejects_entry(tmp_path):
         cost=CostModel(),
     )
     assert not risk.accepted and risk.reason == "INVALID_INPUT"
+

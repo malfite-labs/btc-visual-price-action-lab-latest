@@ -51,7 +51,8 @@ def observe_cycle(path, archive, close_at, now):
     with sqlite3.connect(Path(path).resolve().as_uri() + '?mode=ro', uri=True, timeout=10) as db:
         if db.execute('SELECT 1 FROM d_cycles WHERE close_at=?', (key,)).fetchone():
             return {'status': 'DUPLICATE_BAR', 'reason': 'DUPLICATE_BAR'}
-    # No future bars, and at most 1000 bars to satisfy the 960-bar warmup.
+    # No future bars. The signal module enforces only its indicator lookback,
+    # not the research JSON's 960-bar preload requirement.
     bars = archive.read(close_at - timedelta(minutes=15 * 1000), close_at)
     bars = [bar for bar in bars if datetime.fromisoformat(bar['close_at'].replace('Z', '+00:00')).astimezone(timezone.utc) <= close_at]
     with sqlite3.connect(path, timeout=10, isolation_level=None) as db:
@@ -96,6 +97,8 @@ def read_status(path):
               'account': None, 'equity': None, 'realized_pnl': None,
               'unrealized_pnl': None, 'fills': [], 'decision': None,
               'control_state': 'OBSERVE_ONLY', 'execution_ready': False}
+    from backend.d_signal import RULE_VERSION, SOURCE_COMMIT
+    result.update(rule_version=RULE_VERSION, source_commit=SOURCE_COMMIT)
     if not path.is_file():
         return result
     try:

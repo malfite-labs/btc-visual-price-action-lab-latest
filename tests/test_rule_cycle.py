@@ -17,8 +17,8 @@ def test_real_rule_cycle_opens_targets_and_deduplicates(tmp_path,monkeypatch):
  import backend.rule_cycle as module
  db=tmp_path/'paper.sqlite3';ledger=Ledger(db);AgentOrchestrator(str(db));runner=RuleCycleRunner(ledger,db,CostModel());runner.v3=types.SimpleNamespace(signal_b=lambda bars,i:None,signal_c=lambda bars,i:None)
  monkeypatch.setattr(module,'json_signal',lambda rule,bars,i:{'direction':'LONG','stop':'90','target':None,'setup':'TEST_BREAK'})
- quote={'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','timestamp_valid':True,'age_ms':0,'event_at':'2026-10-28T09:30:01+00:00','bid':'100','ask':'100.1','bid_qty':'1','ask_qty':'1','event_id':'q'}
- book={'source':'ALPACA_US_BTCUSD_SPOT','timestamp_valid':True,'age_ms':0,'bids':[{'p':'100','s':'1'}],'asks':[{'p':'100.1','s':'1'}]};close=datetime(2026,10,28,9,30,tzinfo=timezone.utc)
+ quote={'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','timestamp_valid':True,'age_ms':0,'event_at':'2026-10-28T09:30:01+00:00','bid':'100','ask':'100.1','bid_qty':'1','ask_qty':'1','event_id':'q'}
+ book={'source':'BINANCE_USDM_PERP','timestamp_valid':True,'age_ms':0,'bids':[{'p':'100','s':'1'}],'asks':[{'p':'100.1','s':'1'}]};close=datetime(2026,10,28,9,30,tzinfo=timezone.utc)
  first=asyncio.run(runner.run_cycle(candles=[{'open':'100','high':'101','low':'99','close':'100'}]*288,candle_close=close,quote=quote,orderbook=book));assert first['A']['execution']['accepted'];assert ledger.account('A')['state']=='OPEN_LONG'
  second=asyncio.run(runner.run_cycle(candles=[{'open':'100','high':'101','low':'99','close':'100'}]*288,candle_close=close,quote=quote,orderbook=book));assert second['A']['status']=='DUPLICATE_CYCLE'
  target=runner._meta('A')[2];quote.update(bid=str(float(target)+1),ask=str(float(target)+2));runner.monitor_targets(quote);assert ledger.account('A')['state']=='FLAT'
@@ -41,7 +41,7 @@ def test_actual_rule_cycle_rejects_entry_when_paused(tmp_path, monkeypatch):
  monkeypatch.setattr(runner,'check_profile',lambda:None)
  monkeypatch.setattr(module,'json_signal',lambda rule,bars,i:{'direction':'LONG','stop':'90','target':None,'setup':'TEST_BREAK'})
  control=StrategyControl(tmp_path/'data/strategy-control.sqlite3');control.request_pause('A')
- quote={'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','timestamp_valid':True,'age_ms':0,'event_at':'2026-10-28T09:30:01+00:00','bid':'100','ask':'100.1','bid_qty':'1','ask_qty':'1','event_id':'q'}
+ quote={'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','timestamp_valid':True,'age_ms':0,'event_at':'2026-10-28T09:30:01+00:00','bid':'100','ask':'100.1','bid_qty':'1','ask_qty':'1','event_id':'q'}
  close=datetime(2026,10,28,9,30,tzinfo=timezone.utc)
  result=asyncio.run(runner.run_cycle(candles=[{'open':'100','high':'101','low':'99','close':'100'}]*288,candle_close=close,quote=quote,orderbook={}))
  assert result['A']['execution']['reason']=='STRATEGY_PAUSED'
@@ -68,7 +68,7 @@ def test_c_uses_leverage_and_time_closes_short(tmp_path,monkeypatch):
  from backend.domain import CostModel
  import backend.rule_cycle as module
  db=tmp_path/'p.sqlite3';l=Ledger(db);AgentOrchestrator(str(db));runner=RuleCycleRunner(l,db,CostModel());runner.v3=types.SimpleNamespace(signal_b=lambda bars,i:None,signal_c=lambda bars,i:{'direction':'SHORT','stop':'101','target':None,'setup':'T2','obstacle':None});monkeypatch.setattr(module,'json_signal',lambda *args:None)
- q={'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','timestamp_valid':True,'age_ms':0,'event_at':'2026-10-28T09:30:01+00:00','bid':'100','ask':'100.1','bid_qty':'1000','ask_qty':'1000','event_id':'q'};book={'source':q['source'],'timestamp_valid':True,'age_ms':0,'bids':[{'p':'100','s':'1000'}],'asks':[{'p':'100.1','s':'1000'}]};start=datetime(2026,10,28,9,30,tzinfo=timezone.utc)
+ q={'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','timestamp_valid':True,'age_ms':0,'event_at':'2026-10-28T09:30:01+00:00','bid':'100','ask':'100.1','bid_qty':'1000','ask_qty':'1000','event_id':'q'};book={'source':q['source'],'timestamp_valid':True,'age_ms':0,'bids':[{'p':'100','s':'1000'}],'asks':[{'p':'100.1','s':'1000'}]};start=datetime(2026,10,28,9,30,tzinfo=timezone.utc)
  r=asyncio.run(runner.run_cycle(candles=[{'open':'100','high':'101','low':'99','close':'100'}]*288,candle_close=start,quote=q,orderbook=book));assert r['C']['execution']['accepted'];pos=__import__('json').loads(l.account('C')['position_json']);assert pos['leverage']=='5' and float(pos['planned_loss'])<=200
  later=start+timedelta(minutes=180);q['event_at']=(later+timedelta(seconds=1)).isoformat();r=asyncio.run(runner.run_cycle(candles=[{'open':'100','high':'101','low':'99','close':'100'}]*288,candle_close=later,quote=q,orderbook=book));assert r['C']['action']=='CLOSE_SHORT';assert l.account('C')['state']=='FLAT'
  with sqlite3.connect(db) as c:assert c.execute("select count(*) from fills where agent='C'").fetchone()[0]==2
@@ -98,7 +98,7 @@ def test_rule_scheduler_c_liquidation_uses_original_margin(tmp_path,monkeypatch)
  from backend.domain import CostModel
  import backend.rule_cycle as module
  db=tmp_path/'c.sqlite3';ledger=Ledger(db);AgentOrchestrator(str(db));runner=RuleCycleRunner(ledger,db);runner.v3=types.SimpleNamespace(signal_b=lambda b,i:None,signal_c=lambda b,i:{'direction':'LONG','stop':'99','target':None,'setup':'T2','obstacle':None});monkeypatch.setattr(module,'json_signal',lambda *args:None)
- q={'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','timestamp_valid':True,'age_ms':0,'event_at':'2026-10-28T09:30:01+00:00','bid':'100','ask':'100','bid_qty':'1000','ask_qty':'1000','event_id':'q'};book={'source':q['source'],'timestamp_valid':True,'age_ms':0,'bids':[{'p':'100','s':'1000'}],'asks':[{'p':'100','s':'1000'}]};start=datetime(2026,10,28,9,30,tzinfo=timezone.utc);bars=[{'open':'100','high':'101','low':'99','close':'100'}]*288
+ q={'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','timestamp_valid':True,'age_ms':0,'event_at':'2026-10-28T09:30:01+00:00','bid':'100','ask':'100','bid_qty':'1000','ask_qty':'1000','event_id':'q'};book={'source':q['source'],'timestamp_valid':True,'age_ms':0,'bids':[{'p':'100','s':'1000'}],'asks':[{'p':'100','s':'1000'}]};start=datetime(2026,10,28,9,30,tzinfo=timezone.utc);bars=[{'open':'100','high':'101','low':'99','close':'100'}]*288
  r=asyncio.run(runner.run_cycle(candles=bars,candle_close=start,quote=q,orderbook=book));assert r['C']['execution']['accepted'];q.update({'bid':'1','ask':'1','event_id':'gap'});scheduler=PaperCycleScheduler(db,runner,enabled=True,c_maintenance_rate=D('.01'));result=scheduler.monitor_stops(event_ids={'C':'test-gap'},quote=q,cost=CostModel());assert result['C']['accepted'];assert ledger.account('C')['state']=='FLAT'
 
 def test_v31_short_records_context_without_obstacle_rejection(tmp_path,monkeypatch):
@@ -108,7 +108,7 @@ def test_v31_short_records_context_without_obstacle_rejection(tmp_path,monkeypat
  from backend.rule_cycle import RuleCycleRunner
  import backend.rule_cycle as module
  db=tmp_path/'audit.sqlite3';l=Ledger(db);AgentOrchestrator(str(db));r=RuleCycleRunner(l,db);r.v3=types.SimpleNamespace(signal_b=lambda b,i:None,signal_c=lambda b,i:{'direction':'SHORT','stop':'101','setup':'T2','obstacle':'99'});monkeypatch.setattr(module,'json_signal',lambda *a:None)
- q={'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','timestamp_valid':True,'age_ms':0,'event_at':'2026-10-28T09:30:01+00:00','bid':'100','ask':'100.1','bid_qty':'1000','ask_qty':'1000'};book={'source':q['source'],'timestamp_valid':True,'age_ms':0,'bids':[{'p':'100','s':'1000'}],'asks':[{'p':'100.1','s':'1000'}]}
+ q={'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','timestamp_valid':True,'age_ms':0,'event_at':'2026-10-28T09:30:01+00:00','bid':'100','ask':'100.1','bid_qty':'1000','ask_qty':'1000'};book={'source':q['source'],'timestamp_valid':True,'age_ms':0,'bids':[{'p':'100','s':'1000'}],'asks':[{'p':'100.1','s':'1000'}]}
  result=asyncio.run(r.run_cycle(candles=[{'open':'100','high':'101','low':'99','close':'100'}]*288,candle_close=datetime(2026,10,28,9,30,tzinfo=timezone.utc),quote=q,orderbook=book))
  assert result['C']['execution']['accepted']
  with sqlite3.connect(db) as c: payload=json.loads(c.execute("select raw_response from decisions where agent='C'").fetchone()[0])
@@ -127,7 +127,7 @@ def test_short_safety_boundaries_on_isolated_ledger(tmp_path):
  assert not open_('200','102','10')['accepted'] # exceeds 2% including costs
  assert not open_('501','100.01','25.05')['accepted'] # notional > 5x
  assert not open_('500','100.01','25')['accepted'] # margin plus fee > available
- q={'source':'ALPACA_US_BTCUSD_SPOT','bid':'100','ask':'100.1','timestamp_valid':True};book={'bids':[{'p':'100','s':'1000'}],'asks':[{'p':'100.1','s':'1000'}]}
+ q={'source':'BINANCE_USDM_PERP','bid':'100','ask':'100.1','timestamp_valid':True};book={'bids':[{'p':'100','s':'1000'}],'asks':[{'p':'100.1','s':'1000'}]}
  args=dict(equity=D('10000'),available_cash=D('10000'),direction='SHORT',stop=D('101'),quote=q,orderbook=book,cost=CostModel(),quote_age_ms=60001,book_age_ms=0,leverage=D('5'))
  assert prepare_entry(**args)['reason']=='QUOTE_STALE'
  args['quote_age_ms']=0;args['stop']=D('99');assert prepare_entry(**args)['reason']=='STOP_ON_WRONG_SIDE'
@@ -147,7 +147,7 @@ def test_specific_target_rejections_persist_snapshot(tmp_path,monkeypatch):
  import backend.rule_cycle as module
  for idx,(stop,obstacle,expected) in enumerate([('180',None,'INVALID_TARGET_PRICE')]):
   db=tmp_path/f'case{idx}.sqlite3';l=Ledger(db);AgentOrchestrator(str(db));runner=RuleCycleRunner(l,db);runner.v3=types.SimpleNamespace(signal_b=lambda b,i:None,signal_c=lambda b,i:{'direction':'SHORT','stop':stop,'setup':'T2','obstacle':obstacle});monkeypatch.setattr(module,'json_signal',lambda *a:None)
-  q={'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','timestamp_valid':True,'age_ms':0,'event_at':'2026-10-28T09:30:01+00:00','bid':'100','ask':'100.1','bid_qty':'1000','ask_qty':'1000'};book={'source':q['source'],'timestamp_valid':True,'age_ms':0,'bids':[{'p':'100','s':'1000'}],'asks':[{'p':'100.1','s':'1000'}]}
+  q={'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','timestamp_valid':True,'age_ms':0,'event_at':'2026-10-28T09:30:01+00:00','bid':'100','ask':'100.1','bid_qty':'1000','ask_qty':'1000'};book={'source':q['source'],'timestamp_valid':True,'age_ms':0,'bids':[{'p':'100','s':'1000'}],'asks':[{'p':'100.1','s':'1000'}]}
   result=asyncio.run(runner.run_cycle(candles=[{'open':'100','high':'101','low':'99','close':'100'}]*288,candle_close=datetime(2026,10,28,9,30,tzinfo=timezone.utc),quote=q,orderbook=book))
   assert result['C']['execution']['reason']==expected
   with sqlite3.connect(db) as c: audit=json.loads(c.execute("select raw_response from decisions where agent='C'").fetchone()[0])['execution']['audit']
@@ -174,7 +174,7 @@ def test_b_hold_and_duplicate_cycle_do_not_add_position(tmp_path,monkeypatch):
  from backend.rule_cycle import RuleCycleRunner
  import backend.rule_cycle as module
  db=tmp_path/'b-one-position.sqlite3';ledger=Ledger(db);AgentOrchestrator(str(db));runner=RuleCycleRunner(ledger,db);runner.v3=types.SimpleNamespace(signal_b=lambda b,i:{'direction':'LONG','stop':'99','setup':'B_TEST'},signal_c=lambda b,i:None);monkeypatch.setattr(module,'json_signal',lambda *a:None)
- start=datetime(2026,10,28,9,30,tzinfo=timezone.utc);q={'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','timestamp_valid':True,'age_ms':0,'event_at':'2026-10-28T09:30:01+00:00','bid':'100','ask':'100.1','bid_qty':'100','ask_qty':'100'};book={'source':q['source'],'timestamp_valid':True,'age_ms':0,'bids':[{'p':'100','s':'100'}],'asks':[{'p':'100.1','s':'100'}]};bars=[{'open':'100','high':'101','low':'99','close':'100'}]*288
+ start=datetime(2026,10,28,9,30,tzinfo=timezone.utc);q={'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','timestamp_valid':True,'age_ms':0,'event_at':'2026-10-28T09:30:01+00:00','bid':'100','ask':'100.1','bid_qty':'100','ask_qty':'100'};book={'source':q['source'],'timestamp_valid':True,'age_ms':0,'bids':[{'p':'100','s':'100'}],'asks':[{'p':'100.1','s':'100'}]};bars=[{'open':'100','high':'101','low':'99','close':'100'}]*288
  one=asyncio.run(runner.run_cycle(candles=bars,candle_close=start,quote=q,orderbook=book));assert one['B']['execution']['accepted'];initial=json.loads(ledger.account('B')['position_json']);again=asyncio.run(runner.run_cycle(candles=bars,candle_close=start,quote=q,orderbook=book));assert again['B']['status']=='DUPLICATE_CYCLE'
  later=asyncio.run(runner.run_cycle(candles=bars,candle_close=start+timedelta(minutes=15),quote=q,orderbook=book));assert later['B']['action']=='HOLD';assert json.loads(ledger.account('B')['position_json'])['quantity']==initial['quantity'];assert len(ledger.fills('B'))==1
 
@@ -190,7 +190,7 @@ def test_isolated_guard_keeps_b_pending_and_a_c_decisions_running(tmp_path,monke
  o=l.open_position(agent='B',direction='LONG',quantity=D('1'),price=D('100'),stop=D('99'),fee=D('.05'),slippage=D('0'),idempotency_key='open-b',expected_version=0);assert o['accepted'];l.request_stop_exit(agent='B',trigger_price=D('98'),event_key='stop',quote_event_id="confirmed-quote",expected_version=1)
  runner.v3=types.SimpleNamespace(signal_b=lambda b,i:{'direction':'LONG','stop':'99','setup':'B_TEST'},signal_c=lambda b,i:None);monkeypatch.setattr(module,'json_signal',lambda *a:None)
  assert not recovery_blocked(l,runner)
- q={'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','timestamp_valid':True,'age_ms':0,'event_at':'2026-10-28T09:30:01+00:00','bid':'100','ask':'100.1'};book={'source':q['source'],'age_ms':0,'bids':[{'p':'100','s':'10'}],'asks':[{'p':'100.1','s':'10'}]};bars=[{'open':'100','high':'101','low':'99','close':'100'}]*288
+ q={'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','timestamp_valid':True,'age_ms':0,'event_at':'2026-10-28T09:30:01+00:00','bid':'100','ask':'100.1'};book={'source':q['source'],'age_ms':0,'bids':[{'p':'100','s':'10'}],'asks':[{'p':'100.1','s':'10'}]};bars=[{'open':'100','high':'101','low':'99','close':'100'}]*288
  r=asyncio.run(runner.run_cycle(candles=bars,candle_close=datetime(2026,10,28,9,30,tzinfo=timezone.utc),quote=q,orderbook=book));assert r['A']['action']=='WAIT' and r['B']['action']=='HOLD' and r['C']['action']=='WAIT';assert l.account('B')['state']=='STOP_EXIT_PENDING' and len(l.fills('B'))==1
 
 def test_b_pending_allows_consistent_c_short_to_hold(tmp_path,monkeypatch):
@@ -210,4 +210,5 @@ def test_b_pending_allows_consistent_c_short_to_hold(tmp_path,monkeypatch):
  assert not recovery_blocked(l,r);r.v3=types.SimpleNamespace(signal_b=lambda b,i:None,signal_c=lambda b,i:None);monkeypatch.setattr(module,'json_signal',lambda *a:None)
  bars=[{'open':'100','high':'101','low':'99','close':'100'}]*288
  out=asyncio.run(r.run_cycle(candles=bars,candle_close=datetime(2026,10,28,9,30,tzinfo=timezone.utc),quote=None,orderbook=None));assert out['A']['action']=='WAIT' and out['B']['action']=='HOLD' and out['C']['action']=='HOLD';assert json.loads(l.account('C')['position_json'])['trade_id']==pos['trade_id'] and l.account('B')['state']=='STOP_EXIT_PENDING'
+
 

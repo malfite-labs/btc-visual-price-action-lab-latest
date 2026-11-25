@@ -38,7 +38,7 @@ def plan_position_event(position, quote, now, *, cost=None):
         if now.tzinfo is None:
             raise ValueError('INVALID_NOW')
         now = now.astimezone(timezone.utc)
-        if quote.get('source') != 'ALPACA_US_BTCUSD_SPOT' or quote.get('currency') != 'USD_RESEARCH':
+        if quote.get('source') != 'BINANCE_USDM_PERP' or quote.get('currency') != 'USD_RESEARCH':
             return {'action': 'BLOCKED', 'reason': 'SOURCE_MISMATCH'}
         if quote.get('timestamp_valid') is not True:
             return {'action': 'BLOCKED', 'reason': 'QUOTE_STALE'}
@@ -83,3 +83,4 @@ def plan_position_event(position, quote, now, *, cost=None):
         return {'action': 'HOLD'}
     except (KeyError, TypeError, ValueError, ArithmeticError, InvalidOperation):
         return {'action': 'BLOCKED', 'reason': 'INVALID_INPUT'}
+

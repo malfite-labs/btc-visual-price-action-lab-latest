@@ -41,7 +41,7 @@ async def main():
     async def broadcast(value): seen.append(('broadcast', value['type']))
     app.process_stop_quote=stops
     app.broadcast=broadcast
-    event={'T':'q','S':'BTC/USD','source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','timestamp_valid':True,'t':datetime.now(timezone.utc).isoformat(),'bp':'100','ap':'101','bs':'1','as':'1'}
+    event={'T':'q','S':'BTC/USD','source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','timestamp_valid':True,'t':datetime.now(timezone.utc).isoformat(),'bp':'100','ap':'101','bs':'1','as':'1'}
     await app.stream_events(event)
     assert seen == [('stop','BTC/USD'),('broadcast','market_event')]
     assert len(bridge.quotes)==1 and bridge.quotes[0]['symbol']=='BTC/USD'
@@ -103,7 +103,7 @@ async def no_op(*args): pass
 app.process_stop_quote=no_op
 app.broadcast=no_op
 async def event(bridge, bid, ask):
-    event={'T':'q','S':'BTC/USD','source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','timestamp_valid':True,'t':current[0].isoformat(),'bp':str(bid),'ap':str(ask),'bs':'1','as':'1'}
+    event={'T':'q','S':'BTC/USD','source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','timestamp_valid':True,'t':current[0].isoformat(),'bp':str(bid),'ap':str(ask),'bs':'1','as':'1'}
     await app.stream_events(event)
     await asyncio.wait_for(bridge.dispatcher._queue.join(),3)
 async def main():
@@ -192,3 +192,4 @@ asyncio.run(main())
     proc = subprocess.run([sys.executable, '-c', code], cwd=Path(__file__).resolve().parents[1],
                           env=env, capture_output=True, text=True, timeout=30)
     assert proc.returncode == 0, proc.stdout + proc.stderr
+

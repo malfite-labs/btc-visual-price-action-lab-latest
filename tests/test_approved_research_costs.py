@@ -18,13 +18,13 @@ def test_user_approved_costs_and_60_second_quote_boundary():
         == 60000
     )
     quote = {
-        "source": "ALPACA_US_BTCUSD_SPOT",
+        "source": "BINANCE_USDM_PERP",
         "currency": "USD_RESEARCH",
         "bid": "99",
         "ask": "101",
         "age_ms": 60000,
     }
-    book = {"source": "ALPACA_US_BTCUSD_SPOT", "age_ms": 60000}
+    book = {"source": "BINANCE_USDM_PERP", "age_ms": 60000}
     assert TestOnlyPaperCycleRunner._fresh(quote, book, COST_MODEL)
     assert not TestOnlyPaperCycleRunner._fresh({**quote, "age_ms": 60001}, book, COST_MODEL)
     assert not TestOnlyPaperCycleRunner._fresh(quote, {**book, "age_ms": 60001}, COST_MODEL)
@@ -229,3 +229,4 @@ def test_refreshed_quote_is_used_after_inference_and_failures_block_entry(tmp_pa
     blocked = run_cycle(runner2, adapter, start, refresh_market=failed)
     assert blocked["A"]["execution"]["reason"] == "MARKET_REFRESH_FAILED"
     assert ledger2.fills() == []
+

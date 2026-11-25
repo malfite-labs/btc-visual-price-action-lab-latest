@@ -10,7 +10,7 @@ from backend.domain import CostModel
 
 def quote():
     now = datetime.now(timezone.utc).isoformat()
-    return {"source": "ALPACA_US_BTCUSD_SPOT", "symbol": "BTC/USD", "currency": "USD_RESEARCH",
+    return {"source": "BINANCE_USDM_PERP", "symbol": "BTC/USD", "currency": "USD_RESEARCH",
             "timestamp_valid": True, "age_ms": 10, "event_at": now, "received_at": now,
             "bid": "99.9", "ask": "100.1", "event_id": "q-1"}
 
@@ -84,3 +84,4 @@ def test_c_quote_stop_close_is_mirrored_through_the_actual_protection_handler(tm
     assert mirror.status(quote())["position"] is None
     assert len(mirror.fills()) == 2
     assert mirror.fills()[-1]["reason"].startswith("C_MIRROR_CLOSE:STOP_TRIGGER")
+

@@ -1,6 +1,79 @@
 from scripts import local_dashboard
 
 
+def test_recover_uses_shared_service_launcher(monkeypatch):
+    calls = []
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        return type('Result', (), {'returncode': 0, 'stdout': 'ok', 'stderr': ''})()
+    monkeypatch.setattr(local_dashboard.subprocess, 'run', fake_run)
+    local_dashboard.recover()
+    assert len(calls) == 1
+    assert calls[0][-1].endswith('start_lab.ps1')
+
+
+def test_recent_action_codes_are_shown_in_chinese():
+    stop_distance = local_dashboard.action_label('WAIT_STOP_DIST')
+    unknown = local_dashboard.action_label('UNRECOGNIZED_ACTION')
+
+    assert stop_distance == '\u7b49\u5f85\u6b62\u635f\u8ddd\u79bb\u6761\u4ef6'
+    assert 'WAIT_STOP_DIST' not in stop_distance
+    assert unknown == '\u9700\u68c0\u67e5'
+    assert local_dashboard.action_label('IDLE') == '\u7b49\u5f85'
+    assert local_dashboard.action_label('NO_SETUP') == '\u7b49\u5f85'
+    assert local_dashboard.action_label('NO_PENDING_SIGNAL') == '\u7b49\u5f85'
+    assert local_dashboard.action_label('OTHER_STATE') == '\u7b49\u5f85'
+
+
+
+def test_leverage_column_uses_consistent_open_flat_and_pending_states():
+    assert local_dashboard.leverage_label(None, 'FLAT') == '\u7a7a\u4ed3'
+    assert local_dashboard.leverage_label('5', 'LONG') == '5.00x'
+    assert local_dashboard.leverage_label('0.60x', 'SHORT') == '0.60x'
+    assert local_dashboard.leverage_label('5', 'PENDING_LONG') == '\u5f85\u5f00\u4ed3'
+    assert local_dashboard.leverage_label('\u4e0a\u96505x', 'LONG') == '\u672a\u77e5'
+
+
+
+def test_d_and_e_console_states_show_real_readiness_and_account_data():
+    d = local_dashboard.console_rows({
+        'D': {'state': 'FLAT', 'equity': '10000.00', 'realized': '0.00',
+              'unrealized': '0.00', 'amount': '0.00', 'leverage': '\u7a7a\u4ed3',
+              'action': 'INSUFFICIENT_15M_HISTORY', 'cycle': '2026-11-21 13:00',
+              'control': 'D_OBSERVE_ONLY'},
+        'E': {'state': 'FLAT', 'equity': '10000.00', 'realized': '0.00',
+              'unrealized': '0.00', 'amount': '0.00', 'leverage': '\u7a7a\u4ed3',
+              'action': 'WAIT_NEXT_BAR', 'control': 'E_OBSERVE_ONLY'},
+    })
+    assert d['D']['equity'] == '10000.00'
+    assert d['D']['status_label'] == '\u6267\u884c\u672a\u63a5\u901a'
+    assert local_dashboard.strategy_view('D', d['D'])['action'] == '\u7b49\u5f8515\u5206\u949fK\u7ebf\u9884\u70ed'
+    assert d['E']['equity'] == '10000.00'
+    assert d['E']['status_label'] == '\u89c2\u5bdf\u4e2d'
+    assert local_dashboard.e_control_state({'status': 'READY'}, {'mode': 'OBSERVE_ONLY'}, 'RUNNING') == 'E_OBSERVE_ONLY'
+    assert local_dashboard.e_control_state({'status': 'NOT_INITIALIZED'}, {'mode': 'OBSERVE_ONLY'}, 'RUNNING') == 'E_NOT_INITIALIZED'
+
+
+def test_recover_reports_healthy_services_without_restarting(monkeypatch):
+    monkeypatch.setattr(local_dashboard.subprocess, 'run', lambda *a, **k:
+                        type('Result', (), {'returncode': 0, 'stdout': '', 'stderr': ''})())
+    monkeypatch.setattr(local_dashboard, 'listeners', lambda: [
+        {'port': 8012, 'pid': 1234, 'exe': 'python'},
+        {'port': 5175, 'pid': 5678, 'exe': 'node'},
+    ])
+    monkeypatch.setattr(local_dashboard, '_tracked_pid', lambda name: {
+        'backend': 1234, 'frontend': 5678,
+    }[name])
+    monkeypatch.setattr(local_dashboard, 'fetch', lambda path, port=8012: (
+        {'status': 'ok', 'live_trading_disabled': True} if port == 8012 else 200
+    ))
+
+    result = local_dashboard.recover()
+
+    assert '\u5747\u5df2\u8fd0\u884c' in result
+    assert '\u672a\u91cd\u590d\u542f\u52a8' in result
+
+
 def test_operations_panel_uses_live_and_backup_values_without_inventing_success():
     data = local_dashboard.operations_status_summary(
         {'scheduler': 'ENABLED_INTERNAL_PAPER', 'feed_health': 'LIVE', 'quote_health': 'FRESH',
@@ -11,14 +84,12 @@ def test_operations_panel_uses_live_and_backup_values_without_inventing_success(
          {'id': 'pa-three-bar-hhhl', 'last_status': 'BLOCKED_GAP_RECONCILIATION_REQUIRED'}],
         {'generated_at': '2026-11-14T10:01:00+00:00', 'items': [{'backup_status': 'VERIFIED'}]},
     )
-    assert data['8011版本'] == '1.0.4'
-    assert data['ABC影子账本'] == 'REBUILT_NEW_EPOCH'
-    assert 'pa-one=' in data['PA周期']
-    assert data['备份完整性'] == '1项通过 / 0项失败'
-    assert data['异地副本'] == '未配置（仅本机备份）'
-    assert 'pa-three-bar-hhhl' in data['恢复条件']
-
-
+    assert data['8012\u7248\u672c'] == '1.0.4'
+    assert data['ABC\u5f71\u5b50\u8d26\u672c'] == 'REBUILT_NEW_EPOCH'
+    assert 'pa-one=' in data['PA\u5468\u671f']
+    assert data['\u5907\u4efd\u5b8c\u6574\u6027'] == '1\u9879\u901a\u8fc7 / 0\u9879\u5931\u8d25'
+    assert data['\u5f02\u5730\u526f\u672c'] == '\u672a\u914d\u7f6e\uff08\u4ec5\u672c\u673a\u5907\u4efd\uff09'
+    assert 'pa-three-bar-hhhl' in data['\u6062\u590d\u6761\u4ef6']
 def test_rule_detail_button_keeps_real_strategy_id_after_filters_and_search():
     visible = ['pa-trend-40-breakout', 'G', 'pa-three-bar-hhhl']
     assert [local_dashboard.rule_detail_target(row_id) for row_id in visible] == visible
@@ -188,7 +259,7 @@ def test_pa_rows_use_registered_ids_and_show_distinct_states_and_flat_account():
     assert rows['pa-trend-40-breakout']['name'] == 'PA-01 顺势突破'
     assert rows['pa-trend-40-breakout']['state'] == '空仓'
     assert rows['pa-trend-40-breakout']['amount'] == '0.00'
-    assert rows['pa-trend-40-breakout']['leverage'] == '上限5x'
+    assert rows['pa-trend-40-breakout']['leverage'] == '\u7a7a\u4ed3'
     assert rows['pa-trend-40-breakout']['cycle'] == '2026-11-12 21:30'
     assert rows['pa-sma20-pullback-confirm']['status_label'] == '已启用待周期'
     assert rows['pa-sma20-pullback-confirm']['state'] == '待开空'
@@ -259,7 +330,8 @@ def test_switch_state_tracks_real_pa_and_legacy_controls_and_disables_stale_rows
     assert local_dashboard.console_control_state(sid, {'enabled': False, 'status_label': '数据过期'}) == 'disabled'
     assert local_dashboard.console_control_state('A', {'control': 'RUNNING'}) == 'on'
     assert local_dashboard.console_control_state('A', {'control': 'PAUSED'}) == 'off'
-    assert local_dashboard.console_control_state('D', {'control': 'RUNNING'}) == 'disabled'
+    assert local_dashboard.console_control_state('D', {'control': 'RUNNING', 'enabled': True}) == 'on'
+    assert local_dashboard.console_control_state('D', {'control': 'PAUSED', 'enabled': False}) == 'off'
     assert local_dashboard.console_control_state('D', {'control': 'UNKNOWN'}) == 'disabled'
     assert local_dashboard.console_control_state('G', {'enabled': True, 'control': 'G_MIRROR'}) == 'disabled'
 
@@ -338,7 +410,7 @@ def test_g_mirror_row_uses_independent_read_only_account_and_category():
     assert list(rows) == ['A', 'B', 'C', 'D', 'E', 'G', *local_dashboard.PA_STRATEGY_IDS]
     assert rows['G']['status_label'] == '等待C开仓'
     assert rows['G']['state'] == '空仓'
-    assert rows['G']['leverage'] == '上限5x'
+    assert rows['G']['leverage'] == '\u7a7a\u4ed3'
     assert rows['G']['equity'] == '10,000.00'
     assert local_dashboard.filter_console_rows(rows, '镜像', '全部状态') == ['G']
     assert len(local_dashboard.filter_console_rows(rows, '原有', '全部状态')) == 5

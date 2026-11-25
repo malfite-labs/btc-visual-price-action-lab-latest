@@ -31,7 +31,7 @@ def close_paper_account(store, agent, quote, cost, now):
     if account['state'] not in ('OPEN_LONG', 'OPEN_SHORT'):
         return {'accepted': False, 'reason': 'ACCOUNT_NOT_CLOSABLE'}
     try:
-        if quote.get('source') != 'ALPACA_US_BTCUSD_SPOT' or quote.get('currency') != 'USD_RESEARCH' or quote.get('timestamp_valid') is not True:
+        if quote.get('source') != 'BINANCE_USDM_PERP' or quote.get('currency') != 'USD_RESEARCH' or quote.get('timestamp_valid') is not True:
             return {'accepted': False, 'reason': 'QUOTE_INVALID'}
         event = datetime.fromisoformat(quote['event_at'].replace('Z', '+00:00'))
         received = datetime.fromisoformat(quote['received_at'].replace('Z', '+00:00'))
@@ -223,3 +223,4 @@ class StrategyControl:
                 db.execute('UPDATE strategy_control SET state=?,formal=?,shadow=? WHERE agent=? AND state=?',
                            ('PAUSED' if result == 'FLAT' else 'PAUSING', result, 'UNCHANGED', self._agent(agent), 'PAUSING'))
             return self.status(agent)
+

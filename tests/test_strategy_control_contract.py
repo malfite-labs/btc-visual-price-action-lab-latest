@@ -102,7 +102,7 @@ def test_close_rejects_stale_quote_and_uses_executable_side():
         def close_position(self, **kwargs): self.calls.append(kwargs); return {'accepted': True}
     store = Store()
     now = datetime.now(timezone.utc)
-    quote = {'source': 'ALPACA_US_BTCUSD_SPOT', 'currency': 'USD_RESEARCH', 'timestamp_valid': True,
+    quote = {'source': 'BINANCE_USDM_PERP', 'currency': 'USD_RESEARCH', 'timestamp_valid': True,
              'event_at': (now-timedelta(seconds=61)).isoformat(), 'received_at': (now-timedelta(seconds=61)).isoformat(),
              'bid': '100', 'ask': '101'}
     assert close_paper_account(store, 'A', quote, CostModel(), now)['reason'] == 'QUOTE_STALE'
@@ -121,7 +121,7 @@ def test_paper_close_persists_formal_and_shadow_independently(tmp_path):
                                      idempotency_key='open', expected_version=0)
         assert result['accepted']
     now = datetime.now(timezone.utc)
-    quote = {'source': 'ALPACA_US_BTCUSD_SPOT', 'currency': 'USD_RESEARCH', 'timestamp_valid': True,
+    quote = {'source': 'BINANCE_USDM_PERP', 'currency': 'USD_RESEARCH', 'timestamp_valid': True,
              'event_at': now.isoformat(), 'received_at': now.isoformat(), 'bid': '101', 'ask': '102'}
     assert close_paper_account(formal, 'E', quote, CostModel(), now)['accepted']
     assert formal.account('E')['state'] == 'FLAT'
@@ -138,7 +138,7 @@ def test_pause_closes_formal_but_never_claims_missing_shadow_complete(tmp_path):
                                 stop=Decimal('90'), fee=Decimal('0.01'), slippage=Decimal('0'),
                                 idempotency_key='open', expected_version=0)['accepted']
     now = datetime.now(timezone.utc)
-    quote = {'source': 'ALPACA_US_BTCUSD_SPOT', 'currency': 'USD_RESEARCH', 'timestamp_valid': True,
+    quote = {'source': 'BINANCE_USDM_PERP', 'currency': 'USD_RESEARCH', 'timestamp_valid': True,
              'event_at': now.isoformat(), 'received_at': now.isoformat(), 'bid': '101', 'ask': '102'}
     result = control.pause_accounts('E', {'formal': formal, 'shadow': None}, quote, CostModel(), now)
     assert formal.account('E')['state'] == 'FLAT'
@@ -167,7 +167,7 @@ def test_stale_quote_keeps_position_open_and_blocks_resume(tmp_path):
                                 stop=Decimal('90'), fee=Decimal('0.01'), slippage=Decimal('0'),
                                 idempotency_key='open', expected_version=0)['accepted']
     now = datetime.now(timezone.utc)
-    quote = {'source': 'ALPACA_US_BTCUSD_SPOT', 'currency': 'USD_RESEARCH', 'timestamp_valid': True,
+    quote = {'source': 'BINANCE_USDM_PERP', 'currency': 'USD_RESEARCH', 'timestamp_valid': True,
              'event_at': (now-timedelta(seconds=61)).isoformat(), 'received_at': (now-timedelta(seconds=61)).isoformat(),
              'bid': '101', 'ask': '102'}
     result = control.pause_accounts('E', {'formal': formal, 'shadow': shadow}, quote, CostModel(), now)
@@ -231,7 +231,7 @@ def test_shadow_close_reconciles_forward_metadata(tmp_path):
         db.execute('insert into forward_positions values (?,?,?,?)', ('A', trade, '2026-01-01T00:00:00+00:00', '10000'))
         db.execute('create table forward_trades (trade_id text primary key, agent text, signal_close text, closed_at text, net_pnl text, reason text)')
     now = datetime.now(timezone.utc)
-    quote = {'source': 'ALPACA_US_BTCUSD_SPOT', 'currency': 'USD_RESEARCH', 'timestamp_valid': True,
+    quote = {'source': 'BINANCE_USDM_PERP', 'currency': 'USD_RESEARCH', 'timestamp_valid': True,
              'event_at': now.isoformat(), 'received_at': now.isoformat(), 'bid': '101', 'ask': '102'}
     from backend.strategy_control import close_forward_account
     assert close_forward_account(ledger, 'A', quote, CostModel(), now)['accepted']
@@ -248,7 +248,7 @@ def test_formal_only_pause_leaves_shadow_running_and_unmodified(tmp_path):
                                    stop=Decimal('90'), fee=Decimal('0.01'), slippage=Decimal('0'),
                                    idempotency_key='open', expected_version=0)['accepted']
     now = datetime.now(timezone.utc)
-    quote = {'source': 'ALPACA_US_BTCUSD_SPOT', 'currency': 'USD_RESEARCH', 'timestamp_valid': True,
+    quote = {'source': 'BINANCE_USDM_PERP', 'currency': 'USD_RESEARCH', 'timestamp_valid': True,
              'event_at': now.isoformat(), 'received_at': now.isoformat(), 'bid': '101', 'ask': '102'}
     status = control.pause_formal('E', formal, quote, CostModel(), now)
     assert status['state'] == 'PAUSED' and status['shadow'] == 'UNCHANGED'
@@ -256,3 +256,4 @@ def test_formal_only_pause_leaves_shadow_running_and_unmodified(tmp_path):
     assert shadow.account('E')['state'] == 'OPEN_LONG'
     assert not control.is_entry_allowed('E')
     assert control.resume('E')
+

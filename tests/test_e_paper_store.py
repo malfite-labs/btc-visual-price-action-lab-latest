@@ -11,7 +11,7 @@ def test_e_independent_ledger_open_stop_and_shadow_isolation(tmp_path):
     result=formal.open_position(agent='E',direction='LONG',quantity=D('0.1'),price=D('100'),stop=D('90'),fee=D('0.01'),slippage=D('0'),idempotency_key='e-open',expected_version=0)
     assert result['accepted']
     assert shadow.account('E')['state']=='FLAT'
-    quote={'source':'ALPACA_US_BTCUSD_SPOT','timestamp_valid':True,'age_ms':0,'bid':'89','ask':'89.1','event_id':'q1'}
+    quote={'source':'BINANCE_USDM_PERP','timestamp_valid':True,'age_ms':0,'bid':'89','ask':'89.1','event_id':'q1'}
     result=handle_confirmed_stop(ledger=formal,agent='E',trigger_event_id='stop1',quote=quote,cost=CostModel())
     assert result['accepted'] and formal.account('E')['state']=='FLAT'
     assert len(formal.fills())==2
@@ -40,7 +40,7 @@ def test_pending_stop_survives_restart_and_uses_existing_recovery(tmp_path):
     store.request_stop_exit(agent='E',trigger_price=D('89'),event_key='trigger',quote_event_id='q1',expected_version=account['version'])
     reopened=EPaperStore(path)
     assert reopened.account('E')['state']=='STOP_EXIT_PENDING'
-    quote={'source':'ALPACA_US_BTCUSD_SPOT','timestamp_valid':True,'age_ms':0,'bid':'89','ask':'89.1','event_id':'q2'}
+    quote={'source':'BINANCE_USDM_PERP','timestamp_valid':True,'age_ms':0,'bid':'89','ask':'89.1','event_id':'q2'}
     assert recover_pending_stop(ledger=reopened,agent='E',quote=quote,cost=CostModel(),event_id='restart')['accepted']
     assert reopened.account('E')['state']=='FLAT'
 
@@ -70,7 +70,8 @@ def test_e_live_valuation_uses_existing_ledger_metrics(tmp_path):
     from backend.e_paper_store import read_e_store
     path=tmp_path/'e.sqlite';ledger=EPaperStore(path)
     ledger.open_position(agent='E',direction='LONG',quantity=D('.1'),price=D('100'),stop=D('90'),fee=D('.01'),slippage=D('0'),idempotency_key='o',expected_version=0)
-    quote={'source':'ALPACA_US_BTCUSD_SPOT','timestamp_valid':True,'age_ms':0,'bid':'105','ask':'105.1'}
+    quote={'source':'BINANCE_USDM_PERP','timestamp_valid':True,'age_ms':0,'bid':'105','ask':'105.1'}
     result=read_e_store(path,quote=quote)
     assert result['equity'] is not None
     assert D(result['unrealized_pnl'])>0
+

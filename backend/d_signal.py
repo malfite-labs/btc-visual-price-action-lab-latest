@@ -12,6 +12,16 @@ class DataNotReady(ValueError):
     pass
 
 
+# Minimum history required by the indicators and rolling windows below.
+# This intentionally replaces the research JSON's conservative 960/240
+# preload: D can run from the Binance archive once its actual calculations
+# are defined (15m EMA20/RSI/ATR/RVOL windows and 1h EMA50/ATR14).
+MIN_15M_BARS = 25
+MIN_COMPLETED_HOURS = 50
+RULE_VERSION = 'D-SOURCE-RECOVERY-2026-11-21'
+SOURCE_COMMIT = '82ce4a0bf89e54e066dda63fd97be1e3324a0204'
+
+
 def _time(value):
     parsed = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
     if parsed.tzinfo is None:
@@ -20,8 +30,8 @@ def _time(value):
 
 
 def _validate(bars):
-    if len(bars) < 960:
-        raise DataNotReady('INSUFFICIENT_15M_HISTORY')
+    if len(bars) < MIN_15M_BARS:
+        raise DataNotReady('INSUFFICIENT_15M_INDICATOR_HISTORY')
     converted = []
     previous = None
     for bar in bars:
@@ -30,7 +40,7 @@ def _validate(bars):
             values = {key: float(bar[key]) for key in ('open', 'high', 'low', 'close', 'volume')}
         except (KeyError, TypeError, ValueError, OverflowError) as exc:
             raise DataNotReady('INVALID_CANDLE') from exc
-        if bar.get('symbol') != 'BTC/USD' or bar.get('source') != 'ALPACA_US_BTCUSD_SPOT':
+        if bar.get('symbol') != 'BTC/USD' or bar.get('source') != 'BINANCE_USDM_PERP':
             raise DataNotReady('SOURCE_OR_SYMBOL_MISMATCH')
         if start.second or start.microsecond or start.minute % 15 or end != start + timedelta(minutes=15):
             raise DataNotReady('INVALID_INTERVAL')
@@ -90,8 +100,8 @@ def _hours(bars):
         if chunk[0]['open_at'].minute != 0:
             continue
         hours.append({'open': chunk[0]['open'], 'high': max(x['high'] for x in chunk), 'low': min(x['low'] for x in chunk), 'close': chunk[-1]['close'], 'volume': sum(x['volume'] for x in chunk), 'close_at': chunk[-1]['close_at']})
-    if len(hours) < 240:
-        raise DataNotReady('INSUFFICIENT_1H_HISTORY')
+    if len(hours) < MIN_COMPLETED_HOURS:
+        raise DataNotReady('INSUFFICIENT_1H_INDICATOR_HISTORY')
     return hours
 
 
@@ -132,6 +142,13 @@ def evaluate(bars, state=None):
         return _output('DATA_NOT_READY', 'INVALID_STATE', state)
     i = len(b) - 1
     ind, hour_ind = _indicators(b), _indicators(hours)
+    required_15m = (ind['ema9'][i], ind['ema20'][i - 1], ind['ema20'][i - 5],
+                    ind['atr'][i - 1], ind['rsi'][i], ind['rsi'][i - 1])
+    h_latest = len(hours) - 1
+    required_1h = (hour_ind['ema50'][h_latest], hour_ind['ema20'][h_latest],
+                   hour_ind['ema20'][h_latest - 3], hour_ind['atr'][h_latest])
+    if any(value is None or not isfinite(value) for value in (*required_15m, *required_1h)):
+        return _output('DATA_NOT_READY', 'INDICATOR_NOT_READY', state)
     bar = b[i]
     spread = bar['high'] - bar['low']
     clv = (bar['close'] - bar['low']) / spread if spread > 0 else None
@@ -194,3 +211,4 @@ def evaluate(bars, state=None):
         state.update(phase='COOLDOWN', remaining=4)
         return _output('COOLDOWN', 'CANDIDATE_EXPIRED', state)
     return _output('WATCH', 'AWAIT_CONFIRMATION', state)
+

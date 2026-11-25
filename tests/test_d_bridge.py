@@ -28,7 +28,7 @@ def bars_with_real_signal():
             opening, low, high, close, volume = 124.2, 124, 126, 125.95, 200
         opening += 1000; high += 1000; low += 1000; close += 1000
         at = start + timedelta(minutes=15 * index)
-        rows.append({'symbol':'BTC/USD','source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH',
+        rows.append({'symbol':'BTC/USD','source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH',
                      'interval':'15Min','open':str(opening),'high':str(high),'low':str(low),
                      'close':str(close),'volume':str(volume),'is_closed':True,
                      'open_at':at.isoformat(),'close_at':(at+timedelta(minutes=15)).isoformat()})
@@ -37,7 +37,7 @@ def bars_with_real_signal():
 
 
 def quote(at,bid,ask):
-    return {'symbol':'BTC/USD','source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH',
+    return {'symbol':'BTC/USD','source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH',
             'event_at':at.isoformat(),'received_at':at.isoformat(),'timestamp_valid':True,
             'bid':str(bid),'ask':str(ask)}
 
@@ -97,6 +97,47 @@ def test_real_signal_to_open_targets_and_restarts(tmp_path):
         assert bridge.stream_validated()
         assert len(bridge.runtime.ledger.fills())==3
         await bridge.close()
+    asyncio.run(scenario())
+
+
+def test_pause_cancels_pending_entry_and_reports_clickable_control_state(tmp_path):
+    bars = bars_with_real_signal()
+    candidate_close = datetime.fromisoformat(bars[959]['close_at'])
+    signal_close = datetime.fromisoformat(bars[960]['close_at'])
+    current = [candidate_close + timedelta(seconds=1)]
+    archive = Archive(bars)
+
+    async def scenario():
+        bridge = DBridge(tmp_path/'pause-observe.sqlite', tmp_path/'pause-trade.sqlite', archive,
+                         feed_healthy=lambda: True, candles_complete=lambda: True,
+                         clock=lambda: current[0])
+        await bridge.start()
+        assert bridge.stream_validated()
+        assert bridge.submit_quote(quote(current[0], 1124.29, 1124.30))
+        await asyncio.wait_for(bridge.dispatcher._queue.join(), 3)
+        assert bridge.submit_bar(candidate_close)
+        await asyncio.wait_for(bridge.dispatcher._queue.join(), 3)
+        current[0] = signal_close + timedelta(seconds=1)
+        assert bridge.submit_bar(signal_close)
+        await asyncio.wait_for(bridge.dispatcher._queue.join(), 3)
+        assert bridge.runtime.status()['state']['phase'] == 'PENDING'
+
+        assert bridge.set_enabled(False) == {'enabled': False, 'changed': True}
+        assert bridge.runtime.status()['state']['phase'] == 'COOLDOWN'
+        current[0] += timedelta(seconds=1)
+        paused_quote = quote(current[0], 1125.94, 1125.95)
+        assert bridge.submit_quote(paused_quote)
+        await asyncio.wait_for(bridge.dispatcher._queue.join(), 3)
+        status = await bridge.status(paused_quote)
+        assert status['status'] == 'PAUSED'
+        assert status['enabled'] is False
+        assert status['execution_ready'] is False
+        assert bridge.runtime.ledger.fills() == []
+
+        assert bridge.set_enabled(True) == {'enabled': True, 'changed': True}
+        assert bridge._entry_gate.blocked.is_set() is False
+        await bridge.close()
+
     asyncio.run(scenario())
 
 
@@ -455,3 +496,4 @@ def test_stream_disconnect_rearms_only_after_fresh_quote_then_later_real_signal(
         assert bridge.runtime.ledger.account()['state'] == 'OPEN_LONG'
         await bridge.close()
     asyncio.run(scenario())
+

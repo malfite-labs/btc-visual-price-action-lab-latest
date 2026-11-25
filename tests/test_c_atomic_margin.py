@@ -36,7 +36,7 @@ def test_c_margin_transaction_round_trip_and_restart(tmp_path, direction, stop, 
     assert pos["initial_margin"] == "8000" and pos["leverage"] == "5"
     assert D(account["cash"]) == D("9980")
     quote = {
-        "source": "ALPACA_US_BTCUSD_SPOT",
+        "source": "BINANCE_USDM_PERP",
         "age_ms": 0,
         "bid": "100",
         "ask": "100",
@@ -111,3 +111,4 @@ def test_c_open_rolls_back_on_ledger_event_failure(tmp_path, monkeypatch):
     assert ledger.account("C")["state"] == "FLAT"
     assert D(ledger.account("C")["cash"]) == D("10000")
     assert ledger.fills("C") == []
+

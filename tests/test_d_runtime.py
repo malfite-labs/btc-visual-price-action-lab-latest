@@ -13,14 +13,14 @@ def fixture(now):
     close = now.replace(minute=now.minute//15*15, second=0, microsecond=0)
     signal = {'signal_close':close.isoformat(),'direction':'LONG','setup':'D_CONFIRM',
               'atr':'2','low':'98','neckline':'100','stop':'98.9','close':'100'}
-    bar = {'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','symbol':'BTC/USD',
+    bar = {'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','symbol':'BTC/USD',
            'interval':'15Min','is_closed':True,'open_at':(close-timedelta(minutes=15)).isoformat(),
            'close_at':close.isoformat(),'close':'100','volume':'4000'}
     return signal, bar
 
 
 def quote(at, event_id, bid, ask):
-    return {'symbol':'BTC/USD','source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH',
+    return {'symbol':'BTC/USD','source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH',
             'timestamp_valid':True,'event_at':at.isoformat(),'received_at':at.isoformat(),
             'bid':str(bid),'ask':str(ask),'event_id':event_id}
 
@@ -363,3 +363,4 @@ def test_failed_first_attempt_cannot_open_on_later_quote(tmp_path,monkeypatch):
     assert rt.ledger.fills()==[]
     assert rt.status()['state']['phase']=='COOLDOWN'
     rt.close()
+

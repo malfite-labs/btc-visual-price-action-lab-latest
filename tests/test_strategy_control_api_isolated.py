@@ -71,7 +71,7 @@ def test_endpoint_closes_formal_position_and_guards_reentry(tmp_path, monkeypatc
     assert formal.open_position(**args)['accepted']
     assert shadow.open_position(**args)['accepted']
     now = datetime.now(timezone.utc)
-    quote = {'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','timestamp_valid':True,
+    quote = {'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','timestamp_valid':True,
              'event_at':now.isoformat(),'received_at':now.isoformat(),'bid':'101','ask':'102'}
     monkeypatch.setattr(service, '_strategy_control', lambda: control)
     monkeypatch.setattr(service, '_strategy_formal_store', lambda agent: formal)
@@ -84,3 +84,4 @@ def test_endpoint_closes_formal_position_and_guards_reentry(tmp_path, monkeypatc
     assert formal.open_position(**args)['reason'] == 'STRATEGY_PAUSED'
     assert client.post('/api/v1/strategy-control/E/resume').json()['state'] == 'RUNNING'
     assert formal.open_position(**args)['accepted']
+

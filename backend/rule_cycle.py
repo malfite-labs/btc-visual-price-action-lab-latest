@@ -97,7 +97,7 @@ class RuleCycleRunner:
      c.execute('insert into audit_events values(?,?,?,?,?)',(str(uuid4()),a,'RULE_TIME_EXIT_DUE',json.dumps({'trade_id':meta[1],'due_at':due_at.isoformat(),'observed_closed_bar':candle_close.isoformat(),'recorded_at':observed}),observed))
  def monitor_targets(self,quote):
   outcomes={}
-  if not quote or quote.get('source')!='ALPACA_US_BTCUSD_SPOT' or quote.get('currency')!='USD_RESEARCH' or quote.get('timestamp_valid') is not True or not 0<=int(quote.get('age_ms',10**9))<=self.cost.max_quote_age_ms:return outcomes
+  if not quote or quote.get('source')!='BINANCE_USDM_PERP' or quote.get('currency')!='USD_RESEARCH' or quote.get('timestamp_valid') is not True or not 0<=int(quote.get('age_ms',10**9))<=self.cost.max_quote_age_ms:return outcomes
   for a in 'ABC':
    self._reconcile(a);meta=self._meta(a);acc=self.ledger.account(a)
    if not meta or acc['state'] not in ('OPEN_LONG','OPEN_SHORT'):continue
@@ -132,7 +132,7 @@ class RuleCycleRunner:
     direction=s['direction'];stop=D(s['stop']);metrics=self.ledger.account_metrics(a,quote,self.cost)
     audit={'quote':quote,'orderbook':orderbook,'account_equity':metrics.get('equity'),'available_margin':metrics.get('available_cash'),'stop':str(stop),'direction':direction,'leverage':'5' if a=='C' else '1'}
     try:
-     if not quote or quote.get('timestamp_valid') is not True or quote.get('source')!='ALPACA_US_BTCUSD_SPOT' or quote.get('currency')!='USD_RESEARCH' or D(str(quote['bid']))<=0 or D(str(quote['ask']))<D(str(quote['bid'])):raise ValueError('INVALID_QUOTE_OR_BOOK')
+     if not quote or quote.get('timestamp_valid') is not True or quote.get('source')!='BINANCE_USDM_PERP' or quote.get('currency')!='USD_RESEARCH' or D(str(quote['bid']))<=0 or D(str(quote['ask']))<D(str(quote['bid'])):raise ValueError('INVALID_QUOTE_OR_BOOK')
      from datetime import datetime
      if datetime.fromisoformat(quote['event_at'].replace('Z','+00:00')).astimezone(timezone.utc)<candle_close.astimezone(timezone.utc):raise ValueError('QUOTE_BEFORE_CANDLE_CLOSE')
      pre=prepare_entry(equity=D(metrics['equity']),available_cash=D(metrics['available_cash']),direction=direction,stop=stop,quote=quote,orderbook=orderbook,cost=self.cost,quote_age_ms=int(quote['age_ms']),book_age_ms=0,leverage=D(self.profile[a]['max_leverage']),risk_fraction=D(self.profile[a]['risk_fraction']))
@@ -163,3 +163,4 @@ class RuleCycleRunner:
     with sqlite3.connect(self.db_path) as c:c.execute('update decisions set outcome=?,raw_response=? where decision_id=?',('VALID' if execution.get('accepted') else 'RISK_REJECTED',json.dumps(payload,ensure_ascii=False,default=str),ident))
    results[a]={'agent':a,'status':'VALID','mode':'RULE_DRIVEN','action':action,'decision_id':ident,'execution':execution}
   return results
+

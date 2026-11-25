@@ -113,7 +113,7 @@ def _render_v2_snapshot(closed: list[Candle], path: str | Path) -> dict:
         "panels": panels,
         "image_size": [width, height],
         "layout_version": "v2",
-        "source": "ALPACA_US_BTCUSD_SPOT",
+        "source": "BINANCE_USDM_PERP",
         "currency": "USD_RESEARCH",
         "indicators": [],
     }
@@ -183,7 +183,8 @@ def render_ai_snapshot(
         "image_size": list(image.size),
         "layout_version": "legacy",
         "price_axes": {"global": global_price_axis, "local": local_price_axis},
-        "source": "ALPACA_US_BTCUSD_SPOT",
+        "source": "BINANCE_USDM_PERP",
         "currency": "USD_RESEARCH",
         "indicators": [],
     }
+

@@ -18,10 +18,10 @@ def test_v11_isolated_candidate_visual_gate_fill_stop_and_performance(tmp_path):
     rows[-2].update(open=99.8, high=100, low=99.4, close=99.5)
     rows[-1].update(open=99.5, high=100.2, low=99.4, close=100)
     for bar in rows:
-        bar.update(symbol='BTC/USD', interval='15Min', source='ALPACA_US_BTCUSD_SPOT', currency='USD_RESEARCH')
+        bar.update(symbol='BTC/USD', interval='15Min', source='BINANCE_USDM_PERP', currency='USD_RESEARCH')
     close = datetime.fromisoformat(rows[-1]['close_at'])
     now = close + timedelta(seconds=3)
-    quote = {'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','timestamp_valid':True,
+    quote = {'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','timestamp_valid':True,
              'age_ms':0,'bid':'99.39','ask':'99.4','event_at':now.isoformat(),'event_id':'SYNTHETIC-ENTRY'}
     class SyntheticVisual:
         configured = True
@@ -47,3 +47,4 @@ def test_v11_isolated_candidate_visual_gate_fill_stop_and_performance(tmp_path):
     assert handle_confirmed_stop(ledger=store,agent='E',trigger_event_id='SYNTHETIC-STOP',quote=stop_quote,cost=cost)['accepted']
     result=read_e_store(store.path)
     assert result['account']['state']=='FLAT' and result['closed_trades']==1 and len(result['fills'])==2
+

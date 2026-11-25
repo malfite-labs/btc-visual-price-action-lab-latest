@@ -48,7 +48,7 @@ def test_confirmed_structure_exit_persists_until_fresh_quote(tmp_path):
     from test_e_visual import bars as snapshot
     from datetime import datetime,timedelta
     rows=snapshot()
-    for b in rows:b.update(symbol='BTC/USD',interval='15Min',source='ALPACA_US_BTCUSD_SPOT',currency='USD_RESEARCH')
+    for b in rows:b.update(symbol='BTC/USD',interval='15Min',source='BINANCE_USDM_PERP',currency='USD_RESEARCH')
     for i,low in enumerate([100,99,98,95,98,99,100],start=280):
         rows[i].update(open='105',high='110',low=str(low),close='105')
     rows[-1].update(open='96',high='100',low='93',close='94')
@@ -61,7 +61,7 @@ def test_confirmed_structure_exit_persists_until_fresh_quote(tmp_path):
     result=process_structure_close(store=store,bars=rows,now=now)
     assert result['action']=='EXIT_PENDING' and store.account('E')['state']=='OPEN_LONG'
     assert process_structure_close(store=store,bars=rows,now=now)['action']=='DUPLICATE_BAR'
-    quote={'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','timestamp_valid':True,'age_ms':0,'bid':'93','ask':'93.1','event_id':'q1','event_at':now.isoformat()}
+    quote={'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','timestamp_valid':True,'age_ms':0,'bid':'93','ask':'93.1','event_id':'q1','event_at':now.isoformat()}
     old_quote={**quote,'event_at':(now-timedelta(minutes=1)).isoformat()}
     assert not protect_e_accounts({'formal':store.path},old_quote,CostModel())['formal']['accepted']
     assert store.account('E')['state']=='OPEN_LONG'
@@ -74,7 +74,7 @@ def test_structure_bar_before_entry_must_not_manage_position(tmp_path):
     from test_e_visual import bars as snapshot
     from datetime import datetime,timedelta
     rows=snapshot()
-    for b in rows:b.update(symbol='BTC/USD',interval='15Min',source='ALPACA_US_BTCUSD_SPOT',currency='USD_RESEARCH')
+    for b in rows:b.update(symbol='BTC/USD',interval='15Min',source='BINANCE_USDM_PERP',currency='USD_RESEARCH')
     store=EPaperStore(tmp_path/'e.sqlite')
     store.open_position(agent='E',direction='LONG',quantity=Decimal('.1'),price=Decimal('100'),stop=Decimal('90'),fee=Decimal('.01'),slippage=Decimal('0'),idempotency_key='open',expected_version=0)
     now=datetime.fromisoformat(rows[-1]['close_at'])+timedelta(seconds=1)
@@ -87,7 +87,7 @@ def test_newly_confirmed_higher_low_sets_persisted_tighter_stop(tmp_path):
     from datetime import datetime,timedelta
     import sqlite3
     rows=snapshot()
-    for b in rows:b.update(symbol='BTC/USD',interval='15Min',source='ALPACA_US_BTCUSD_SPOT',currency='USD_RESEARCH')
+    for b in rows:b.update(symbol='BTC/USD',interval='15Min',source='BINANCE_USDM_PERP',currency='USD_RESEARCH')
     for b,low in zip(rows[-13:],[100,99,98,92,98,99,100,99,98,94,98,99,100]):
         b.update(open='105',high='110',low=str(low),close='105')
     store=EPaperStore(tmp_path/'e.sqlite')
@@ -107,7 +107,7 @@ def test_short_structure_exit_uses_confirmed_high_and_fresh_ask(tmp_path):
     from datetime import datetime,timedelta
     import sqlite3
     rows=snapshot()
-    for b in rows:b.update(symbol='BTC/USD',interval='15Min',source='ALPACA_US_BTCUSD_SPOT',currency='USD_RESEARCH')
+    for b in rows:b.update(symbol='BTC/USD',interval='15Min',source='BINANCE_USDM_PERP',currency='USD_RESEARCH')
     for b,high in zip(rows[-8:-1],[103,104,105,108,105,104,103]):b.update(open='100',high=str(high),low='90',close='101')
     rows[-1].update(open='104',high='110',low='100',close='109')
     store=EPaperStore(tmp_path/'e.sqlite')
@@ -115,6 +115,7 @@ def test_short_structure_exit_uses_confirmed_high_and_fresh_ask(tmp_path):
     now=datetime.fromisoformat(rows[-1]['close_at'])+timedelta(seconds=1)
     with sqlite3.connect(store.path) as db:db.execute("UPDATE fills SET occurred_at=? WHERE position_effect='OPEN'",((now-timedelta(minutes=120)).isoformat(),))
     assert process_structure_close(store=store,bars=rows,now=now)['action']=='EXIT_PENDING'
-    quote={'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','timestamp_valid':True,'age_ms':0,'bid':'108.9','ask':'109','event_at':now.isoformat(),'event_id':'q'}
+    quote={'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','timestamp_valid':True,'age_ms':0,'bid':'108.9','ask':'109','event_at':now.isoformat(),'event_id':'q'}
     assert protect_e_accounts({'formal':store.path},quote,CostModel())['formal']['accepted']
     assert EPaperStore(store.path).account('E')['state']=='FLAT'
+

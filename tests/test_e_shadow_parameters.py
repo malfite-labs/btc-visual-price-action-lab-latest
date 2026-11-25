@@ -71,11 +71,12 @@ def test_whitelisted_candidate_executes_only_in_tagged_shadow_store(tmp_path):
     from backend.domain import CostModel
     from test_e_quant_v11 import e2_window
     rows=e2_window()
-    for b in rows:b.update(symbol='BTC/USD',interval='15Min',source='ALPACA_US_BTCUSD_SPOT',currency='USD_RESEARCH')
+    for b in rows:b.update(symbol='BTC/USD',interval='15Min',source='BINANCE_USDM_PERP',currency='USD_RESEARCH')
     now=datetime.fromisoformat(rows[-1]['close_at'])+timedelta(seconds=3)
     candidate=detect_setups(rows,_shadow_change={'E2_drop_window':6})['selected'];ask=float(candidate['stop'])+.04
-    quote={'source':'ALPACA_US_BTCUSD_SPOT','currency':'USD_RESEARCH','timestamp_valid':True,'age_ms':0,'bid':str(ask-.01),'ask':str(ask),'event_at':now.isoformat()}
+    quote={'source':'BINANCE_USDM_PERP','currency':'USD_RESEARCH','timestamp_valid':True,'age_ms':0,'bid':str(ask-.01),'ask':str(ask),'event_at':now.isoformat()}
     store=EPaperStore(tmp_path/'shadow.sqlite')
     with sqlite3.connect(store.path) as db:db.execute("INSERT INTO e_store_identity VALUES('account_role','SHADOW')")
     result=run_quant_cycle(store=store,bars=rows,quote=quote,now=now,cost=CostModel(),shadow_change={'E2_drop_window':6},strategy_dir=ROOT)
     assert result['status']=='PAPER_FILLED' and store.account('E')['state']=='OPEN_LONG'
+

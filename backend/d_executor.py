@@ -6,7 +6,7 @@ from decimal import Decimal, InvalidOperation
 def validate_quote(quote, now, max_age_ms=60000):
     """Validate provider identity and both event and receive timestamps."""
     try:
-        if (quote.get('symbol') != 'BTC/USD' or quote.get('source') != 'ALPACA_US_BTCUSD_SPOT'
+        if (quote.get('symbol') != 'BTC/USD' or quote.get('source') != 'BINANCE_USDM_PERP'
                 or quote.get('currency') != 'USD_RESEARCH'):
             return False
         if quote.get('timestamp_valid') is not True or now.tzinfo is None:
@@ -178,7 +178,7 @@ def process_pending_entry(ledger, intents, signal_id, signal_bar, now, entry_gat
                      and candle_open.tzinfo is not None and candle_close == close
                      and candle_close - candle_open == timedelta(minutes=15)
                      and signal_bar['symbol'] == 'BTC/USD' and signal_bar['interval'] == '15Min'
-                     and signal_bar['source'] == 'ALPACA_US_BTCUSD_SPOT'
+                     and signal_bar['source'] == 'BINANCE_USDM_PERP'
                      and signal_bar['currency'] == 'USD_RESEARCH' and signal_bar['is_closed'] is True
                      and Decimal(str(signal_bar['close'])) == Decimal(str(signal['close']))
                      and Decimal(str(signal_bar['volume'])).is_finite()
@@ -380,3 +380,4 @@ def process_verified_quote(ledger, now):
         if not result.get('accepted'):
             return {'status':'BLOCKED','result':result}
     return {'status':'BLOCKED','reason':'TRANSITION_LIMIT'}
+

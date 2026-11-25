@@ -8,7 +8,7 @@ from backend.execution import recover_pending_stop
 def protect_e_short_margin(store,quote,cost):
     account=store.account('E')
     if account['state']!='OPEN_SHORT' or not account.get('position_json'):return {'accepted':False,'reason':'NO_SHORT_POSITION'}
-    if not quote or quote.get('source')!='ALPACA_US_BTCUSD_SPOT' or quote.get('currency')!='USD_RESEARCH' or quote.get('timestamp_valid') is not True or not 0<=int(quote.get('age_ms',10**9))<=cost.max_quote_age_ms:return {'accepted':False,'reason':'QUOTE_UNAVAILABLE_OR_STALE'}
+    if not quote or quote.get('source')!='BINANCE_USDM_PERP' or quote.get('currency')!='USD_RESEARCH' or quote.get('timestamp_valid') is not True or not 0<=int(quote.get('age_ms',10**9))<=cost.max_quote_age_ms:return {'accepted':False,'reason':'QUOTE_UNAVAILABLE_OR_STALE'}
     try:
         position=json.loads(account['position_json']);price=Decimal(str(quote['ask']));bid=Decimal(str(quote['bid']));qty=Decimal(position['quantity'])
         if not price.is_finite() or not bid.is_finite() or bid<=0 or price<bid:return {'accepted':False,'reason':'QUOTE_INVALID'}
@@ -22,3 +22,4 @@ def protect_e_short_margin(store,quote,cost):
         if not pending.get('accepted') or pending.get('duplicate'):return pending
         return recover_pending_stop(ledger=store,agent='E',quote=quote,cost=cost,event_id=event,reason='STOP_LIQUIDATION')
     except (KeyError,ValueError,TypeError,ArithmeticError,InvalidOperation):return {'accepted':False,'reason':'INVALID_RISK_INPUT'}
+
