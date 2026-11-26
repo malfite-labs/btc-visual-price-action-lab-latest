@@ -51,7 +51,7 @@ class _EntryGate:
 
 class DBridge:
     def __init__(self, observation_path, ledger_path, archive, *, feed_healthy,
-                 candles_complete, clock=None, max_pending=1024):
+                 candles_complete, clock=None, max_pending=1024, common_guard=False):
         self.observation_path = observation_path
         self.ledger_path = ledger_path
         self.archive = archive
@@ -68,12 +68,20 @@ class DBridge:
         self._fault_persisting = 0
         self._gap_quotes = []
         self._last_verified_quote = None
+        self.common_guard = common_guard
+        self._common_work = asyncio.Lock()
+        self._common_failure = None
 
     async def start(self):
         if self.runtime is not None:
             raise RuntimeError('D_BRIDGE_ALREADY_STARTED')
-        runtime = await asyncio.to_thread(DRuntime, self.observation_path, self.ledger_path, self.archive)
+        runtime = await asyncio.to_thread(DRuntime, self.observation_path, self.ledger_path, self.archive,
+                                          common_guard=self.common_guard)
         runtime.entry_gate = self._entry_gate
+        if self.common_guard:
+            self._entry_gate.invalidate()
+            self.runtime = runtime
+            return
         try:
             if await asyncio.to_thread(runtime.has_data_loss):
                 self._entry_gate.invalidate()
@@ -127,6 +135,13 @@ class DBridge:
 
         self.enabled = True
         epoch = self._entry_gate.epoch
+        if self.common_guard:
+            if (self._feed_ready() and self._common_failure is None
+                    and self.runtime is not None
+                    and self.runtime.status()['protection'] == 'READY'
+                    and not self.runtime.has_data_loss()):
+                self._entry_gate.rearm(epoch)
+            return {'enabled': True, 'changed': True}
         if (self.dispatcher is not None and self.dispatcher.failure is None
                 and not self._fault_persisting and self._feed_ready()
                 and self.dispatcher._queue.empty() and self.runtime is not None
@@ -182,9 +197,56 @@ class DBridge:
         return self.enabled and not self._entry_gate.blocked.is_set() and self._feed_ready()
 
     def _feed_ready(self):
+        if self.common_guard:
+            return bool(self.feed_healthy() and self.candles_complete())
         return (not self._stream_down and not self._fault_persisting and self.dispatcher is not None
                 and self.dispatcher.failure is None and bool(self.feed_healthy())
                 and bool(self.candles_complete()))
+
+    async def process_common(self, kind, value):
+        """Serialize shared market callbacks without a second queue or watcher."""
+        import logging
+        async with self._common_work:
+            if self.runtime is None:
+                return
+            try:
+                return await asyncio.to_thread(self._handle_common, kind, value)
+            except Exception as exc:
+                self._entry_gate.invalidate()
+                self._common_failure = 'D_RUNTIME_' + type(exc).__name__
+                logging.getLogger(__name__).exception('D shared callback failed (%s)', kind)
+                return {'status': 'BLOCKED', 'reason': self._common_failure}
+
+    def _handle_common(self, kind, value):
+        now = self.clock()
+        ready = self._feed_ready()
+        if kind == 'bar':
+            if self._common_failure or not self._ready():
+                return {'status': 'BLOCKED', 'reason': 'MARKET_NOT_READY'}
+            return self.runtime.on_bar(value, now, market_ready=True)
+        quote = self._event(value) if value is not None else None
+        if quote is None or not validate_quote(quote, now):
+            self._entry_gate.invalidate()
+            self.runtime.mark_stream_unavailable('INVALID_QUOTE')
+            return {'status': 'BLOCKED', 'reason': 'INVALID_QUOTE'}
+        if not ready:
+            self._entry_gate.invalidate()
+        # A fresh quote may manage exits even while the common entry gate
+        # awaits continuous candles or while the operator has paused entries.
+        holding = bool(self.runtime.ledger.account()['position'])
+        if ready and not holding and (self.runtime.status()['protection'] != 'READY'
+                                      or self._common_failure):
+            if not self.runtime.confirm_stream_recovered(quote, now, market_ready=True,
+                                                         candles_complete=True):
+                return {'status': 'BLOCKED', 'reason': 'D_RECONCILIATION_REQUIRED'}
+            self._common_failure = None
+        allow_entry = ready and self.enabled and not holding and self._common_failure is None
+        if allow_entry:
+            self._entry_gate.rearm(self._entry_gate.epoch)
+        result = self.runtime.on_quote(quote, now, market_ready=ready)
+        if ready and result.get('status') in ('IDLE', 'COMPLETE', 'EMPTY', 'PENDING', 'REJECTED'):
+            self._common_failure = None
+        return result
 
     def _handle(self, kind, value):
         now = self.clock()
@@ -245,34 +307,68 @@ class DBridge:
             self._gap_quotes = []
 
     async def status(self, quote=None):
-        if self.runtime is None or self.dispatcher is None:
+        if self.runtime is None or (self.dispatcher is None and not self.common_guard):
             return {'status': 'UNAVAILABLE', 'reason': 'D_BRIDGE_NOT_STARTED', 'execution_ready': False}
         from backend.d_signal import RULE_VERSION, SOURCE_COMMIT
         runtime = await asyncio.to_thread(self.runtime.status)
         account = await asyncio.to_thread(read_execution_account, self.ledger_path, quote, self.clock())
         observation = await asyncio.to_thread(read_status, self.observation_path)
-        failure = self.dispatcher.failure
+        failure = self._common_failure if self.common_guard else self.dispatcher.failure
         # Use the exact quote snapshot rendered by this status request for both
         # valuation and circuit checks. The previously dispatched WS quote may
         # be older even while the shared market layer has a newer validated quote.
         risk_quote = self._event(quote) if isinstance(quote, dict) else None
         risk = await asyncio.to_thread(self.runtime.circuit_status, risk_quote, self.clock())
-        reason = failure or runtime['reason'] or (risk.get('reason') if risk.get('block_entries') else None)
+        feed_ready = self._feed_ready()
+        transient_reasons = {
+            'MARKET_NOT_READY', 'INVALID_QUOTE', 'STREAM_UNAVAILABLE',
+            'MARKET_STREAM_UNAVAILABLE', 'STARTUP_AWAITING_FEED_VALIDATION',
+            'RESTART_AWAITING_FRESH_QUOTE',
+        }
+        reason = failure or ('MARKET_NOT_READY' if self.common_guard and not feed_ready else None) or runtime['reason'] or (risk.get('reason') if risk.get('block_entries') else None)
         ready = (self.enabled and self._ready() and runtime['protection'] == 'READY' and not failure
                  and not risk.get('block_entries', True)
                  and account['status'] == 'READY'
                  and account.get('reason') != 'VALUATION_UNAVAILABLE')
-        status = 'PAUSED' if not self.enabled else 'AUTO_PAPER' if ready else 'PROTECTION_UNCERTAIN'
+        is_market_recovering = (
+            self.common_guard
+            and self.enabled
+            and not ready
+            and not failure
+            and not self.runtime.has_data_loss()
+            and account['status'] == 'READY'
+            and (not feed_ready or (reason in transient_reasons))
+        )
+        status = (
+            'PAUSED' if not self.enabled
+            else 'AUTO_PAPER' if ready
+            else 'MARKET_RECOVERING' if is_market_recovering
+            else 'PROTECTION_UNCERTAIN'
+        )
+        control_state = (
+            'PAUSED' if not self.enabled
+            else 'RUNNING' if ready
+            else 'MARKET_RECOVERING' if is_market_recovering
+            else 'PROTECTION_UNCERTAIN'
+        )
         reason = 'STRATEGY_PAUSED' if not self.enabled else reason
         return {**account, 'status': status, 'enabled': self.enabled,
                 'reason': reason, 'execution_ready': ready,
                 'circuit': risk,
-                'control_state': 'PAUSED' if not self.enabled else 'RUNNING' if ready else 'PROTECTION_UNCERTAIN',
+                'control_state': control_state,
                 'rule_version': RULE_VERSION, 'source_commit': SOURCE_COMMIT,
+                'integration_version': 'D-COMMON-GUARD-V1' if self.common_guard else 'D-LEGACY',
                 'decision': observation.get('decision'), 'signal': observation.get('signal'),
                 'decision_state': runtime['state']}
 
     async def close(self):
+        if self.common_guard:
+            self._entry_gate.invalidate()
+            async with self._common_work:
+                if self.runtime is not None:
+                    await asyncio.to_thread(self.runtime.close)
+                    self.runtime = None
+            return
         self._stream_down = True
         self._entry_gate.invalidate()
         dispatcher, runtime = self.dispatcher, self.runtime

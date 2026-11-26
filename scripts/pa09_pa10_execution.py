@@ -236,5 +236,11 @@ class CandidateLedger:
                     self._settle(db,st,stamp,outcome,reason)
             if reason not in ('NO_POSITION','HOLD'):
                 st['last_status']=reason
+            elif (not pos and entry_allowed is not None and entry_allowed()
+                  and (not enforce_activation or st.get('enabled') is True)
+                  and st.get('last_status') in ('ENTRY_BLOCKED', 'GAP_NO_ENTRY')):
+                # Common market guard recovered on a flat account: clear transient entry-block
+                # without back-opening any expired signal or overriding manual pause.
+                st['last_status']='WAIT'
             self._save(db,st)
             return reason

@@ -309,7 +309,10 @@ async def market_loop():
                 e_dispatch=globals().get('_schedule_e_market_from_loop')
                 if e_dispatch is not None:e_dispatch(candles,last_close)
                 d_dispatch=globals().get('_schedule_d_market_from_loop')
-                if d_dispatch is not None:d_dispatch(last_close)
+                if d_bridge is not None and d_bridge.common_guard:
+                    await d_bridge.process_common('bar', last_close)
+                elif d_dispatch is not None:
+                    d_dispatch(last_close)
                 dispatchable, dispatch_reason = claim_closed_bar_for_dispatch(
                     last_close, ROOT / ".run" / "market-decision-watermark.json"
                 )
@@ -398,12 +401,17 @@ async def stream_events(event: dict):
                                  and event.get('timestamp_valid') is True
                                  and timing['timestamp_valid'] is True
                                  and bid.is_finite() and ask.is_finite() and 0 < bid <= ask)
-                    if not raw_valid:
+                    if getattr(d_bridge, 'common_guard', False):
+                        await d_bridge.process_common('quote', quote if raw_valid else None)
+                    elif not raw_valid:
                         _fail_d_dispatch(d_bridge, 'D_RAW_QUOTE_INVALID')
                     elif not d_bridge.submit_quote(quote):
                         _fail_d_dispatch(d_bridge, 'D_QUOTE_SUBMIT_FAILED')
                 except (KeyError, TypeError, ValueError, ArithmeticError, InvalidOperation):
-                    _fail_d_dispatch(d_bridge, 'D_RAW_QUOTE_INVALID')
+                    if getattr(d_bridge, 'common_guard', False):
+                        await d_bridge.process_common('quote', None)
+                    else:
+                        _fail_d_dispatch(d_bridge, 'D_RAW_QUOTE_INVALID')
                 except Exception:
                     logging.getLogger(__name__).exception('D quote dispatch failed')
                     _fail_d_dispatch(d_bridge, 'D_QUOTE_SUBMIT_FAILED')
@@ -411,7 +419,10 @@ async def stream_events(event: dict):
             await process_stop_quote(quote)
         except Exception as exc:
             if d_bridge is not None and not d_dispatched:
-                _fail_d_dispatch(d_bridge, 'D_QUOTE_PARSE_FAILED')
+                if getattr(d_bridge, 'common_guard', False):
+                    await d_bridge.process_common('quote', None)
+                else:
+                    _fail_d_dispatch(d_bridge, 'D_QUOTE_PARSE_FAILED')
             market_status["websocket_quote"] = "PARSE_ERROR"
             market_status["quote_error"] = type(exc).__name__
     elif event.get("T") == "error":
@@ -564,20 +575,28 @@ _d_market_tasks: set[asyncio.Task] = set()
 d_bridge = None
 
 
+def _common_market_guard():
+    """Single source of truth for market readiness across all 16+ strategies."""
+    from backend.common_guard import evaluate_common_market_guard
+    quote = _quote_with_live_age(market_status.get('quote'))
+    return evaluate_common_market_guard(
+        feed_health=market_status.get('feed_health'),
+        quote=quote,
+        ws_recovery_state=market.status.get('websocket_recovery_state'),
+        gap_count_288=market_status.get('gap_count_288'),
+        candle_count=len(candles),
+        max_quote_age_ms=COST_MODEL.max_quote_age_ms,
+        startup_monitor_checked=bool(market_status.get('startup_position_monitor_checked', True)),
+    )
+
+
 def _d_feed_healthy():
-    quote = market.status.get('last_quote') or {}
-    return (market.status.get('websocket_recovery_state') == 'HEALTHY'
-            and websocket_quote_health(
-                market.status.get('websocket', 'UNKNOWN'),
-                market.status.get('websocket_last_quote_received_at'), datetime.now(UTC),
-                timestamp_valid=bool(quote.get('timestamp_valid')),
-                last_quote_event_at=quote.get('event_at')) == 'FRESH')
+    return _common_market_guard().quote_ready
 
 
 def _d_candles_complete():
-    return (market_status.get('feed_health') == 'LIVE'
-            and market_status.get('gap_count_288') == 0
-            and len(candles) >= 288)
+    g = _common_market_guard()
+    return g.feed_live and g.candles_complete
 
 
 def _schedule_d_market_from_loop(close):
@@ -1072,16 +1091,7 @@ async def _dispatch_strategy_pool_cycle(closed, close, quote):
 
 
 def _pa_quote_entries_allowed():
-    quote = _quote_with_live_age(market_status.get('quote')) or {}
-    return bool(
-        market_status.get('feed_health') == 'LIVE'
-        and market_status.get('gap_count_288') == 0
-        and market_status.get('startup_position_monitor_checked') is True
-        and market.status.get('websocket_recovery_state') == 'HEALTHY'
-        and quote.get('source') == 'BINANCE_USDM_PERP'
-        and quote.get('timestamp_valid') is True
-        and 0 <= int(quote.get('age_ms', 10**9)) <= COST_MODEL.max_quote_age_ms
-    )
+    return _common_market_guard().entry_ready
 
 
 def _d_auto_paper_requested():
@@ -1141,7 +1151,7 @@ async def lifespan(app: FastAPI):
                 from backend.d_bridge import DBridge
                 bridge = DBridge(DATA_ROOT/'d'/'formal.sqlite3', DATA_ROOT/'d'/'trading.sqlite3',
                                  candle_archive, feed_healthy=_d_feed_healthy,
-                                 candles_complete=_d_candles_complete)
+                                 candles_complete=_d_candles_complete, common_guard=True)
                 await bridge.start()
                 if stop_event.is_set():
                     await bridge.close()
@@ -1233,7 +1243,16 @@ async def g_mirror_fills(limit: int = 500):
 
 @app.get('/api/v1/strategy-pool')
 async def strategy_pool_list():
-    return {'items': strategy_pool.list() + pa_extension.list()}
+    guard = _common_market_guard()
+    pool_items = strategy_pool.list()
+    for item in pool_items:
+        if item.get('enabled') and not guard.entry_ready and item.get('status') in ('RUNNING', 'ENABLED_NOT_RUNNING'):
+            item['status'] = 'MARKET_RECOVERING'
+        elif item.get('enabled') and guard.entry_ready and item.get('status') == 'ENABLED_NOT_RUNNING':
+            last_st = str(item.get('last_status') or '')
+            if last_st.startswith('BLOCKED:QUOTE_UNAVAILABLE_OR_STALE') or last_st == 'BLOCKED_STALE_QUOTE':
+                item['status'] = 'RUNNING'
+    return {'items': pool_items + pa_extension.list(market_ready=guard.entry_ready)}
 
 @app.get('/api/v1/strategy-pool/{strategy_id}/versions')
 async def strategy_pool_versions(strategy_id: str):
@@ -1500,6 +1519,7 @@ async def system_status():
         "feed_health": effective_health,
         "quote_health": quote_health,
         "quote_fresh": not stale,
+        "common_market_guard": _common_market_guard().to_dict(),
         "stop_monitor": "QUOTE_EVENT_INTERNAL_PAPER_STOP_MONITOR",
         "scheduler": (
             "ENABLED_INTERNAL_PAPER" if paper_scheduler.enabled else "DISABLED_NOT_ARMED"
@@ -1699,7 +1719,7 @@ async def set_d_control(request: Request):
         await asyncio.to_thread(initialize_store, DATA_ROOT / 'd' / 'formal.sqlite3')
         bridge = DBridge(DATA_ROOT / 'd' / 'formal.sqlite3', DATA_ROOT / 'd' / 'trading.sqlite3',
                          candle_archive, feed_healthy=_d_feed_healthy,
-                         candles_complete=_d_candles_complete)
+                         candles_complete=_d_candles_complete, common_guard=True)
         await bridge.start()
         try:
             temp_path.write_text(payload, encoding='utf-8')

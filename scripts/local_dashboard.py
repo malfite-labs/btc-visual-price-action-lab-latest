@@ -245,16 +245,25 @@ def money_label(value):
 
 def pa_status_label(item):
     status = item.get('status')
-    if status == 'ENABLED_NOT_RUNNING' and 'GAP' in str(item.get('last_status')):
-        return '周期滞后'
+    last_st = str(item.get('last_status') or '')
+    if status == 'MARKET_RECOVERING':
+        return '行情恢复中'
+    if status == 'RECONCILING' or 'RECONCILED_AWAITING' in last_st:
+        return '对账中'
+    if status == 'FAULTED' or 'GAP_RECONCILIATION_REQUIRED' in last_st:
+        return '对账异常'
     if status == 'RUNNING':
         return '运行中'
     if status == 'ENABLED_NOT_RUNNING':
-        return '已启用待周期'
-    if status in ('PAUSED', 'REGISTERED', 'REGISTERED_PAUSED'):
-        return '已暂停' if item.get('paused_at') or status != 'REGISTERED' else '未启用'
-    if status == 'FAULTED':
-        return '故障'
+        if 'ENTRY_BLOCKED' in last_st or 'STALE_QUOTE' in last_st or 'GAP_NO_ENTRY' in last_st:
+            return '行情恢复中'
+        return '等待信号'
+    if status in ('PAUSED', 'REGISTERED_PAUSED'):
+        return '已暂停'
+    if status == 'REGISTERED':
+        return '已暂停' if item.get('paused_at') else '已停用'
+    if status == 'DISABLED':
+        return '已停用'
     return str(status or '状态未知')
 
 
@@ -279,10 +288,11 @@ def console_rows(decisions, pa_items=(), pa_error=None, g_status=None, g_error=N
     rows = {}
     now = now or datetime.now(timezone.utc)
     control_names = {
-        'RUNNING': '运行中', 'PAUSING': '未完成', 'PAUSED': '已暂停',
-        'OBSERVE_ONLY': '观察中', 'PROTECTION_UNCERTAIN': '保护待确认',
-        'D_OBSERVE_ONLY': '执行未接通', 'E_OBSERVE_ONLY': '观察中',
-        'E_NOT_INITIALIZED': '账户未初始化',
+        'RUNNING': '运行中', 'PAUSING': '对账中', 'PAUSED': '已暂停',
+        'MARKET_RECOVERING': '行情恢复中', 'RECONCILING': '对账中',
+        'OBSERVE_ONLY': '已停用', 'PROTECTION_UNCERTAIN': '对账异常',
+        'D_OBSERVE_ONLY': '已停用', 'E_OBSERVE_ONLY': '已停用',
+        'E_NOT_INITIALIZED': '已停用',
     }
     for agent in ('A', 'B', 'C', 'D', 'E'):
         row = dict(decisions.get(agent) or {})
@@ -366,27 +376,34 @@ def console_rows(decisions, pa_items=(), pa_error=None, g_status=None, g_error=N
         follow = g_status.get('follow_state') or g_status.get('status')
         g_err = g_status.get('last_error')
         benign_risk_exit = (
-            g_err == 'MIRROR_RISK_EXIT'
+            g_err in (None, 'MIRROR_RISK_EXIT')
             and follow == 'WAIT_FOR_C_NEXT_OPEN'
             and not g_status.get('position')
             and bool(g_status.get('enabled'))
         )
+        g_enabled = bool(g_status.get('enabled'))
         label = (
-            '异常' if (g_err and not benign_risk_exit)
+            '已暂停' if not g_enabled
+            else '对账异常' if (g_err and not benign_risk_exit)
             else '等待C开仓' if follow == 'WAIT_FOR_C_NEXT_OPEN'
             else '运行中' if follow in ('MIRRORING', 'PAIR_CLOSED')
-            else '异常'
+            else '对账异常'
+        )
+        # Separate current live waiting event from historical fill action (preserved in trade details)
+        current_g_action = (
+            'WAIT_FOR_C_NEXT_OPEN' if (g_enabled and follow == 'WAIT_FOR_C_NEXT_OPEN' and not g_status.get('position') and benign_risk_exit)
+            else (g_err if (g_err and not benign_risk_exit) else (g_status.get('last_action') or follow or 'WAIT'))
         )
         rows['G'] = {'id': 'G', 'strategy_id': 'G', 'name': 'C反向镜像', 'status_label': label,
-                     'control_label': '只读', 'control': 'G_MIRROR',
+                     'control_label': '运行中' if g_enabled else '已暂停', 'control': 'G_MIRROR',
                      'state': {'LONG': '做多', 'SHORT': '做空'}.get(direction, '空仓'),
                      'amount': money_label(g_status.get('position_amount') or '0'),
                      'leverage': leverage_label(g_status.get('leverage'), direction or 'FLAT'),
                      'equity': money_label(g_status.get('equity')), 'realized': money_label(g_status.get('realized')),
                      'unrealized': money_label(g_status.get('unrealized')), 'fees': money_label(g_status.get('fees')),
-                     'action': g_status.get('last_action') or follow or 'WAIT', 'cycle': '—',
+                     'action': current_g_action, 'historical_action': g_status.get('last_action'), 'cycle': '—',
                      'cycle_health': '事件驱动', 'sync_at': cycle_label(g_status.get('last_cycle')),
-                     'enabled': bool(g_status.get('enabled')), 'raw': g_status, 'category': '镜像策略'}
+                     'enabled': g_enabled, 'raw': g_status, 'category': '镜像策略'}
     ordered = ('A', 'B', 'C', 'D', 'E', 'G', *PA_STRATEGY_IDS)
     result = {key: rows[key] for key in ordered if key in rows}
     if not pa_error:
@@ -447,19 +464,20 @@ def strategy_view(row_id, row):
 
 
 def console_control_state(row_id, row):
-    if row_id == 'G':
+    """Reflect actual backend enable authorization (independent of transient market health)."""
+    if row.get('status_label') in ('读取失败', '数据过期', '未登记'):
         return 'disabled'
-    if row_id in PA_STRATEGY_IDS:
-        if row.get('status_label') in ('读取失败', '数据过期', '未登记'):
-            return 'disabled'
+    if row_id == 'G':
+        return 'on' if row.get('enabled') else 'off'
+    if row_id in PA_STRATEGY_IDS or row_id in ('PA-09', 'PA-10') or row.get('is_pool_strategy'):
         return 'on' if row.get('enabled') else 'off'
     if row_id == 'D':
         if 'enabled' not in row or row.get('control') == 'UNKNOWN':
             return 'disabled'
         return 'on' if row.get('enabled') else 'off'
-    if row.get('control') in ('RUNNING', 'PAUSING'):
+    if row.get('control') in ('RUNNING', 'PAUSING', 'MARKET_RECOVERING', 'RECONCILING'):
         return 'on'
-    if row.get('control') == 'PAUSED':
+    if row.get('control') in ('PAUSED', 'OBSERVE_ONLY', 'D_OBSERVE_ONLY', 'E_OBSERVE_ONLY'):
         return 'off'
     return 'disabled'
 

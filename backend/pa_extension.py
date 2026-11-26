@@ -116,7 +116,7 @@ class PAExtension:
             self.exit_checks[sid]=monotonic()
         return result
 
-    def list(self):
+    def list(self, *, market_ready=None):
         result=[]
         for sid,ledger in self.ledgers.items():
             s=ledger.snapshot(); p=s['position']
@@ -127,16 +127,30 @@ class PAExtension:
             fills=ledger.fills()
             enabled=sid in self.enabled or s.get("enabled") is True
             cycle=(timestamp(s['last'])+STEP) if s['last'] else None
-            running=bool(cycle and 0<=(datetime.now(timezone.utc)-cycle).total_seconds()<=1800
-                         and s.get('last_status') not in {'ENTRY_BLOCKED','GAP_NO_ENTRY'})
+            last_st = s.get('last_status') or 'WAIT'
+            transient_blocked = last_st in {'ENTRY_BLOCKED', 'GAP_NO_ENTRY'}
+            if not enabled:
+                status = 'PAUSED' if s.get('activated_at') else 'REGISTERED'
+            elif market_ready is False:
+                status = 'MARKET_RECOVERING'
+            elif cycle and 0 <= (datetime.now(timezone.utc) - cycle).total_seconds() <= 1800:
+                if transient_blocked and market_ready is True and not p:
+                    status = 'RUNNING'
+                    last_st = 'WAIT'
+                elif transient_blocked:
+                    status = 'MARKET_RECOVERING'
+                else:
+                    status = 'RUNNING'
+            else:
+                status = 'ENABLED_NOT_RUNNING'
             result.append(dict(id=sid,name=NAMES[sid],active_version='1.0.0',enabled=enabled,
-                               status=('RUNNING' if running else 'ENABLED_NOT_RUNNING') if enabled else 'REGISTERED',
+                               status=status,
                                position_direction=p['direction'] if p else 'FLAT',
                                position_amount=str(Decimal(p['entry'])*Decimal(p['qty'])) if p else '0',
                                fees=str(sum((Decimal(f['fee']) for f in fills),Decimal(0))),
                                realized=str(sum((Decimal(f['net']) for f in fills if f['net'] is not None),Decimal(0))),
-                               last_action=s.get('last_status'),
+                               last_action=last_st,
                                cash=str(cash),equity=str(cash+pnl),unrealized=str(pnl),position=p,
                                phase=s['phase'],last_cycle=cycle.isoformat() if cycle else None,
-                               last_status=s.get('last_status') or 'REGISTERED'))
+                               last_status=last_st or 'REGISTERED'))
         return result

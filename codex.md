@@ -2485,3 +2485,15 @@ C自然跟单排查：游标78到91读取10笔C，真实Demo五单，仍空头0.
 - **动态注册与统一跟单适配 (`scripts/local_dashboard.py`, `scripts/live_copy_v2.py`, `scripts/live_copy_service.py`, `scripts/live_copy_window.py`)**：
   - 新上传至策略池的自定义 ID 策略自动进入策略池、纸盘控制台及实盘跟单策略选择器，并直接复用 `paper_fills()` 统一成交触发器与定额跟单引擎。
 - **验证**：`tests/test_strategy_template_and_pool.py` + `tests/test_v31_adapters_and_leverage_sync.py` + `tests/test_dual_env_copy.py` 共 31 项隔离测试全部通过；正式 16 套策略、Demo（PID 15964）及正式实盘（STOPPED）运行态完全不受影响。
+
+
+## 2026-11-26｜V3.1 全策略公共保护机制一致性专项修复 (`COMMON-MARKET-GUARD-V1`)
+- **唯一公共行情门禁 (`backend/common_guard.py`, `backend/app.py`)**：
+  - 统一 `evaluate_common_market_guard()` 与 `classify_unified_status()` 为全部 16 套策略及未来新增策略的唯一行情门禁与 7 态标准状态机（`运行中`/`等待信号`/`行情恢复中`/`对账中`/`对账异常`/`已暂停`/`已停用`），并在 `/api/v1/system/status` 暴露 `common_market_guard`。
+  - `_d_feed_healthy()`、`_d_candles_complete()`、`_pa_quote_entries_allowed()`、`/api/v1/strategy-pool` 全部复用同一公共门禁，移除分散重复判断。
+- **D 策略、PA-09/PA-10 与 G 策略专项修复 (`backend/d_bridge.py`, `backend/pa_extension.py`, `scripts/pa09_pa10_execution.py`, `scripts/local_dashboard.py`)**：
+  - **D**：区分瞬时行情恢复（`MARKET_RECOVERING`）与真实账本保护异常；修复 `common_guard=True` 模式下暂停/恢复后 `_entry_gate` 正确重新武装且人工暂停不污染行情保护状态。
+  - **PA-09 / PA-10**：行情恢复并收到有效新鲜报价后，空仓状态下自动清除短暂断联产生的 `ENTRY_BLOCKED`/`GAP_NO_ENTRY` 并回到 `WAIT`/`RUNNING`（绝不补开过期信号、绝不解除人工暂停）；修复启停开关与后台 `enabled` 授权一致。
+  - **G**：分离当前等待事件（`等待C开仓` / `WAIT_FOR_C_NEXT_OPEN`）与历史成交动作（`MIRROR_RISK_EXIT` 保留在成交明细中），启停开关准确反映实际监听授权。
+- **模板规范与验证 (`scripts/strategy_template_bundle.py`, `tests/test_common_guard_consistency.py`)**：
+  - 同步更新模板包内 `策略开发与上传规范.md`；34/34 项隔离测试全部通过，8012 受控重载生效，Demo 与正式实盘 PA-08 运行态完整保留。
