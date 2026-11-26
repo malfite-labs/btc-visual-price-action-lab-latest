@@ -13,7 +13,7 @@ export type DemoFill = {
   realized_pnl_usdt:string|null;net_pnl_before_funding_usdt:string|null
 }
 export type DemoPosition = {strategy_id:string;copy_config_id:string;position_side:'LONG'|'SHORT';quantity:string;price:string;unrealized_pnl:string|null}
-export type DemoSnapshot = {environment:'demo';strategies:string[];items:DemoFill[];positions:DemoPosition[];errors:string[];selected_strategy?:string|null}
+export type DemoSnapshot = {environment:'demo'|'production';strategies:string[];items:DemoFill[];positions:DemoPosition[];errors:string[];selected_strategy?:string|null;default_environment?:'demo'|'production'}
 export type Event = {event_id:string;strategy_id:string;strategy_version?:string;trade_id?:string;occurred_at:string;position_effect:string;position_direction:string;quantity:string;price:string;reason_text?:string;realized_pnl?:string;verification_status:string;source:string;demo?:DemoFill}
 
 export function demoEvent(fill:DemoFill):Event {

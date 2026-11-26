@@ -90,22 +90,23 @@ export default function KlineWindow({ live = false }: { live?: boolean }) {
   const focusRequest=useRef(0)
   const requestedStrategy=useRef<string|null|undefined>(undefined)
 
-  const available=live?(environment==='demo'?demo?.strategies??[]:[]):strategies
-  const sourceEvents=useMemo(()=>live?(environment==='demo'?demo?.items.map(demoEvent)??[]:[]):events,[live,environment,demo,events])
+  const available=live?(demo?.strategies??[]):strategies
+  const sourceEvents=useMemo(()=>live?(demo?.items.map(demoEvent)??[]):events,[live,demo,events])
   const filtered=useMemo(()=>sourceEvents.filter(e=>e.verification_status==='VERIFIED'&&selection.includes(e.strategy_id)&&(effect==='all'||(effect==='open')===(e.position_effect==='OPEN'))).sort((a,b)=>Date.parse(b.occurred_at)-Date.parse(a.occurred_at)),[sourceEvents,selection,effect])
 
   useEffect(()=>{
-    if(!live||environment!=='demo')return
+    if(!live)return
     const controller=new AbortController()
     let busy=false
+    const endpoint=environment==='production'?'http://127.0.0.1:5187/production-fills':'http://127.0.0.1:5187/demo-fills'
     const refresh=async()=>{
       if(busy)return
       busy=true
       try {
-        const response=await fetch('http://127.0.0.1:5187/demo-fills',{signal:controller.signal,cache:'no-store',redirect:'error'})
+        const response=await fetch(endpoint,{signal:controller.signal,cache:'no-store',redirect:'error'})
         if(!response.ok)throw Error(String(response.status))
         const snapshot:DemoSnapshot=await response.json()
-        if(snapshot.environment!=='demo')throw Error('环境不符')
+        if(snapshot.environment!==environment)throw Error('环境不符')
         if(!controller.signal.aborted){
           setDemo(snapshot)
           if(snapshot.selected_strategy!==requestedStrategy.current){
@@ -115,10 +116,13 @@ export default function KlineWindow({ live = false }: { live?: boolean }) {
             setDetail([])
             setHighlight('')
           }
-          setEventState(snapshot.errors.length?'部分 Demo 账本不可用':'')
+          setEventState(snapshot.errors.length?(environment==='production'?'部分正式实盘账本不可用':'部分 Demo 账本不可用'):'')
         }
       } catch {
-        if(!controller.signal.aborted)setEventState('Demo 成交读取暂不可用')
+        if(!controller.signal.aborted){
+          setDemo(null)
+          setEventState(environment==='production'?'正式实盘成交读取暂不可用':'Demo 成交读取暂不可用')
+        }
       } finally {busy=false}
     }
     void refresh()
@@ -361,7 +365,7 @@ export default function KlineWindow({ live = false }: { live?: boolean }) {
 
   useEffect(()=>{
     const s=series.current
-    if(!live||environment!=='demo'||!s)return
+    if(!live||!s)return
     const guides=(demo?.positions??[]).filter(p=>selection.includes(p.strategy_id)).map(p=>s.createPriceLine({
       price:Number(p.price),color:p.position_side==='LONG'?palette.up:palette.down,
       lineStyle:2,lineWidth:1,axisLabelVisible:true,

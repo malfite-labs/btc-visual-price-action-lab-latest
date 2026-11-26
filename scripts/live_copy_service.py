@@ -133,14 +133,21 @@ def main():
     parser.add_argument('--strategy',default='C')
     parser.add_argument('--config-id')
     parser.add_argument('--legacy-demo-ledger', action='store_true')
+    parser.add_argument('--environment', choices=('BINANCE_DEMO', 'BINANCE_PRODUCTION'), default='BINANCE_DEMO')
+    parser.add_argument('--account-id')
+    parser.add_argument('--data-dir', type=Path)
     parser.add_argument('--demo-check',action='store_true')
+    parser.add_argument('--production-check',action='store_true')
     parser.add_argument('--authorized-demo-orders',action='store_true')
+    parser.add_argument('--authorized-production-orders',action='store_true')
     parser.add_argument('--leverage',type=int,choices=range(1,6),default=5)
     parser.add_argument('--stop-fraction',type=Decimal)
     parser.add_argument('--target-fraction',type=Decimal)
     parser.add_argument('--risk-cap',type=Decimal)
     args = parser.parse_args()
-    if args.demo_check:
+    if args.demo_check or args.production_check:
+        if args.production_check:
+            args.environment = 'BINANCE_PRODUCTION'
         return demo_run(args,parser)
     import msvcrt
     lock_path = args.runtime_dir/'active.lock' if args.runtime_dir else Path(str(Path(args.ledger).resolve()) + '.lock')
@@ -150,7 +157,9 @@ def main():
             msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
         except OSError:
             raise SystemExit('FOLLOWER_ALREADY_RUNNING') from None
-        if args.authorized_demo_orders:
+        if args.authorized_demo_orders or args.authorized_production_orders:
+            if args.authorized_production_orders:
+                args.environment = 'BINANCE_PRODUCTION'
             stopped = demo_run(args,parser)
             if stopped is not None:
                 lock.close()
@@ -165,7 +174,7 @@ def main():
                 target = runtime / 'status.json'
                 pending = target.with_suffix('.tmp')
                 pending.write_text(json.dumps({'state':state, 'time':time.time(),'strategy':args.strategy,
-                    'mode':'DRY_RUN','pid':os.getpid(),'copy_config_id':args.config_id,
+                    'mode':'DRY_RUN','environment':args.environment,'pid':os.getpid(),'copy_config_id':args.config_id,
                     'cursor':follower.cursor()}), encoding='utf8')
                 pending.replace(target)
         try:
@@ -219,6 +228,16 @@ def demo_read_retry(operation, publish, *, sleep=time.sleep, jitter=None):
             sleep(delay)
 
 
+def read_demo_command(runtime):
+    if runtime is None:
+        return 'run'
+    try:
+        action = (runtime/'command.txt').read_text(encoding='utf8').strip()
+    except (OSError, UnicodeError):
+        return 'pause'
+    return action if action in ('run', 'pause', 'stop') else 'pause'
+
+
 def demo_poll(engine, command, publish, *, sleep=time.sleep, jitter=None, startup=False):
     def current_command():
         return command() if callable(command) else command
@@ -251,14 +270,19 @@ def demo_poll(engine, command, publish, *, sleep=time.sleep, jitter=None, startu
 
 
 def demo_run(args, parser):
-    from scripts.live_center import dpapi
-    from scripts.live_c_demo_exchange import DemoExchange
+    from scripts.live_copy_env import DEMO_ENV, PROD_ENV, alias_fingerprint, env_paths, make_exchange
     from scripts.live_copy_follow import FollowExecutor
 
-    root = Path(os.environ['LOCALAPPDATA'])/'BTC Paper Lab V3 Demo Acceptance'
-    key, secret = json.loads(dpapi((root/'credentials.dpapi').read_bytes(),decrypt=True))
-    exchange = DemoExchange(key,secret)
-    runtime = args.runtime_dir
+    environment = getattr(args, 'environment', DEMO_ENV)
+    is_prod = environment == PROD_ENV
+    paths = env_paths(environment, base_root=getattr(args, 'data_dir', None))
+    allow_writes = bool(getattr(args, 'authorized_production_orders', False)) if is_prod else bool(getattr(args, 'authorized_demo_orders', False))
+    exchange, _, resolved_account_id = make_exchange(
+        environment, account_id=getattr(args, 'account_id', None),
+        allow_writes=allow_writes, base_root=getattr(args, 'data_dir', None)
+    )
+    mode_code = 'PRODUCTION' if is_prod else 'DEMO'
+    runtime = args.runtime_dir or paths.runtime
     last_success = None
     last_reason = ''
     reconnect_count = 0
@@ -271,10 +295,12 @@ def demo_run(args, parser):
         if reason or state not in ('DEMO_RUNNING','DEMO_PAUSED'):
             last_reason=reason
         if runtime:
+            runtime.mkdir(parents=True, exist_ok=True)
             target = runtime/'status.json'
-            pending = runtime/'status.demo.tmp'
+            pending = runtime/f'status.{mode_code.lower()}.tmp'
             pending.write_text(json.dumps(dict(state=state,strategy=args.strategy,
-                mode='DEMO',time=time.time(),pid=os.getpid(),copy_config_id=args.config_id,
+                mode=mode_code,environment=environment,account_id=resolved_account_id,
+                time=time.time(),pid=os.getpid(),copy_config_id=args.config_id,
                 cursor=follower.cursor() if follower is not None else None,reason=last_reason,last_reconciled_at=last_success,
                 reconnect_count=reconnect_count,last_connected_at=last_success)),encoding='utf8')
             for attempt in range(5):
@@ -291,49 +317,48 @@ def demo_run(args, parser):
         exchange.synchronize()
         mode = exchange._request('GET','/fapi/v1/positionSide/dual').get('dualSidePosition')
         if type(mode) is not bool:
-            raise RuntimeError('DEMO_POSITION_MODE_UNVERIFIED')
+            raise RuntimeError(f'{mode_code}_POSITION_MODE_UNVERIFIED')
         exchange.hedge = mode
         snapshot = exchange.risk_snapshot()
         settings = snapshot['symbol'][0]
         if (settings['marginType'] != 'ISOLATED' or int(settings['leverage']) > args.leverage
                 or not snapshot['permissions']['enableFutures']):
-            raise RuntimeError('DEMO_CONFIGURATION_NOT_COMPATIBLE')
+            raise RuntimeError(f'{mode_code}_CONFIGURATION_NOT_COMPATIBLE')
         return mode, snapshot
 
-    if args.demo_check:
-        mode, snapshot = initialize(0)
+    check_only = bool(getattr(args, 'demo_check', False) or getattr(args, 'production_check', False))
+    if check_only:
+        report = exchange.preflight_report(planned_leverage=args.leverage, fixed_margin=args.fixed, budget=args.budget)
+        print(f'{mode_code}_READ_ONLY', json.dumps(report, ensure_ascii=False), flush=True)
+        return
     else:
         publish('DEMO_RECONCILING','正在进行 Binance 时间同步及账户初始化')
         try:
             mode, snapshot = demo_read_retry(initialize,publish)
         except (OSError, ValueError, RuntimeError, KeyError, IndexError) as exc:
-            publish('RECONCILE_REQUIRED',f'Demo 启动检查失败（{exc}）')
+            publish('RECONCILE_REQUIRED',f'{mode_code} 启动检查失败（{exc}）')
             raise
-    if args.demo_check:
-        print('DEMO_READ_ONLY', 'HEDGE' if mode else 'ONE_WAY', 'positions',len(snapshot['positions']),
-              'orders',len(snapshot['orders']),'algos',len(snapshot['conditional']),flush=True)
-        return
     if args.once or args.risk_cap is None:
-        parser.error('Demo execution requires configured risk budget and a managed service')
+        parser.error(f'{mode_code} execution requires configured risk budget and a managed service')
     args.stop_fraction = args.stop_fraction or None
     args.target_fraction = args.target_fraction or None
     if (any(value is not None and (not value.is_finite() or not 0 < value < 1)
             for value in (args.stop_fraction,args.target_fraction))
             or not args.risk_cap.is_finite() or args.risk_cap <= 0):
-        parser.error('Invalid Demo stop or risk settings')
+        parser.error(f'Invalid {mode_code} stop or risk settings')
     from uuid import UUID
     if args.config_id:
         config_id = UUID(args.config_id).hex
     else:
         config_id = None
-    directory = root/'continuous-copy'
-    if config_id and not args.legacy_demo_ledger:
+    directory = paths.ledgers
+    if config_id and (is_prod or not args.legacy_demo_ledger):
         directory = directory/config_id
     directory.mkdir(parents=True,exist_ok=True)
     ledger = directory/'demo-execution-inbox.sqlite3'
     from contextlib import ExitStack
     with ExitStack() as ownership:
-        demo_read_retry(lambda _: ownership.enter_context(exchange.order_ownership()),publish)
+        alias = demo_read_retry(lambda _: ownership.enter_context(exchange.order_ownership()),publish)
         if (args.strategy.startswith('pa-') and not paper_fills(args.source,strategy=args.strategy)
                 and args.strategy!='pa-trend-false-break-reclaim'):
             raise RuntimeError('PA_ADAPTER_HAS_NO_VERIFIED_FILLS')
@@ -360,15 +385,16 @@ def demo_run(args, parser):
                 if db.execute('SELECT 1 FROM inbox LIMIT 1').fetchone():
                     raise RuntimeError('EXISTING_DEMO_EVENTS_REQUIRE_POLICY_RECONCILIATION')
                 db.execute('UPDATE demo_policy SET value=? WHERE id=1',(policy,))
-        engine = FollowExecutor(follower,exchange,directory,'DEMO-CONTINUOUS',
+        account_binding = f'PROD-{alias_fingerprint(alias)}' if is_prod else 'DEMO-CONTINUOUS'
+        engine = FollowExecutor(follower,exchange,directory,account_binding,
             leverage=args.leverage,stop_fraction=args.stop_fraction,risk_cap=args.risk_cap,
             target_fraction=args.target_fraction,exit_mode='FOLLOW_PAPER')
-        print('DEMO_CONTINUOUS',args.strategy,flush=True)
+        print(f'{mode_code}_CONTINUOUS',args.strategy,flush=True)
         startup = True
         try:
             while True:
                 def command():
-                    return (runtime/'command.txt').read_text(encoding='utf8').strip() if runtime else 'run'
+                    return read_demo_command(runtime)
                 stopped,events = demo_poll(engine,command,publish,startup=startup)
                 startup = False
                 if stopped:

@@ -2392,3 +2392,40 @@ C自然跟单排查：游标78到91读取10笔C，真实Demo五单，仍空头0.
 - Checklist：检查当前远端、提交树和历史凭据候选；排除运行账本与 DPAPI；复测、核对远端提交和文档。
 - Anti-pattern：在正式目录初始化 Git，强推，或把运行备份和 Windows 快捷方式纳入源码。
 - 复盘：原始文件含 Windows 行尾及 Markdown 强制换行，按原样保留。针对性复测 31/31，历史基线 205/8 仍单独记录。
+
+### 2026-11-25 16项策略盈亏与交易快照
+- 22:33 CST 只读快照：16账户现金变化合计-2175.37 USD_RESEARCH，成交流水247条。A/B/C现金变化分别+93.07/-127.01/-1896.74；D 0；E -31.08；G镜像-0.75；PA池8项合计-212.86；PA-09/10均0。
+- A当前SHORT 0.17379046；其他账户快照空仓。Binance最新事件报价年龄72.49秒，超过既有60秒估值保护；不报告未实现盈亏。D状态UNCERTAIN，D_DISPATCH_OperationalError，数据丢失锁ACTIVE，保持原样。
+- Rule：行情超过60秒时不以旧报价估算浮盈浮亏；明确现金余额变动与总权益的区别。
+- Checklist：合并主纸盘、D/E/G独立账本、策略池和PA-09/10扩展账本；统一比较初始资金10000；检查持仓与成交流水。
+- Anti-pattern：只查主账本遗漏E/G/PA扩展账户，或把陈旧报价估值写成当前权益。
+- 复盘：一次只读汇总脚本因Python运行时路径拼写错误未执行，未产生副作用；改用先前已验证的运行时路径后成功。下次复用已确认路径并单独检查报价新鲜度。
+
+### 2026-11-25 保护策略恢复复核
+- PA-02、PA-06 已由正式 API 确认为 RUNNING / OK / FLAT。D 仍为 PROTECTION_UNCERTAIN，D_DISPATCH_OperationalError，空仓、零成交、零执行意图，三库 quick_check OK。
+- Rule：D 恢复须同时处理持久保护锁与内存调度故障；依赖 trade_id 的旧恢复分支不能用于空仓时创建的锁。
+- Checklist：核对正式仓位、成交、意图和锁记录；在隔离库复现空仓错误锁；区分其他模块 SQLite 锁日志与 D 原始异常。
+- Anti-pattern：清锁改状态、借停用启用掩盖内存故障或伪造平仓成交。本轮未变更策略、运行数据或服务。
+
+### 2026-11-26 重启专项恢复
+- Demo 原 PID 已退出。GET time 的 HTTP 0 进入重试期间，command.txt 读取 Errno 22 冒泡终止服务；UI 未在 RECONCILE_REQUIRED 检查 PID。隔离验证命令空缺、损坏和合法输入，更新命令读失败默认禁止开仓和 UI 死进程判断。
+- 原配置和账本恢复 PID 7060，游标从115随自然事件推进至117。原多仓与成交核对一致，后随纸盘自然平仓，最终 Demo 仓位和两类挂单均为零。
+- D 保留无 trade_id 的历史 OperationalError 持久锁；旧日志只存类型，暂无 D 原 SQL 证据。现有 D 回归 33 通过，未替代正式恢复。Windows 自动化识别到两个窗口，但读取时返回 owner mismatch。
+- Rule：分离本地控制读异常与交易所对账异常，控制不可读时暂停开仓并保持退出管理。
+- Checklist：核对 PID、账户锁、原委托和游标，以交易所只读回执复核恢复；确认 D 锁关联和原始失败证据。
+- Anti-pattern：按旧状态锁住已退出进程的 UI，或为恢复 D 直接清空保护锁。
+
+### 2026-11-26 D迁移公共行情保护
+- D-COMMON-GUARD-V1 通过61项定向回归；正式旧锁归档，11:00及11:15各写入一条 IDLE / NO_SETUP。D空仓、零成交、权益10000.00。实时报价在FRESH和STALE间波动，陈旧时暂停。
+- Windows 10:58整机重启，8012及5175已恢复，Demo进程退出。C原多仓的止损成交已从正式账本核对，G等待下一笔C开仓。
+- Rule：迁移必须保留历史锁证据，并验证空仓、零成交、无待处理意图或报价、三库完整。
+- Checklist：空库的报价证据表惰性创建时先核对待处理报价；先构造稳定事件ID再校验；正式验收以持久自然周期记录为准。
+- Anti-pattern：把空库缺少惰性证据表误判为有未决报价，或把见到AUTO_PAPER当成周期已经执行。
+- 复盘：两项测试先暴露空库证据表和事件ID顺序问题，修复后通过。正式网页卡片受5175跨域读限制，截图使用正式8012状态接口。
+
+
+### 2026-11-26 BTC Paper Lab V3.1 双环境实盘跟单中心升级与新版UI
+- 备份位置：`.backups/v31-dual-env-20261126-123104`（含全部修改前源码，随时可逐文件回滚）。
+- 核心架构：`ONE_COPY_ENGINE` + 双环境隔离（`BINANCE_DEMO` / `BINANCE_PRODUCTION`）。新增 `scripts/live_copy_env.py` 统一管理双环境配置、运行目录、独立账本、切换队列与 DPAPI 凭据隔离；`scripts/live_c_demo_exchange.py` 泛化为 `BinanceFuturesExchange`（`DemoExchange` + `ProductionExchange`，`allow_writes` 默认 `False`）并新增只读 `preflight_report`；`scripts/live_copy_service.py` 复用统一引擎支持 `--environment` 与 `--production-check`。
+- 策略名称与新版UI：`scripts/local_dashboard.py` 提供统一 16 策略编号/中文名称与排序来源（A–E、G · C反向镜像、PA-01～PA-10）；`scripts/live_copy_window.py` 升级为现代双环境桌面交易中心（顶部 Demo/正式标签页、4张对齐统计卡片、11列策略配置表、可搜索可滚动16策略选择卡片、独立止盈/止损按成交价涨跌幅%配置、跨环境仅复制参数、策略排队切换弹窗）；`scripts/kline_window.py` 与 `frontend/src/KlineWindow.tsx` 严格隔离 Demo 与正式实盘 K 线成交回执。
+- 实测验收：`tests/test_dual_env_copy.py` 7/7 隔离回归全部通过；正式账户只读预检实测通过读取（可用 `100.17 USDT`，`HEDGE` / `ISOLATED` / 零敞口，因当前实际杠杆 `10× > 5×` 按规范返回 `BLOCKED`，未修改账户且未发送任何订单）；正式窗口完成 5 张新版 UI 实测截图；现有 Demo 历史配置/账本与纸盘系统均保持不变，生产真实下单保持关闭（`production_order_enabled = False`）。

@@ -34,8 +34,95 @@ PA_STRATEGIES = (
     ('pa-three-bar-hhhl', 'PA-08 三根高低点持续推进'),
 )
 PA_STRATEGY_IDS = tuple(strategy_id for strategy_id, _ in PA_STRATEGIES)
+CORE_STRATEGY_LABELS = (
+    ('A', 'A'),
+    ('B', 'B'),
+    ('C', 'C'),
+    ('D', 'D'),
+    ('E', 'E'),
+    ('G', 'G · C反向镜像'),
+)
 RULE_DETAIL_IDS = ('A', 'B', 'C', 'D', 'E', 'G', *PA_STRATEGY_IDS)
 BEIJING = timezone(timedelta(hours=8), name='Asia/Shanghai')
+
+
+def _pa_extension_names():
+    try:
+        from backend.pa_extension import NAMES
+        return dict(NAMES)
+    except Exception:
+        return {}
+
+
+def strategy_display_catalog(extra_names=None):
+    """Single source of truth for ordered strategy_id -> display label mapping."""
+    catalog = dict(CORE_STRATEGY_LABELS)
+    for strategy_id, label in PA_STRATEGIES:
+        code, _, title = label.partition(' ')
+        catalog[strategy_id] = f'{code} · {title}' if title else code
+    for strategy_id, title in _pa_extension_names().items():
+        catalog[strategy_id] = f'{strategy_id} · {title}' if title and title != strategy_id else strategy_id
+    if extra_names:
+        for strategy_id, title in extra_names.items():
+            if strategy_id not in catalog and title:
+                text = str(title).strip()
+                catalog[strategy_id] = text if text == strategy_id or ' · ' in text else f'{strategy_id} · {text}'
+    return catalog
+
+
+def strategy_display_name(strategy_id, extra_names=None):
+    if not strategy_id:
+        return '未知'
+    sid = str(strategy_id)
+    return strategy_display_catalog(extra_names).get(sid, sid)
+
+
+def strategy_sort_key(strategy_id):
+    sid = str(strategy_id or '')
+    ordered = tuple(strategy_display_catalog().keys())
+    if sid in ordered:
+        return (0, ordered.index(sid), sid)
+    if sid.upper().startswith('PA-') and sid[3:].isdigit():
+        return (1, int(sid[3:]), sid)
+    return (2, 0, sid.casefold())
+
+
+def build_live_paper_rows(cached_ids=(), data_dir=None):
+    """Return ordered {strategy_id: display_label} for live-copy strategy selection."""
+    from contextlib import closing
+    data = Path(data_dir) if data_dir is not None else Path(__file__).resolve().parents[1] / 'data'
+    ids = set(cached_ids or ())
+    extra_names = {}
+    try:
+        with closing(sqlite3.connect((data / 'paper.sqlite3').as_uri() + '?mode=ro', uri=True)) as db:
+            ids.update(row[0] for row in db.execute('SELECT agent FROM accounts'))
+    except sqlite3.Error:
+        pass
+    try:
+        with closing(sqlite3.connect((data / 'strategy-pool.sqlite3').as_uri() + '?mode=ro', uri=True)) as db:
+            query = (
+                'SELECT s.id, v.document FROM strategies s '
+                'LEFT JOIN versions v ON v.strategy_id = s.id AND v.version = s.active_version '
+                'WHERE s.archived_at IS NULL'
+            )
+            for sid, raw_doc in db.execute(query):
+                ids.add(sid)
+                if raw_doc:
+                    try:
+                        doc = json.loads(raw_doc)
+                        name = doc.get('name') or doc.get('display_name') or doc.get('title')
+                        if name:
+                            extra_names[sid] = str(name)
+                    except (ValueError, TypeError):
+                        pass
+    except sqlite3.Error:
+        pass
+    ids.update(path.stem for path in (data / 'pa-v1-extensions').glob('PA-*.sqlite3'))
+    for strategy, ledger in (('D', 'd/trading.sqlite3'), ('E', 'e/formal.sqlite3'), ('G', 'g/mirror.sqlite3')):
+        if (data / ledger).is_file():
+            ids.add(strategy)
+    catalog = strategy_display_catalog(extra_names)
+    return {sid: catalog.get(sid, sid) for sid in sorted(ids, key=strategy_sort_key)}
 
 
 def _apply_persistent_user_proxy(env):
@@ -2660,24 +2747,7 @@ def main():
     make_canvas_button(button_group, '刷新状态', refresh, 126, 'outline', 'refresh').pack(side='left', padx=5)
     make_canvas_button(button_group, '打开K线', lambda: __import__('scripts.kline_window',fromlist=['open_kline']).open_kline(root), 124, 'outline', 'external').pack(side='left', padx=5)
     def live_paper_rows():
-        import sqlite3
-        from contextlib import closing
-        data = Path(__file__).resolve().parents[1] / 'data'
-        ids = set(cached_rows['value'])
-        for filename, query in (
-            ('paper.sqlite3','SELECT agent FROM accounts'),
-            ('strategy-pool.sqlite3','SELECT id FROM strategies WHERE archived_at IS NULL'),
-        ):
-            try:
-                with closing(sqlite3.connect((data/filename).as_uri()+'?mode=ro',uri=True)) as db:
-                    ids.update(row[0] for row in db.execute(query))
-            except sqlite3.Error:
-                continue
-        ids.update(path.stem for path in (data/'pa-v1-extensions').glob('PA-*.sqlite3'))
-        for strategy, ledger in (('D','d/trading.sqlite3'),('E','e/formal.sqlite3'),('G','g/mirror.sqlite3')):
-            if (data/ledger).is_file():
-                ids.add(strategy)
-        return {sid: dict(PA_STRATEGIES).get(sid,sid) for sid in sorted(ids)}
+        return build_live_paper_rows(cached_rows['value'])
 
     make_canvas_button(button_group, '实盘跟单', lambda: __import__('scripts.live_copy_window', fromlist=['main']).main(root, paper_rows=live_paper_rows), 108, 'primary', 'external').pack(side='left', padx=5)
     def refresh_node_buttons():

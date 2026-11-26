@@ -28,8 +28,8 @@ def sanitize_geometry(value, screen=None):
             x,y=int(coords[1]),int(coords[2])
     return f'{width}x{height}+{x}+{y}'
 
-def _attach_demo_feed(window, snapshot):
-    if snapshot is None or getattr(window, '_demo_feed', None):
+def _attach_demo_feed(window, snapshot, production_snapshot=None):
+    if (snapshot is None and production_snapshot is None) or getattr(window, '_demo_feed', None):
         return
 
     class Feed(BaseHTTPRequestHandler):
@@ -38,15 +38,22 @@ def _attach_demo_feed(window, snapshot):
 
         def do_GET(self):
             origin = 'http://127.0.0.1:5175'
-            if (self.path != '/demo-fills' or self.headers.get('Origin') != origin
+            if (self.path not in ('/demo-fills', '/production-fills')
+                    or self.headers.get('Origin') != origin
                     or self.headers.get('Host') != '127.0.0.1:5187'):
                 self.send_error(403)
                 return
-            try:
-                payload = json.dumps(snapshot(), ensure_ascii=False).encode('utf-8')
-            except (OSError, ValueError, KeyError, RuntimeError):
-                self.send_error(503)
-                return
+            provider = production_snapshot if self.path == '/production-fills' else snapshot
+            if provider is None:
+                payload = json.dumps(dict(environment='production' if self.path == '/production-fills' else 'demo',
+                                          strategies=[], items=[], positions=[], errors=[], selected_strategy=None),
+                                     ensure_ascii=False).encode('utf-8')
+            else:
+                try:
+                    payload = json.dumps(provider(), ensure_ascii=False).encode('utf-8')
+                except (OSError, ValueError, KeyError, RuntimeError):
+                    self.send_error(503)
+                    return
             self.send_response(200)
             self.send_header('Content-Type','application/json; charset=utf-8')
             self.send_header('Content-Length',str(len(payload)))
@@ -72,13 +79,13 @@ def _attach_demo_feed(window, snapshot):
     window.bind('<Destroy>',stop,add='+')
 
 
-def open_kline(root, *, live=False, preview=False, demo_snapshot=None):
+def open_kline(root, *, live=False, preview=False, demo_snapshot=None, production_snapshot=None):
     if preview and not live:
         raise ValueError('Preview is only supported for the isolated live chart')
     key = (live, preview)
     current=_windows.get(key)
     if current is not None and current.winfo_exists():
-        _attach_demo_feed(current,demo_snapshot)
+        _attach_demo_feed(current,demo_snapshot,production_snapshot)
         current.deiconify();current.lift();current.focus_force();return current
     if not HOST.is_file():
         messagebox.showerror('K线窗口不可用','WebView2 原生宿主尚未构建；请参阅安装说明。',parent=root);return None
@@ -109,7 +116,7 @@ def open_kline(root, *, live=False, preview=False, demo_snapshot=None):
     except OSError as exc:
         win.destroy();messagebox.showerror('K线窗口不可用',str(exc),parent=root);return None
     _windows[key]=win
-    _attach_demo_feed(win,demo_snapshot)
+    _attach_demo_feed(win,demo_snapshot,production_snapshot)
     def close():
         try:
             settings.parent.mkdir(parents=True,exist_ok=True);settings.write_text(json.dumps({'geometry':win.geometry()}),encoding='utf8')
@@ -123,5 +130,5 @@ def open_kline(root, *, live=False, preview=False, demo_snapshot=None):
     win.protocol('WM_DELETE_WINDOW',close);win.after(1000,check);return win
 
 
-def open_live_kline(root, *, demo_snapshot=None):
-    return open_kline(root, live=True, demo_snapshot=demo_snapshot)
+def open_live_kline(root, *, demo_snapshot=None, production_snapshot=None):
+    return open_kline(root, live=True, demo_snapshot=demo_snapshot, production_snapshot=production_snapshot)
