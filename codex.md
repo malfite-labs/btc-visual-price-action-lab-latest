@@ -2497,3 +2497,13 @@ C自然跟单排查：游标78到91读取10笔C，真实Demo五单，仍空头0.
   - **G**：分离当前等待事件（`等待C开仓` / `WAIT_FOR_C_NEXT_OPEN`）与历史成交动作（`MIRROR_RISK_EXIT` 保留在成交明细中），启停开关准确反映实际监听授权。
 - **模板规范与验证 (`scripts/strategy_template_bundle.py`, `tests/test_common_guard_consistency.py`)**：
   - 同步更新模板包内 `策略开发与上传规范.md`；34/34 项隔离测试全部通过，8012 受控重载生效，Demo 与正式实盘 PA-08 运行态完整保留。
+
+
+## 2026-11-26｜V3.1 Binance API 可视化配置功能与 UI
+- **底层 DPAPI 凭据管理与只读检测 (`scripts/live_copy_env.py`)**：
+  - 复用既有 Windows DPAPI 存储（Demo `credentials.dpapi` + `demo-api-meta.json`；正式实盘 `Configuration` `live-v1a.dpapi` 多账户字典），新增 `mask_api_key()`、`get_api_credential_summary()`、`save_api_credentials()` 与严格只读 `test_api_connection()`（仅 GET，不下单、不改杠杆）。
+  - 内置运行中账户保护（`is_in_use=True` 时阻止覆盖正在使用的凭据）。
+- **主界面按钮与「配置 API」弹窗 (`scripts/live_copy_window.py`)**：
+  - 在实盘跟单中心底部「刷新账户」与「查看记录」之间新增蓝色描边「⚙ 配置API」按钮（Demo/正式双环境均显示，按入口自动选中对应标签）。
+  - 实现 760×700 居中「配置 API」弹窗：顶部 Demo/正式双标签切换、多账户选择/新增、API Key 掩码与 Secret Key 加密隐藏（支持输入时眼睛图标临时查看）、实时只读连接检测区（连接状态/延迟/认证/权限/可用 USDT/模式杠杆/最近检测时间）、安全提示区及「测试连接」「保存配置」「清空」「取消」四按钮；同步接入新建跟单页面的执行账户下拉列表。
+- **验证**：`tests/test_api_config_ui.py` 4/4 隔离测试通过；4 张正式 Windows 窗口截图已实测核验（所有密钥均安全掩码）；Demo `PID 5532`（C 策略）与正式实盘 `PID 19844`（PA-08 策略）及 8012/5175 运行态零扰动。

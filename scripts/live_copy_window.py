@@ -24,8 +24,12 @@ from scripts.live_copy_env import (
     config_ledger_dir,
     copy_config_payload,
     env_paths,
+    get_api_credential_summary,
+    get_demo_remark,
     list_production_accounts,
     make_exchange,
+    save_api_credentials,
+    test_api_connection,
 )
 from scripts.local_dashboard import build_live_paper_rows, strategy_display_name, strategy_sort_key
 
@@ -288,6 +292,8 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
     style.map('TButton', background=[('active', '#edf3fe'), ('disabled', '#f1f5f9')], foreground=[('disabled', '#94a3b8')])
     style.configure('Primary.TButton', padding=(14, 7), font=('Microsoft YaHei UI', 9, 'bold'), background=PALETTE['primary'], foreground='#ffffff', bordercolor=PALETTE['primary'])
     style.map('Primary.TButton', background=[('active', PALETTE['primary_hover']), ('disabled', '#93c5fd')], foreground=[('disabled', '#ffffff')])
+    style.configure('ApiBtn.TButton', padding=(12, 7), font=('Microsoft YaHei UI', 9, 'bold'), background='#f5f9ff', foreground=PALETTE['primary'], bordercolor=PALETTE['primary'])
+    style.map('ApiBtn.TButton', background=[('active', '#e3eeff'), ('disabled', '#f1f5f9')], foreground=[('disabled', '#94a3b8')])
     style.configure('Copy.Treeview', background='#ffffff', fieldbackground='#ffffff', foreground=PALETTE['text'], rowheight=row_height, font=('Microsoft YaHei UI', 9), borderwidth=0)
     style.configure('Copy.Treeview.Heading', background='#e8f0fc', foreground=PALETTE['text'], font=('Microsoft YaHei UI', 9, 'bold'), padding=(6, 7), relief='flat')
     style.map('Copy.Treeview', background=[('selected', PALETTE['selected_bg'])], foreground=[('selected', PALETTE['selected_fg'])])
@@ -365,8 +371,13 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
     def env_defaults(env_code):
         p = env_paths(env_code, base_root=(env_roots or {}).get(env_code))
         prod_accounts = list_production_accounts() if env_code == PROD_ENV else []
-        acc_label = f"Binance USDⓈ-M · {prod_accounts[0]['name']}" if prod_accounts else p.default_account_label
-        acc_id = prod_accounts[0]['account_id'] if prod_accounts else None
+        if env_code == PROD_ENV:
+            acc_label = f"Binance USDⓈ-M · {prod_accounts[0]['name']}" if prod_accounts else p.default_account_label
+            acc_id = prod_accounts[0]['account_id'] if prod_accounts else None
+        else:
+            demo_name = get_demo_remark(base_root=(env_roots or {}).get(DEMO_ENV))
+            acc_label = f"Binance USDⓈ-M · {demo_name}" if demo_name != 'Binance Demo' else p.default_account_label
+            acc_id = 'DEMO'
         return {
             'strategy': '',
             'mode': '定额跟单',
@@ -1888,6 +1899,366 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
             return
         trade_details(c.env, cid)
 
+    def open_api_config_dialog(initial_api_env=None, *, auto_test=False):
+        """Open the standalone modal '配置 API' window for Binance Demo & Production credentials."""
+        dlg = tk.Toplevel(root)
+        dlg.title('配置 API')
+        dlg.configure(bg=PALETTE['card_bg'])
+        dlg.transient(root)
+        dlg.grab_set()
+
+        # Center 760x700 dialog safely within current screen bounds (100%/125%/150% DPI friendly)
+        sw_d, sh_d = dlg.winfo_screenwidth(), dlg.winfo_screenheight()
+        dw, dh = min(760, max(660, sw_d - 80)), min(700, max(620, sh_d - 60))
+        dx = max(20, (sw_d - dw) // 2)
+        dy = max(20, (sh_d - dh) // 2)
+        dlg.geometry(f'{dw}x{dh}+{dx}+{dy}')
+        dlg.minsize(660, 620)
+
+        api_env_state = {'env': initial_api_env if initial_api_env in VALID_ENVS else active_env}
+        selected_acc_state = {'account_id': None, 'accounts': [], 'configured': False, 'last_alias': ''}
+        secret_visible = {'show': False}
+        testing_flag = {'busy': False}
+        env_tab_btns = {}
+
+        # StringVars anchored on dlg so GC never clears them
+        key_var = tk.StringVar(dlg, value='')
+        secret_var = tk.StringVar(dlg, value='')
+        name_var = tk.StringVar(dlg, value='')
+        acc_pick_var = tk.StringVar(dlg, value='')
+        status_var = tk.StringVar(dlg, value='未检测')
+        latency_var = tk.StringVar(dlg, value='延迟：—')
+        auth_var = tk.StringVar(dlg, value='—')
+        perm_var = tk.StringVar(dlg, value='—')
+        avail_var = tk.StringVar(dlg, value='—')
+        mode_lev_var = tk.StringVar(dlg, value='—')
+        checked_at_var = tk.StringVar(dlg, value='—')
+        detail_var = tk.StringVar(dlg, value='点击「测试连接」执行只读账户检测（不下单、不改杠杆）。')
+        key_badge_var = tk.StringVar(dlg, value='')
+        secret_badge_var = tk.StringVar(dlg, value='')
+        dlg._api_vars = (
+            key_var, secret_var, name_var, acc_pick_var, status_var, latency_var,
+            auth_var, perm_var, avail_var, mode_lev_var, checked_at_var, detail_var,
+            key_badge_var, secret_badge_var,
+        )
+
+        outer = tk.Frame(dlg, bg=PALETTE['card_bg'], padx=24, pady=16)
+        outer.pack(fill='both', expand=True)
+
+        # 1. Header
+        hdr_f = tk.Frame(outer, bg=PALETTE['card_bg'])
+        hdr_f.pack(fill='x', pady=(0, 12))
+        icon_c = tk.Label(hdr_f, text='🔑', bg='#e8f1ff', fg=PALETTE['primary'], width=3, height=1, font=('Segoe UI Emoji', 16))
+        icon_c.pack(side='left', padx=(0, 12))
+        t_col = tk.Frame(hdr_f, bg=PALETTE['card_bg'])
+        t_col.pack(side='left', fill='x')
+        tk.Label(t_col, text='配置 API', bg=PALETTE['card_bg'], fg=PALETTE['text'], font=('Microsoft YaHei UI', 14, 'bold')).pack(anchor='w')
+        tk.Label(t_col, text='用于连接 Binance 账户并执行自动跟单交易。', bg=PALETTE['card_bg'], fg=PALETTE['muted'], font=('Microsoft YaHei UI', 9)).pack(anchor='w')
+
+        # 2. Top environment switch tabs
+        tab_bar = tk.Frame(outer, bg='#e2ebf8', padx=3, pady=3, highlightbackground='#c5d7f2', highlightthickness=1)
+        tab_bar.pack(fill='x', pady=(0, 10))
+        tab_bar.grid_columnconfigure(0, weight=1, uniform='api_tab')
+        tab_bar.grid_columnconfigure(1, weight=1, uniform='api_tab')
+
+        def switch_api_tab(target_env):
+            api_env_state['env'] = target_env
+            selected_acc_state['account_id'] = None
+            load_env_summary()
+
+        for col_i, (e_code, e_lbl) in enumerate(((DEMO_ENV, '⚗ Demo 虚拟盘 API'), (PROD_ENV, '💼 正式实盘 API'))):
+            tb = tk.Button(
+                tab_bar, text=e_lbl, bd=0, relief='flat', cursor='hand2', pady=8,
+                font=('Microsoft YaHei UI', 10, 'bold'),
+                command=lambda ec=e_code: switch_api_tab(ec),
+            )
+            tb.grid(row=0, column=col_i, sticky='ew', padx=1)
+            env_tab_btns[e_code] = tb
+
+        # Info notice
+        env_info = tk.Frame(outer, bg=PALETTE['info_bg'], padx=12, pady=7, highlightbackground=PALETTE['info_border'], highlightthickness=1)
+        env_info.pack(fill='x', pady=(0, 12))
+        tk.Label(env_info, text='ⓘ Demo 与正式实盘 API 独立配置、独立保存、互不影响。', bg=PALETTE['info_bg'],
+                 fg=PALETTE['primary'], font=('Microsoft YaHei UI', 9, 'bold')).pack(anchor='w')
+
+        # 3. Form fields
+        form_f = tk.Frame(outer, bg=PALETTE['card_bg'])
+        form_f.pack(fill='x', pady=(0, 10))
+        form_f.grid_columnconfigure(1, weight=1)
+
+        # Optional Production account selector row (hidden on Demo)
+        acc_row_lbl = tk.Label(form_f, text='  已绑定账户', bg=PALETTE['card_bg'], fg=PALETTE['text'], width=14, anchor='w', font=('Microsoft YaHei UI', 9, 'bold'))
+        acc_cb = ttk.Combobox(form_f, textvariable=acc_pick_var, state='readonly')
+
+        def on_pick_prod_account(_e=None):
+            idx = acc_cb.current()
+            accs = selected_acc_state['accounts']
+            if 0 <= idx < len(accs):
+                selected_acc_state['account_id'] = accs[idx]['account_id']
+                load_env_summary(keep_selected_id=True)
+            else:
+                # "+ 新增正式账户"
+                selected_acc_state['account_id'] = '__NEW__'
+                selected_acc_state['configured'] = False
+                key_var.set('')
+                secret_var.set('')
+                name_var.set('Binance子账户')
+                key_badge_var.set('新增账户（请输入完整密钥）')
+                secret_badge_var.set('')
+                reset_status_box('未配置', '请输入新账户的 API Key 与 Secret Key 后测试或保存。')
+
+        acc_cb.bind('<<ComboboxSelected>>', on_pick_prod_account)
+
+        # Row 1: API Key
+        tk.Label(form_f, text='* API Key', bg=PALETTE['card_bg'], fg=PALETTE['text'], width=14, anchor='w', font=('Microsoft YaHei UI', 9, 'bold')).grid(row=1, column=0, sticky='w', pady=6)
+        key_wrap = tk.Frame(form_f, bg=PALETTE['card_bg'])
+        key_wrap.grid(row=1, column=1, sticky='ew', pady=6)
+        key_entry = ttk.Entry(key_wrap, textvariable=key_var, font=('Consolas', 9))
+        key_entry.pack(side='left', fill='x', expand=True)
+        tk.Button(key_wrap, text='✕', bd=0, relief='flat', bg='#f1f5f9', fg=PALETTE['muted'], width=3, cursor='hand2',
+                  command=lambda: key_var.set('')).pack(side='left', padx=(4, 0))
+        tk.Label(form_f, textvariable=key_badge_var, bg=PALETTE['card_bg'], fg=PALETTE['gain'], anchor='w', font=('Microsoft YaHei UI', 8)).grid(row=2, column=1, sticky='w', pady=(0, 4))
+
+        # Row 3: Secret Key
+        tk.Label(form_f, text='* Secret Key', bg=PALETTE['card_bg'], fg=PALETTE['text'], width=14, anchor='w', font=('Microsoft YaHei UI', 9, 'bold')).grid(row=3, column=0, sticky='w', pady=6)
+        sec_wrap = tk.Frame(form_f, bg=PALETTE['card_bg'])
+        sec_wrap.grid(row=3, column=1, sticky='ew', pady=6)
+        secret_entry = ttk.Entry(sec_wrap, textvariable=secret_var, show='●', font=('Consolas', 9))
+        secret_entry.pack(side='left', fill='x', expand=True)
+
+        def toggle_secret_eye():
+            secret_visible['show'] = not secret_visible['show']
+            secret_entry.configure(show='' if secret_visible['show'] else '●')
+            eye_btn.configure(text='🙈' if secret_visible['show'] else '👁')
+
+        eye_btn = tk.Button(sec_wrap, text='👁', bd=0, relief='flat', bg='#f1f5f9', fg=PALETTE['text'], width=3, cursor='hand2', command=toggle_secret_eye)
+        eye_btn.pack(side='left', padx=(4, 0))
+        tk.Label(form_f, textvariable=secret_badge_var, bg=PALETTE['card_bg'], fg=PALETTE['gain'], anchor='w', font=('Microsoft YaHei UI', 8)).grid(row=4, column=1, sticky='w', pady=(0, 4))
+
+        # Row 5: 备注名称
+        tk.Label(form_f, text='* 备注名称', bg=PALETTE['card_bg'], fg=PALETTE['text'], width=14, anchor='w', font=('Microsoft YaHei UI', 9, 'bold')).grid(row=5, column=0, sticky='w', pady=6)
+        name_entry = ttk.Entry(form_f, textvariable=name_var, font=('Microsoft YaHei UI', 9))
+        name_entry.grid(row=5, column=1, sticky='ew', pady=6)
+        tk.Label(form_f, text='用于区分不同的 API 配置（如：Binance Demo、Binance正式主账户、Binance子账户等）',
+                 bg=PALETTE['card_bg'], fg=PALETTE['muted'], anchor='w', font=('Microsoft YaHei UI', 8)).grid(row=6, column=1, sticky='w', pady=(0, 2))
+
+        # 4. Connection Status Card
+        st_card = tk.Frame(outer, bg='#f8fafd', padx=14, pady=10, highlightbackground='#d6e2f5', highlightthickness=1)
+        st_card.pack(fill='x', pady=(4, 10))
+        st_top = tk.Frame(st_card, bg='#f8fafd')
+        st_top.pack(fill='x', pady=(0, 6))
+        tk.Label(st_top, text='连接状态', bg='#f8fafd', fg=PALETTE['muted'], font=('Microsoft YaHei UI', 9)).pack(side='left', padx=(0, 10))
+        status_lbl = tk.Label(st_top, textvariable=status_var, bg='#f8fafd', fg=PALETTE['muted'], font=('Microsoft YaHei UI', 9, 'bold'))
+        status_lbl.pack(side='left', padx=(0, 14))
+        tk.Label(st_top, textvariable=latency_var, bg='#f8fafd', fg=PALETTE['text'], font=('Microsoft YaHei UI', 9)).pack(side='left', padx=(0, 10))
+        retest_btn = tk.Button(st_top, text='↻ 重新检测', bd=0, relief='flat', bg='#f8fafd', fg=PALETTE['primary'],
+                               cursor='hand2', font=('Microsoft YaHei UI', 9, 'bold'))
+        retest_btn.pack(side='right')
+
+        st_grid = tk.Frame(st_card, bg='#f8fafd')
+        st_grid.pack(fill='x')
+        st_grid.grid_columnconfigure(1, weight=1)
+        st_grid.grid_columnconfigure(3, weight=1)
+        grid_fields = [
+            ('账户认证：', auth_var, '合约权限：', perm_var),
+            ('可用 USDT：', avail_var, '模式/杠杆：', mode_lev_var),
+            ('最近检测：', checked_at_var, '检测说明：', detail_var),
+        ]
+        for r_i, (l1, v1, l2, v2) in enumerate(grid_fields):
+            tk.Label(st_grid, text=l1, bg='#f8fafd', fg=PALETTE['muted'], font=('Microsoft YaHei UI', 8)).grid(row=r_i, column=0, sticky='w', pady=2)
+            tk.Label(st_grid, textvariable=v1, bg='#f8fafd', fg=PALETTE['text'], font=('Microsoft YaHei UI', 8, 'bold' if r_i == 1 else 'normal'), anchor='w').grid(row=r_i, column=1, sticky='w', padx=(0, 12), pady=2)
+            tk.Label(st_grid, text=l2, bg='#f8fafd', fg=PALETTE['muted'], font=('Microsoft YaHei UI', 8)).grid(row=r_i, column=2, sticky='w', pady=2)
+            tk.Label(st_grid, textvariable=v2, bg='#f8fafd', fg=PALETTE['text'], font=('Microsoft YaHei UI', 8), anchor='w', wraplength=280, justify='left').grid(row=r_i, column=3, sticky='w', pady=2)
+
+        # 5. Security Notice Banner
+        sec_box = tk.Frame(outer, bg=PALETTE['info_bg'], padx=12, pady=8, highlightbackground=PALETTE['info_border'], highlightthickness=1)
+        sec_box.pack(fill='x', pady=(0, 12))
+        tk.Label(
+            sec_box, bg=PALETTE['info_bg'], fg=PALETTE['text'], anchor='w', justify='left', wraplength=680,
+            font=('Microsoft YaHei UI', 8),
+            text='🛡 API密钥仅在本机加密保存，不会上传至服务器或GitHub。请勿开启提现权限，并建议设置API访问IP白名单。',
+        ).pack(anchor='w')
+
+        # Helpers for status rendering & running-account protection
+        def reset_status_box(st_text, detail_text):
+            color = PALETTE['gain'] if st_text == '连接正常' else PALETTE['loss'] if st_text in ('网络连接失败', 'API认证失败', '权限不足') else PALETTE['muted']
+            status_var.set(('● ' if st_text in ('连接正常', '网络连接失败', 'API认证失败', '权限不足') else '') + st_text)
+            status_lbl.configure(fg=color)
+            latency_var.set('延迟：—')
+            auth_var.set('—')
+            perm_var.set('—')
+            avail_var.set('—')
+            mode_lev_var.set('—')
+            checked_at_var.set('—')
+            detail_var.set(detail_text)
+
+        def is_target_account_in_use(env_code, target_acc_id):
+            if target_acc_id == '__NEW__':
+                return False
+            row_r = running(env_code)
+            busy_service = row_r.get('state') in (*active_states, 'RECONCILE_REQUIRED', 'PROTECTION_INCOMPLETE')
+            busy_ledger = any(demo_ledger_busy(env_code, k) for k in ctx(env_code).configs)
+            if not busy_service and not busy_ledger:
+                return False
+            if env_code == DEMO_ENV:
+                return True
+            running_acc = row_r.get('account_id')
+            if running_acc and target_acc_id and running_acc != target_acc_id:
+                return False
+            return True
+
+        def load_env_summary(*, keep_selected_id=False):
+            env_code = api_env_state['env']
+            for ec, btn in env_tab_btns.items():
+                is_cur = (ec == env_code)
+                btn.configure(
+                    bg=PALETTE['primary'] if is_cur else '#ffffff',
+                    fg='#ffffff' if is_cur else PALETTE['text'],
+                    activebackground=PALETTE['primary_hover'] if is_cur else '#edf3fe',
+                    activeforeground='#ffffff' if is_cur else PALETTE['text'],
+                )
+            acc_id_arg = selected_acc_state['account_id'] if (keep_selected_id and selected_acc_state['account_id'] != '__NEW__') else None
+            summary = get_api_credential_summary(env_code, account_id=acc_id_arg, base_root=(env_roots or {}).get(env_code))
+            selected_acc_state['accounts'] = summary['accounts']
+            selected_acc_state['configured'] = summary['configured']
+            selected_acc_state['account_id'] = summary['account_id'] or None
+            selected_acc_state['last_alias'] = summary.get('exchange_alias') or ''
+
+            if env_code == PROD_ENV:
+                acc_row_lbl.grid(row=0, column=0, sticky='w', pady=6)
+                acc_cb.grid(row=0, column=1, sticky='ew', pady=6)
+                choices = [f"{a['name']}（{a['masked_key']}）" for a in summary['accounts']] + ['＋ 新增正式账户']
+                acc_cb.configure(values=choices)
+                if summary['accounts']:
+                    idx_match = next((i for i, a in enumerate(summary['accounts']) if a['account_id'] == summary['account_id']), 0)
+                    acc_cb.current(idx_match)
+                else:
+                    acc_cb.current(0)
+            else:
+                acc_row_lbl.grid_forget()
+                acc_cb.grid_forget()
+
+            # Never backfill plaintext secret; show masked API key in badge and keep entry clean for replacement
+            key_var.set('')
+            secret_var.set('')
+            secret_visible['show'] = False
+            secret_entry.configure(show='●')
+            eye_btn.configure(text='👁')
+            name_var.set(summary['name'])
+
+            if summary['configured']:
+                key_badge_var.set(f"已加密保存：{summary['masked_key']}（留空则保持原密钥，输入新密钥可替换）")
+                secret_badge_var.set('已加密保存（安全隐藏，不回填明文）')
+                reset_status_box('未检测', '点击「测试连接」执行只读账户检测（不下单、不改杠杆）。')
+            else:
+                key_badge_var.set('未配置密钥')
+                secret_badge_var.set('')
+                reset_status_box('未配置', '尚未配置该环境的 Binance API 密钥。')
+
+        def run_connection_test():
+            if testing_flag['busy']:
+                return
+            env_code = api_env_state['env']
+            raw_k = key_var.get().strip()
+            raw_s = secret_var.get().strip()
+            acc_id = None if selected_acc_state['account_id'] == '__NEW__' else selected_acc_state['account_id']
+            testing_flag['busy'] = True
+            reset_status_box('正在检测', '正在向 Binance 发送只读查询，请稍候…')
+            test_btn.configure(state='disabled')
+            retest_btn.configure(state='disabled')
+
+            def worker():
+                return test_api_connection(
+                    env_code,
+                    api_key=raw_k or None,
+                    api_secret=raw_s or None,
+                    account_id=acc_id,
+                    base_root=(env_roots or {}).get(env_code),
+                )
+
+            fut = pool.submit(worker)
+
+            def done():
+                if not dlg.winfo_exists():
+                    return
+                if not fut.done():
+                    dlg.after(120, done)
+                    return
+                testing_flag['busy'] = False
+                test_btn.configure(state='normal')
+                retest_btn.configure(state='normal')
+                res = fut.result()
+                st_txt = res['status']
+                color = PALETTE['gain'] if res['ok'] else PALETTE['loss'] if st_txt in ('网络连接失败', 'API认证失败', '权限不足') else PALETTE['muted']
+                status_var.set(('● ' if st_txt != '未配置' else '') + st_txt)
+                status_lbl.configure(fg=color)
+                latency_var.set(f"延迟：{res['latency_ms']} ms" if res['latency_ms'] is not None else '延迟：—')
+                auth_var.set(res['auth_status'])
+                perm_var.set(res['futures_perm'])
+                avail_var.set(f"{res['available_usdt']} USDT" if res['available_usdt'] is not None else '—')
+                lev_part = f"{res['actual_leverage']}× / {res['margin_type']}" if res['actual_leverage'] is not None else '—'
+                mode_lev_var.set(f"{res['position_mode']} · {lev_part}")
+                checked_at_var.set(res['checked_at'])
+                detail_var.set(res['detail'])
+                if res.get('account_alias'):
+                    selected_acc_state['last_alias'] = res['account_alias']
+
+            dlg.after(120, done)
+
+        def do_save():
+            env_code = api_env_state['env']
+            raw_k = key_var.get().strip()
+            raw_s = secret_var.get().strip()
+            remark = name_var.get().strip()
+            target_id = selected_acc_state['account_id']
+            replacing_secret = bool(raw_k or raw_s)
+            in_use = is_target_account_in_use(env_code, target_id) and replacing_secret
+            try:
+                saved = save_api_credentials(
+                    env_code,
+                    api_key=raw_k or None,
+                    api_secret=raw_s or None,
+                    name=remark,
+                    account_id=None if target_id == '__NEW__' else target_id,
+                    exchange_alias=selected_acc_state.get('last_alias') or '',
+                    base_root=(env_roots or {}).get(env_code),
+                    is_in_use=in_use,
+                )
+                selected_acc_state['account_id'] = saved['account_id']
+                load_env_summary(keep_selected_id=True)
+                refresh_account(env_code, force=True)
+                messagebox.showinfo(
+                    'API 配置已保存',
+                    f"已通过 Windows DPAPI 在本机加密保存【{ctx(env_code).paths.env_title}】API 配置。\n"
+                    f"备注名称：{saved['name']}（{saved['masked_key']}）\n"
+                    f"保存不会自动启动跟单，也不会修改交易授权。",
+                    parent=dlg,
+                )
+            except Exception as exc:
+                messagebox.showerror('保存 API 配置失败', str(exc), parent=dlg)
+
+        def do_clear_inputs():
+            key_var.set('')
+            secret_var.set('')
+            name_var.set('')
+
+        # 6. Bottom 4 action buttons (pinned to bottom so never clipped at 125%/150% scaling)
+        btn_bar = tk.Frame(outer, bg=PALETTE['card_bg'])
+        btn_bar.pack(side='bottom', fill='x', pady=(6, 0))
+        btn_inner = tk.Frame(btn_bar, bg=PALETTE['card_bg'])
+        btn_inner.pack(anchor='center')
+        test_btn = ttk.Button(btn_inner, text='🔗 测试连接', command=run_connection_test)
+        test_btn.pack(side='left', padx=6)
+        retest_btn.configure(command=run_connection_test)
+        ttk.Button(btn_inner, text='💾 保存配置', style='Primary.TButton', command=do_save).pack(side='left', padx=6)
+        ttk.Button(btn_inner, text='🧹 清空', command=do_clear_inputs).pack(side='left', padx=6)
+        ttk.Button(btn_inner, text='✕ 取消', command=dlg.destroy).pack(side='left', padx=6)
+
+        load_env_summary()
+        if auto_test and selected_acc_state['configured']:
+            dlg.after(150, run_connection_test)
+        return dlg
+
     def values():
         return {key: value.get() for key, value in fields.items()}
 
@@ -1908,8 +2279,8 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
             target_cid = draft_cid if draft_cid else uuid4().hex
             prior = c.configs.get(target_cid, {})
             defs = env_defaults(c.env)
-            v['account'] = defs['account']
-            v['account_id'] = defs['account_id']
+            v['account'] = v.get('account') or defs['account']
+            v['account_id'] = v.get('account_id') or defs['account_id']
             if target_cid in c.configs and busy(c.env, target_cid):
                 raise ValueError('请先安全停止并完成对账，再编辑此配置。')
             if (
@@ -2148,6 +2519,7 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
             controls['stop'] = ttk.Button(footer, text='■ 停止跟单', command=lambda: control('stop', c.env))
             controls['stop'].pack(side='left', padx=4)
             ttk.Button(footer, text='↻ 刷新账户', command=lambda: refresh_account(c.env)).pack(side='left', padx=4)
+            ttk.Button(footer, text='⚙ 配置API', style='ApiBtn.TButton', command=lambda: open_api_config_dialog(c.env)).pack(side='left', padx=4)
             ttk.Button(footer, text='📄 查看记录', command=show_records).pack(side='left', padx=4)
             ttk.Button(footer, text='📈 打开实盘K线', command=open_selected_kline).pack(side='right')
             sync_view()
@@ -2435,7 +2807,19 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
 
             env_display = '⚗ Binance Demo（虚拟资金）' if editing_env == DEMO_ENV else '⚡ Binance 正式实盘（真实资金）'
             form_row('交易环境', 'environment', readonly_text=env_display)
-            form_row('执行账户', 'account', (defs['account'],))
+            if editing_env == PROD_ENV:
+                prod_accs = list_production_accounts()
+                acc_choices = tuple(f"Binance USDⓈ-M · {a['name']}" for a in prod_accs) or (defs['account'],)
+                acc_id_by_label = {f"Binance USDⓈ-M · {a['name']}": a['account_id'] for a in prod_accs}
+                acc_row_f = tk.Frame(right_card, bg=PALETTE['card_bg'])
+                acc_row_f.pack(fill='x', pady=6)
+                tk.Label(acc_row_f, text='执行账户', bg=PALETTE['card_bg'], fg=PALETTE['text'], width=22, anchor='w',
+                         font=('Microsoft YaHei UI', 9)).pack(side='left')
+                acc_sel_cb = ttk.Combobox(acc_row_f, textvariable=fields['account'], values=acc_choices, state='readonly')
+                acc_sel_cb.pack(side='left', fill='x', expand=True)
+                acc_sel_cb.bind('<<ComboboxSelected>>', lambda _e: fields['account_id'].set(acc_id_by_label.get(fields['account'].get(), '')))
+            else:
+                form_row('执行账户', 'account', (defs['account'],))
 
             ttk.Button(footer, text='← 返回主页', command=lambda: render(0)).pack(side='left')
             def go_next():
