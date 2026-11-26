@@ -126,12 +126,13 @@ def planned_margin(event, *, budget, fixed=None, evidence=None):
 
 def order_quantity(*, margin, available, price, planned_leverage, actual_leverage,
                    step, minimum, maximum, min_notional, fee, reserve, risk_cap, stop_distance):
+    from scripts.live_copy_env import MAX_COPY_LEVERAGE
     values = (margin, available, price, step, minimum, maximum, min_notional,
               fee, reserve, risk_cap)
     if (any(not n.is_finite() or n < 0 for n in values) or min(price, step, risk_cap) <= 0
             or stop_distance is not None and (not stop_distance.is_finite() or stop_distance <= 0)):
         raise ValueError('INVALID_ORDER_INPUT')
-    if not 1 <= actual_leverage <= planned_leverage <= 5:
+    if not 1 <= actual_leverage <= planned_leverage <= MAX_COPY_LEVERAGE:
         raise ValueError('LEVERAGE_MISMATCH')
     cash = max(Decimal(0), min(margin, available) - reserve)
     cost = price / actual_leverage + price * fee * 2

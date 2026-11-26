@@ -10,6 +10,7 @@ import sqlite3
 import time
 import os
 
+from scripts.live_copy_env import MAX_COPY_LEVERAGE
 from scripts.live_copy_v2 import paper_fills
 
 
@@ -140,7 +141,7 @@ def main():
     parser.add_argument('--production-check',action='store_true')
     parser.add_argument('--authorized-demo-orders',action='store_true')
     parser.add_argument('--authorized-production-orders',action='store_true')
-    parser.add_argument('--leverage',type=int,choices=range(1,6),default=5)
+    parser.add_argument('--leverage',type=int,choices=range(1,MAX_COPY_LEVERAGE+1),default=5)
     parser.add_argument('--stop-fraction',type=Decimal)
     parser.add_argument('--target-fraction',type=Decimal)
     parser.add_argument('--risk-cap',type=Decimal)

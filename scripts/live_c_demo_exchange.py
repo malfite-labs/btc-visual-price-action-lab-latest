@@ -176,9 +176,11 @@ class BinanceFuturesExchange(BinanceReader):
                 'positions': [net] if net else [], 'orders': orders, 'conditional': conditional,
                 'permissions': {'enableFutures': self._request('GET','/fapi/v1/accountConfig').get('canTrade') is True}, 'symbol':symbol}
 
-    def preflight_report(self, *, planned_leverage=5, fixed_margin=None, budget=None):
+    def preflight_report(self, *, planned_leverage=None, fixed_margin=None, budget=None):
         """Strict GET-only preflight check against actual exchange specs. Never modifies account settings."""
         from decimal import ROUND_CEILING
+        from scripts.live_copy_env import MAX_COPY_LEVERAGE
+        planned_lev = MAX_COPY_LEVERAGE if planned_leverage is None else int(planned_leverage)
         self.synchronize()
         dual = self._request('GET', '/fapi/v1/positionSide/dual').get('dualSidePosition')
         if type(dual) is not bool:
@@ -216,7 +218,7 @@ class BinanceFuturesExchange(BinanceReader):
         price = Decimal(self._read('ticker')['price'])
         fee = Decimal(self._read('commission')['takerCommissionRate'])
         req_qty = max(min_qty, (min_notional / price / step_size).to_integral_value(rounding=ROUND_CEILING) * step_size)
-        eff_lev = min(int(planned_leverage), actual_leverage, 5)
+        eff_lev = min(planned_lev, actual_leverage, MAX_COPY_LEVERAGE)
         est_min_notional = req_qty * price
         est_min_margin = (est_min_notional / eff_lev) + est_min_notional * fee * 2 + Decimal('0.10')
 
@@ -225,10 +227,10 @@ class BinanceFuturesExchange(BinanceReader):
             blockers.append('账户未开通合约交易权限（canTrade=false）')
         if margin_type != 'ISOLATED':
             blockers.append(f'BTCUSDT 当前为 {margin_type}，须在交易所切换为逐仓（ISOLATED）；系统不会自动修改')
-        if actual_leverage > 5:
-            blockers.append(f'BTCUSDT 当前实际杠杆为 {actual_leverage}×，超过系统允许上限 5×，请在 Binance 调整至 ≤5×（系统不会自动修改）')
-        elif actual_leverage > int(planned_leverage):
-            blockers.append(f'BTCUSDT 当前实际杠杆 {actual_leverage}× 高于计划杠杆 {planned_leverage}×，请在 Binance 调整')
+        if actual_leverage > MAX_COPY_LEVERAGE:
+            blockers.append(f'BTCUSDT 当前实际杠杆为 {actual_leverage}×，超过系统允许上限 {MAX_COPY_LEVERAGE}×，请在 Binance 调整至 ≤{MAX_COPY_LEVERAGE}×（系统不会自动修改）')
+        elif actual_leverage > planned_lev:
+            blockers.append(f'BTCUSDT 当前实际杠杆 {actual_leverage}× 高于配置计划杠杆 {planned_lev}×，请在 Binance 调整或提高配置计划杠杆（最高 {MAX_COPY_LEVERAGE}×）')
         if btc_positions or other_positions or orders or algos:
             blockers.append(f'账户存在未结敞口（BTC仓位 {len(btc_positions)} / 其他仓位 {len(other_positions)} / 普通单 {len(orders)} / 条件单 {len(algos)}）')
         if fixed_margin is not None and Decimal(fixed_margin) < est_min_margin:
@@ -246,7 +248,8 @@ class BinanceFuturesExchange(BinanceReader):
             'position_mode': 'HEDGE' if dual else 'ONE_WAY',
             'margin_type': margin_type,
             'actual_leverage': actual_leverage,
-            'planned_leverage': int(planned_leverage),
+            'planned_leverage': planned_lev,
+            'max_leverage': MAX_COPY_LEVERAGE,
             'available_usdt': str(available),
             'wallet_usdt': str(wallet),
             'price': str(price),

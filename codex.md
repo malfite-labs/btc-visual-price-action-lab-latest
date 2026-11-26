@@ -2429,3 +2429,12 @@ C自然跟单排查：游标78到91读取10笔C，真实Demo五单，仍空头0.
 - 核心架构：`ONE_COPY_ENGINE` + 双环境隔离（`BINANCE_DEMO` / `BINANCE_PRODUCTION`）。新增 `scripts/live_copy_env.py` 统一管理双环境配置、运行目录、独立账本、切换队列与 DPAPI 凭据隔离；`scripts/live_c_demo_exchange.py` 泛化为 `BinanceFuturesExchange`（`DemoExchange` + `ProductionExchange`，`allow_writes` 默认 `False`）并新增只读 `preflight_report`；`scripts/live_copy_service.py` 复用统一引擎支持 `--environment` 与 `--production-check`。
 - 策略名称与新版UI：`scripts/local_dashboard.py` 提供统一 16 策略编号/中文名称与排序来源（A–E、G · C反向镜像、PA-01～PA-10）；`scripts/live_copy_window.py` 升级为现代双环境桌面交易中心（顶部 Demo/正式标签页、4张对齐统计卡片、11列策略配置表、可搜索可滚动16策略选择卡片、独立止盈/止损按成交价涨跌幅%配置、跨环境仅复制参数、策略排队切换弹窗）；`scripts/kline_window.py` 与 `frontend/src/KlineWindow.tsx` 严格隔离 Demo 与正式实盘 K 线成交回执。
 - 实测验收：`tests/test_dual_env_copy.py` 7/7 隔离回归全部通过；正式账户只读预检实测通过读取（可用 `100.17 USDT`，`HEDGE` / `ISOLATED` / 零敞口，因当前实际杠杆 `10× > 5×` 按规范返回 `BLOCKED`，未修改账户且未发送任何订单）；正式窗口完成 5 张新版 UI 实测截图；现有 Demo 历史配置/账本与纸盘系统均保持不变，生产真实下单保持关闭（`production_order_enabled = False`）。
+
+
+### 2026-11-26 BTC Paper Lab V3.1 用户验收问题集中修复
+- 备份位置：`.backups/v31-fix-20261126-135938`。
+- 根因与修复：
+  1. **Demo 状态与启停异常**：原 V3 Demo 后台 `PID 12660`（策略 G，`ce7c2b1bb3...`）于 12:41:49 因纸盘 G 发生 `MIRROR_RISK_EXIT` 触发 `UNVERIFIED_EXIT_QUANTITY` 安全退出并遗留 `BTCUSDT SHORT -0.0024 BTC` 空单，导致账本忙/敞口门禁拒绝新启，且无活进程可暂停/停止；同时修复了 V3.1 UI 中 `new_config()` 提前覆盖 `selected_id`、`render(0)`/切标签后需等 1s 才刷新按钮与卡片状态、以及无活进程点击暂停/停止缺少明确提示的问题。
+  2. **最高跟单杠杆升级至 10×**：在 `scripts/live_copy_env.py` 定义统一常量 `MAX_COPY_LEVERAGE = 10`，全链路同步至 `live_copy_v2.py`、`live_copy_service.py`、`live_c_demo_exchange.py` 与 `live_copy_window.py`（默认新建杠杆保持 5×，已有 5× 配置不变）。正式账户 10× 只读预检实测 `PASS`（`blockers=[]`，`100.17 USDT`，`HEDGE`/`ISOLATED`/`10×`，估算最小保证金 `≥ 6.22 USDT`）。
+  3. **实盘 K 线默认环境修复**：`kline_window.py` 新增 `/live-env`（带单调 `seq`），`live_copy_window.py` 传入当前环境，`KlineWindow.tsx` 监听并自动切换默认环境（新建与复用窗口均生效），正式实盘 K 线实测默认显示 `正式实盘` 与 `暂无正式实盘成交`。
+- 回归验证：`tests/test_dual_env_copy.py` 12/12 PASS（新增 1–10× 杠杆计算与 5× 兼容、10× 正式预检、暂停/恢复/带仓安全停止生命周期、`EXCHANGE_UNKNOWN` 与部分成交保护、K 线 `/live-env` 隔离）；纸盘系统、Demo 历史账本与遗留空单均未被破坏，生产真实下单保持关闭。

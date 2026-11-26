@@ -89,10 +89,33 @@ export default function KlineWindow({ live = false }: { live?: boolean }) {
   const visibleAt=useRef<number|null>(null)
   const focusRequest=useRef(0)
   const requestedStrategy=useRef<string|null|undefined>(undefined)
+  const envRequestSeq=useRef<number>(-1)
 
   const available=live?(demo?.strategies??[]):strategies
   const sourceEvents=useMemo(()=>live?(demo?.items.map(demoEvent)??[]):events,[live,demo,events])
   const filtered=useMemo(()=>sourceEvents.filter(e=>e.verification_status==='VERIFIED'&&selection.includes(e.strategy_id)&&(effect==='all'||(effect==='open')===(e.position_effect==='OPEN'))).sort((a,b)=>Date.parse(b.occurred_at)-Date.parse(a.occurred_at)),[sourceEvents,selection,effect])
+
+  useEffect(()=>{
+    if(!live)return
+    const controller=new AbortController()
+    const syncEnv=async()=>{
+      try {
+        const res=await fetch('http://127.0.0.1:5187/live-env',{signal:controller.signal,cache:'no-store',redirect:'error'})
+        if(!res.ok)return
+        const data:{environment?:'demo'|'production';seq?:number}=await res.json()
+        const seq=typeof data.seq==='number'?data.seq:0
+        if((data.environment==='demo'||data.environment==='production')&&seq!==envRequestSeq.current){
+          envRequestSeq.current=seq
+          requestedStrategy.current=undefined
+          setDemo(null)
+          selectEnvironment(data.environment)
+        }
+      } catch {/* Keep current environment if host feed is temporarily unavailable. */}
+    }
+    void syncEnv()
+    const timer=window.setInterval(syncEnv,1200)
+    return ()=>{controller.abort();clearInterval(timer)}
+  },[live])
 
   useEffect(()=>{
     if(!live)return

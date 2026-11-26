@@ -18,6 +18,7 @@ from uuid import uuid4
 
 from scripts.live_copy_env import (
     DEMO_ENV,
+    MAX_COPY_LEVERAGE,
     PROD_ENV,
     VALID_ENVS,
     config_ledger_dir,
@@ -522,6 +523,8 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
     active_env = initial_env if initial_env in VALID_ENVS else DEMO_ENV
     current_page = 0
     editing_env = active_env
+    draft_cid = None
+    kline_env_state = {'environment': 'production' if active_env == PROD_ENV else 'demo', 'seq': 0}
     fields = {k: tk.StringVar(root, value=v) for k, v in env_defaults(active_env).items()}
     table = None
     pnl_cells = {}
@@ -716,10 +719,13 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
         config = c.configs.get(selected_config(), {})
         raw_sid = config.get('strategy')
         c.chart_requested_strategy = display_strategy(raw_sid, paper_rows()) if raw_sid else None
+        kline_env_state['environment'] = 'production' if c.env == PROD_ENV else 'demo'
+        kline_env_state['seq'] += 1
         open_live_kline(
             root,
             demo_snapshot=lambda: make_chart_snapshot(DEMO_ENV),
             production_snapshot=lambda: make_chart_snapshot(PROD_ENV),
+            env_state=lambda: dict(kline_env_state),
         )
 
     def demo_ledger_busy(env_code, cid):
@@ -870,8 +876,12 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
         ttk.Button(dialog, text='关闭', command=dialog.destroy).pack(anchor='e', padx=14, pady=(0, 12))
 
         def run_probe():
+            sel_cfg = c.configs.get(selected_config(c.env) or '', {})
+            probe_lev = int(sel_cfg.get('leverage') or MAX_COPY_LEVERAGE)
+            probe_fixed = Decimal(sel_cfg.get('fixed') or '20')
+            probe_budget = Decimal(sel_cfg.get('budget') or '100')
             exchange, acc_label, _ = make_exchange(c.env, allow_writes=False, base_root=(env_roots or {}).get(c.env))
-            report = exchange.preflight_report(planned_leverage=5, fixed_margin=Decimal('20'), budget=Decimal('100'))
+            report = exchange.preflight_report(planned_leverage=probe_lev, fixed_margin=probe_fixed, budget=probe_budget)
             return acc_label, report
 
         future = pool.submit(run_probe)
@@ -894,11 +904,11 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
                     f"预检结论：{r['status']}",
                     f"合约交易权限（canTrade）：{'已开通' if r['can_trade'] else '未开通'}",
                     f"持仓模式：{r['position_mode']}（保留用户原模式，不自动修改）",
-                    f"保证金模式：{r['margin_type']} · 当前实际杠杆：{r['actual_leverage']}×（系统上限 5×）",
+                    f"保证金模式：{r['margin_type']} · 当前实际杠杆：{r['actual_leverage']}×（系统上限 {MAX_COPY_LEVERAGE}×，本次预检计划杠杆 {r['planned_leverage']}×）",
                     f"USDT 可用余额：{money(r['available_usdt'])} · 钱包余额：{money(r['wallet_usdt'])}",
                     f"当前敞口：BTC仓位 {r['btc_positions']} / 其他仓位 {r['other_positions']} / 普通挂单 {r['open_orders']} / Algo条件单 {r['open_algos']}",
                     f"BTCUSDT 规格：现价 {r['price']} · 最小数量 {r['min_qty']} · 步长 {r['step_size']} · 价格步长 {r['tick_size']} · 最小名义 {r['min_notional']} USDT",
-                    f"Taker 费率：{r['taker_fee']} · 按5×估算最小单保证金：≥ {r['est_min_margin_usdt']} USDT",
+                    f"Taker 费率：{r['taker_fee']} · 按{r['planned_leverage']}×估算最小单保证金：≥ {r['est_min_margin_usdt']} USDT",
                     '',
                     '阻断项：' if r['blockers'] else '无阻断项。正式真实资金交易仍需用户单独确认授权后方可启用。',
                 ]
@@ -1325,6 +1335,8 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
                     spawn_follower(c.env, cid, v, source, extra)
                 return
             if command in ('run', 'enable') or current not in active_states:
+                if command not in ('run', 'enable'):
+                    messagebox.showinfo('跟单服务', f'当前{c.paths.env_title}没有运行中的跟单后台，无需执行该操作。', parent=root)
                 return
             if command == 'toggle_pause':
                 command = 'run' if current in ('PAUSED', 'DEMO_PAUSED') else 'pause'
@@ -1333,6 +1345,7 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
                     return
                 command = 'run'
             c.send_command(command)
+            root.after(200, sync_view)
         except (OSError, KeyError, ValueError, ArithmeticError) as exc:
             messagebox.showerror('跟单服务', str(exc), parent=root)
 
@@ -1371,7 +1384,7 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
                 activeforeground='#ffffff' if is_active else PALETTE['text'],
             )
 
-    def update_state():
+    def sync_view():
         if not root.winfo_exists():
             return
         update_tab_pills()
@@ -1518,6 +1531,10 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
                 enabled = not c.transition and status in active_states and status != 'DEMO_STOP_PENDING'
                 button.configure(state='normal' if enabled else 'disabled')
 
+    def update_state():
+        if not root.winfo_exists():
+            return
+        sync_view()
         root.after(1000, update_state)
 
     def details(env_code, cid):
@@ -1683,21 +1700,22 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
         )
 
     def new_config():
-        nonlocal editing_env
+        nonlocal editing_env, draft_cid
         c = ctx()
         editing_env = c.env
-        c.selected_id = uuid4().hex
+        draft_cid = None
         for key, value in env_defaults(c.env).items():
             fields[key].set(value)
         render(1)
 
     def edit(env_code, cid):
-        nonlocal editing_env
+        nonlocal editing_env, draft_cid
         c = ctx(env_code)
         if busy(env_code, cid):
             messagebox.showerror('编辑配置', '请先安全停止并完成对账。', parent=root)
             return
         editing_env = env_code
+        draft_cid = cid
         c.selected_id = cid
         defs = env_defaults(env_code)
         for key, value in fields.items():
@@ -1769,43 +1787,44 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
         return {key: value.get() for key, value in fields.items()}
 
     def save(*, destination=0, enable_after=False):
+        nonlocal draft_cid
         c = ctx(editing_env)
         try:
             v = values()
             if v['strategy'] not in paper_rows() or v['mode'] != '定额跟单':
                 raise ValueError('请选择有效的纸盘策略。')
             budget = Decimal(v['budget'])
-            if not budget.is_finite() or budget <= 0 or not 1 <= int(v['leverage']) <= 5:
-                raise ValueError('总预算须大于 0，计划杠杆须为 1–5×。')
+            if not budget.is_finite() or budget <= 0 or not 1 <= int(v['leverage']) <= MAX_COPY_LEVERAGE:
+                raise ValueError(f'总预算须大于 0，计划杠杆须为 1–{MAX_COPY_LEVERAGE}×。')
             if not 0 < Decimal(v['fixed']) <= budget:
                 raise ValueError('每笔保证金须大于 0 且不超过总资金上限。')
             optional_exit(v, 'custom_sl', 'stop')
             optional_exit(v, 'custom_tp', 'tp')
-            if c.selected_id is None:
-                c.selected_id = uuid4().hex
-            prior = c.configs.get(c.selected_id, {})
+            target_cid = draft_cid if draft_cid else uuid4().hex
+            prior = c.configs.get(target_cid, {})
             defs = env_defaults(c.env)
             v['account'] = defs['account']
             v['account_id'] = defs['account_id']
-            if busy(c.env, c.selected_id):
+            if target_cid in c.configs and busy(c.env, target_cid):
                 raise ValueError('请先安全停止并完成对账，再编辑此配置。')
             if (
                 prior
                 and v['strategy'] != prior['strategy']
-                and (prior.get('legacy_demo_ledger') or (c.ledger_dir(c.selected_id) / 'demo-execution-inbox.sqlite3').is_file())
+                and (prior.get('legacy_demo_ledger') or (c.ledger_dir(target_cid) / 'demo-execution-inbox.sqlite3').is_file())
             ):
                 raise ValueError('已关联账本的配置不能更换策略，请新建配置。')
-            c.configs[c.selected_id] = {
+            c.configs[target_cid] = {
                 **prior, **v, **env_policy(c.env),
-                'copy_config_id': c.selected_id,
+                'copy_config_id': target_cid,
                 'created_at': prior.get('created_at', datetime.now().isoformat()),
                 'archived_at': None,
             }
             c.persist()
-            saved_cid = c.selected_id
+            c.selected_id = target_cid
+            draft_cid = None
             render(destination)
             if enable_after:
-                control('enable', c.env, saved_cid)
+                control('enable', c.env, target_cid)
         except (ValueError, ArithmeticError, OSError) as exc:
             messagebox.showerror('保存失败', str(exc) or '请检查预算、单笔保证金、杠杆和百分比。', parent=root)
 
@@ -1982,6 +2001,7 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
                 if table.selection():
                     c.selected_id = table.selection()[0]
                 place_pnl_cells()
+                sync_view()
 
             table.bind('<Button-3>', lambda e: context_menu(e, table, False, env_code=c.env))
             table.bind('<<TreeviewSelect>>', on_select_row, add='+')
@@ -2025,6 +2045,7 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
             ttk.Button(footer, text='↻ 刷新账户', command=lambda: refresh_account(c.env)).pack(side='left', padx=4)
             ttk.Button(footer, text='📄 查看记录', command=show_records).pack(side='left', padx=4)
             ttk.Button(footer, text='📈 打开实盘K线', command=open_selected_kline).pack(side='right')
+            sync_view()
             return
 
         # Step 1 (选择策略 + 跟单设置) or Step 2 (高级设置 + 确认启用)
@@ -2118,6 +2139,7 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
                         sub_l = tk.Label(item, text=detail_txt, bg=c_bg, fg=PALETTE['primary'] if ready else '#b45309',
                                          font=('Microsoft YaHei UI', 8), wraplength=420, justify='left')
                         sub_l.pack(anchor='w', padx=(24, 0), pady=(3, 0))
+                        sub_l.bind('<MouseWheel>', _on_mousewheel)
 
                     def choose(_e, chosen=sid):
                         fields['strategy'].set(chosen)
@@ -2158,7 +2180,7 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
             form_row('跟单模式', 'mode', ('定额跟单',))
             form_row('每笔跟单保证金（USDT）', 'fixed')
             form_row('总资金上限（USDT）', 'budget')
-            form_row('计划杠杆（最高 5×）', 'leverage', ('1', '2', '3', '4', '5'))
+            form_row(f'计划杠杆（最高 {MAX_COPY_LEVERAGE}×）', 'leverage', tuple(str(i) for i in range(1, MAX_COPY_LEVERAGE + 1)))
             env_display = '⚗ Binance Demo（虚拟资金）' if editing_env == DEMO_ENV else '⚡ Binance 正式实盘（真实资金）'
             form_row('交易环境', 'environment', readonly_text=env_display)
             form_row('执行账户', 'account', (defs['account'],))

@@ -349,3 +349,209 @@ def test_strategy_name_sync_and_order():
     assert rows['PA-09'] == 'PA-09 · 区间边界 Pinbar 反转'
     assert rows['PA-10'] == 'PA-10 · 完整压力支撑互换'
     assert strategy_display_name('pa-trend-40-breakout') == 'PA-01 · 顺势突破'
+
+
+def test_leverage_upgrade_1_to_10_and_5x_compat():
+    from scripts.live_copy_env import MAX_COPY_LEVERAGE
+    from scripts.live_copy_v2 import order_quantity
+
+    assert MAX_COPY_LEVERAGE == 10
+    # 5x existing config remains compatible: 20 * 5 = 100 notional -> 0.001 BTC at 60000
+    q5 = order_quantity(
+        margin=Decimal('20'), available=Decimal('100'), price=Decimal('60000'),
+        planned_leverage=5, actual_leverage=5, step=Decimal('0.001'),
+        minimum=Decimal('0.001'), maximum=Decimal('10'), min_notional=Decimal('50'),
+        fee=Decimal('0.0005'), reserve=Decimal('0.10'), risk_cap=Decimal('5'), stop_distance=None,
+    )
+    assert q5 == Decimal('0.001')
+
+    # 10x config: 20 * 10 = 200 notional -> 0.003 BTC at 60000 (180 USDT notional, within 20 USDT margin)
+    q10 = order_quantity(
+        margin=Decimal('20'), available=Decimal('100'), price=Decimal('60000'),
+        planned_leverage=10, actual_leverage=10, step=Decimal('0.001'),
+        minimum=Decimal('0.001'), maximum=Decimal('10'), min_notional=Decimal('50'),
+        fee=Decimal('0.0005'), reserve=Decimal('0.10'), risk_cap=Decimal('5'), stop_distance=None,
+    )
+    assert q10 == Decimal('0.003')
+
+    # 11x must still be rejected
+    with pytest.raises(ValueError, match='LEVERAGE_MISMATCH'):
+        order_quantity(
+            margin=Decimal('20'), available=Decimal('100'), price=Decimal('60000'),
+            planned_leverage=11, actual_leverage=10, step=Decimal('0.001'),
+            minimum=Decimal('0.001'), maximum=Decimal('10'), min_notional=Decimal('50'),
+            fee=Decimal('0.0005'), reserve=Decimal('0.10'), risk_cap=Decimal('5'), stop_distance=None,
+        )
+
+
+def test_production_preflight_10x_passes_when_planned_10x_and_blocks_11x():
+    class MockProd10x(ProductionExchange):
+        def synchronize(self):
+            pass
+
+        def _request(self, method, path, parameters=None, *, signed=True, clock_retry=True):
+            assert method == 'GET'
+            if path == '/fapi/v1/positionSide/dual':
+                return {'dualSidePosition': True}
+            if path == '/fapi/v3/balance':
+                return [{'asset': 'USDT', 'accountAlias': 'uX', 'availableBalance': '100.17'}]
+            if path == '/fapi/v3/account':
+                return {'assets': [{'asset': 'USDT', 'availableBalance': '100.17', 'walletBalance': '100.17'}]}
+            if path in ('/fapi/v3/positionRisk', '/fapi/v1/openOrders', '/fapi/v1/openAlgoOrders'):
+                return []
+            if path == '/fapi/v1/symbolConfig':
+                return [{'symbol': 'BTCUSDT', 'marginType': 'ISOLATED', 'leverage': '10'}]
+            if path == '/fapi/v1/accountConfig':
+                return {'canTrade': True}
+            raise AssertionError(path)
+
+        def _read(self, op):
+            if op == 'exchange_info':
+                return {'symbols': [{
+                    'symbol': 'BTCUSDT', 'status': 'TRADING',
+                    'filters': [
+                        {'filterType': 'LOT_SIZE', 'minQty': '0.001', 'maxQty': '100', 'stepSize': '0.001'},
+                        {'filterType': 'MARKET_LOT_SIZE', 'minQty': '0.001', 'maxQty': '100', 'stepSize': '0.001'},
+                        {'filterType': 'MIN_NOTIONAL', 'notional': '50'},
+                        {'filterType': 'PRICE_FILTER', 'tickSize': '0.10'},
+                    ],
+                }]}
+            if op == 'ticker':
+                return {'symbol': 'BTCUSDT', 'price': '61000.00'}
+            if op == 'commission':
+                return {'takerCommissionRate': '0.0005'}
+            raise AssertionError(op)
+
+    ex = MockProd10x('k', 's')
+    r10 = ex.preflight_report(planned_leverage=10, fixed_margin=Decimal('20'), budget=Decimal('100'))
+    assert r10['status'] == 'PASS'
+    assert r10['blockers'] == []
+    assert r10['max_leverage'] == 10
+
+    r5 = ex.preflight_report(planned_leverage=5, fixed_margin=Decimal('20'), budget=Decimal('100'))
+    assert r5['status'] == 'BLOCKED'
+    assert any('10×' in b and '5×' in b for b in r5['blockers'])
+
+
+def test_pause_resume_and_safe_stop_lifecycle(tmp_path):
+    from scripts.live_copy_service import demo_poll
+
+    paper_db = tmp_path / 'paper.sqlite3'
+    _make_paper_db(paper_db)
+    work = tmp_path / 'demo_lifecycle'
+    work.mkdir()
+    follower = DryFollower(paper_db, work / 'demo-execution-inbox.sqlite3', Decimal('20'), Decimal('100'), strategy='C')
+    ex = FakeExchange('DEMO', hedge=True, leverage=5)
+    engine = FollowExecutor(follower, ex, work, 'DEMO-CONTINUOUS', leverage=5, stop_fraction=None, risk_cap=Decimal('5'), exit_mode='FOLLOW_PAPER')
+
+    published = []
+    def publish(state, reason='', *, success=False, retries=0):
+        published.append((state, reason))
+
+    # 1. Start running -> open position
+    _insert_fill(paper_db, fill_id='f1', agent='C', trade_id='t1', effect='OPEN', direction='LONG')
+    stopped, evs = demo_poll(engine, lambda: 'run', publish)
+    assert not stopped and evs == [('C:f1', 'FOLLOW_PAPER')]
+    assert ex.position == Decimal('0.001')
+
+    # 2. Pause -> new open is SKIPPED (not opened), while existing position stays managed
+    _insert_fill(paper_db, fill_id='f2', agent='C', trade_id='t2', effect='OPEN', direction='LONG')
+    stopped, evs = demo_poll(engine, lambda: 'pause', publish)
+    assert not stopped and evs == [('C:f2', 'SKIPPED')]
+    assert published[-1][0] == 'DEMO_PAUSED'
+
+    # 3. Stop while holding position -> does NOT stop prematurely, enters DEMO_STOP_PENDING
+    stopped, evs = demo_poll(engine, lambda: 'stop', publish)
+    assert not stopped
+    assert published[-1][0] == 'DEMO_STOP_PENDING'
+
+    # 4. Close original trade t1 while in stop-pending -> linked close executes, then next stop succeeds!
+    _insert_fill(paper_db, fill_id='f3', agent='C', trade_id='t1', effect='CLOSE', direction='LONG')
+    stopped, evs = demo_poll(engine, lambda: 'stop', publish)
+    assert not stopped and evs == [('C:f3', 'CLOSED')]
+    assert ex.position == Decimal(0)
+
+    stopped, evs = demo_poll(engine, lambda: 'stop', publish)
+    assert stopped is True and evs == []
+
+    # 5. Resume on fresh trade t3 -> does not backfill t2, follows new t3 cleanly
+    _insert_fill(paper_db, fill_id='f4', agent='C', trade_id='t3', effect='OPEN', direction='SHORT')
+    stopped, evs = demo_poll(engine, lambda: 'run', publish)
+    assert not stopped and evs == [('C:f4', 'FOLLOW_PAPER')]
+    assert ex.position == Decimal('-0.001')
+
+
+def test_exchange_unknown_and_partial_fill_handling(tmp_path):
+    from scripts.live_c_demo_exchange import DemoApiError
+    from scripts.live_c_intent import EntryIntent
+
+    class UnknownExchange(FakeExchange):
+        def order(self, client_id):
+            err = DemoApiError('/fapi/v1/order', 0, 0)
+            err.method = 'GET'
+            raise err
+
+    ex = UnknownExchange('PRODUCTION', hedge=True, leverage=10)
+    exec_dir = tmp_path / 'unk'
+    exec_dir.mkdir()
+    executor = DemoExecutor(ex, exec_dir, 'PROD-test', Decimal('0.10'))
+    now = datetime.now(UTC)
+    intent = EntryIntent('PROD-test', now.isoformat(), 'V3.1', 'dcp-unk1', 'LONG', Decimal('0.002'), Decimal('60000'), None, None, 'FOLLOW_PAPER', None)
+    assert executor.accept(intent, now=now) == 'EXCHANGE_UNKNOWN'
+
+    # Partial fill with FOLLOW_PAPER must not mark as completed (non-terminal -> RECONCILE_REQUIRED)
+    class PartialExchange(FakeExchange):
+        def entry(self, intent):
+            super().entry(intent)
+            self.orders[intent.client_order_id]['status'] = 'PARTIALLY_FILLED'
+            self.orders[intent.client_order_id]['executedQty'] = '0.001'
+            oid = self.orders[intent.client_order_id]['orderId']
+            self.trades_by_oid[oid][0]['qty'] = '0.001'
+            self.position = Decimal('0.001')
+            return self.orders[intent.client_order_id]
+
+    pex = PartialExchange('PRODUCTION', hedge=True, leverage=10)
+    pdir = tmp_path / 'part'
+    pdir.mkdir()
+    pexec = DemoExecutor(pex, pdir, 'PROD-part', Decimal('0.10'))
+    pintent = EntryIntent('PROD-part', now.isoformat(), 'V3.1', 'dcp-part1', 'LONG', Decimal('0.002'), Decimal('60000'), None, None, 'FOLLOW_PAPER', None)
+    assert pexec.accept(pintent, now=now) == 'RECONCILE_REQUIRED'
+
+
+def test_kline_feed_live_env_and_environment_isolation():
+    import urllib.request
+    from scripts.kline_window import _attach_demo_feed
+
+    class DummyWin:
+        def __init__(self):
+            self._cbs = []
+        def bind(self, _ev, fn, add=None):
+            self._cbs.append(fn)
+
+    win = DummyWin()
+    state = {'environment': 'demo', 'seq': 1}
+    _attach_demo_feed(
+        win,
+        lambda: {'environment': 'demo', 'strategies': ['G · C反向镜像'], 'items': [], 'positions': [], 'errors': []},
+        lambda: {'environment': 'production', 'strategies': [], 'items': [], 'positions': [], 'errors': []},
+        env_state=lambda: dict(state),
+    )
+    server = getattr(win, '_demo_feed', None)
+    if server is None:
+        pytest.skip('Port 5187 already bound by running Kline window')
+    try:
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        def fetch(path):
+            req = urllib.request.Request('http://127.0.0.1:5187' + path, headers={'Origin': 'http://127.0.0.1:5175'})
+            with opener.open(req, timeout=3) as resp:
+                return json.load(resp)
+        assert fetch('/live-env') == {'environment': 'demo', 'seq': 1}
+        state['environment'] = 'production'
+        state['seq'] = 2
+        assert fetch('/live-env') == {'environment': 'production', 'seq': 2}
+        assert fetch('/production-fills')['environment'] == 'production'
+        assert fetch('/production-fills')['items'] == []
+        assert fetch('/demo-fills')['environment'] == 'demo'
+    finally:
+        server.shutdown()
+        server.server_close()

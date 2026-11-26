@@ -10,6 +10,7 @@ from scripts.live_center import Configuration, dpapi
 DEMO_ENV = 'BINANCE_DEMO'
 PROD_ENV = 'BINANCE_PRODUCTION'
 VALID_ENVS = (DEMO_ENV, PROD_ENV)
+MAX_COPY_LEVERAGE = 10
 
 
 @dataclass(frozen=True)
