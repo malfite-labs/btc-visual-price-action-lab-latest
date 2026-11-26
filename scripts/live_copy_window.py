@@ -2201,35 +2201,96 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
             form_row('跟单模式', 'mode', ('定额跟单',))
             form_row('每笔跟单保证金（USDT）', 'fixed')
             form_row('总资金上限（USDT）', 'budget')
-            allowed_choices = tuple(str(i) for i in e_ctx.allowed_leverages)
-            lev_max_label = e_ctx.allowed_leverages[-1] if e_ctx.allowed_leverages else MAX_COPY_LEVERAGE
-            form_row(f'计划杠杆（允许 1–{lev_max_label}×）', 'leverage', allowed_choices)
-            if e_ctx.exchange_max_leverage is not None or e_ctx.actual_leverage is not None:
-                lev_hint = tk.Label(
-                    right_card, bg=PALETTE['card_bg'], fg=PALETTE['muted'], anchor='w',
-                    font=('Microsoft YaHei UI', 8),
-                    text=(
-                        f"交易所 BTCUSDT 档位上限 {e_ctx.exchange_max_leverage or MAX_COPY_LEVERAGE}×，"
-                        f"与系统 {MAX_COPY_LEVERAGE}× 上限取交集为 1–{lev_max_label}×"
-                        + (f"；当前账户实际杠杆 {e_ctx.actual_leverage}×" if e_ctx.actual_leverage is not None else '')
-                    ),
-                )
-                lev_hint.pack(fill='x', pady=(0, 4))
+
+            # Fixed opening leverage selector: displays 1倍..N倍 while persisting numeric string in fields['leverage']
+            allowed_nums = tuple(e_ctx.allowed_leverages) if e_ctx.allowed_leverages else tuple(range(1, MAX_COPY_LEVERAGE + 1))
+            lev_max_label = allowed_nums[-1]
+            lev_labels = tuple(f'{n}倍' for n in allowed_nums)
+            cur_lev_str = fields['leverage'].get() or '5'
+            if cur_lev_str not in tuple(str(n) for n in allowed_nums):
+                cur_lev_str = str(min(int(cur_lev_str) if cur_lev_str.isdigit() else 5, lev_max_label))
+                fields['leverage'].set(cur_lev_str)
+            lev_choice = tk.StringVar(root, value=f'{cur_lev_str}倍')
+            lev_row = tk.Frame(right_card, bg=PALETTE['card_bg'])
+            lev_row.pack(fill='x', pady=6)
+            tk.Label(lev_row, text=f'固定开仓杠杆（最高 {lev_max_label}×）', bg=PALETTE['card_bg'], fg=PALETTE['text'],
+                     width=22, anchor='w', font=('Microsoft YaHei UI', 9)).pack(side='left')
+            lev_cb = ttk.Combobox(lev_row, textvariable=lev_choice, values=lev_labels, state='readonly')
+            lev_cb._choice_var = lev_choice
+            lev_cb.pack(side='left', fill='x', expand=True)
+
+            # Live opening notional preview & Binance actual leverage match box
+            preview_box = tk.Frame(
+                right_card, bg=PALETTE['info_bg'], padx=12, pady=9,
+                highlightbackground=PALETTE['info_border'], highlightthickness=1,
+            )
+            preview_box.pack(fill='x', pady=(4, 6))
+            preview_main = tk.Label(preview_box, bg=PALETTE['info_bg'], fg=PALETTE['text'], anchor='w',
+                                    font=('Microsoft YaHei UI', 10, 'bold'))
+            preview_main.pack(fill='x')
+            preview_formula = tk.Label(preview_box, bg=PALETTE['info_bg'], fg=PALETTE['muted'], anchor='w',
+                                       font=('Microsoft YaHei UI', 8))
+            preview_formula.pack(fill='x', pady=(2, 0))
+            preview_note = tk.Label(
+                preview_box, bg=PALETTE['info_bg'], fg=PALETTE['muted'], anchor='w',
+                font=('Microsoft YaHei UI', 8),
+                text='计划名义价值，实际成交受交易所数量精度、价格及最小订单限制影响。',
+            )
+            preview_note.pack(fill='x', pady=(1, 4))
+
+            match_row = tk.Frame(preview_box, bg=PALETTE['info_bg'])
+            match_row.pack(fill='x')
+            actual_lev_lbl = tk.Label(match_row, bg=PALETTE['info_bg'], fg=PALETTE['text'], anchor='w',
+                                      font=('Microsoft YaHei UI', 8, 'bold'))
+            actual_lev_lbl.pack(side='left')
+            match_badge_lbl = tk.Label(match_row, bg=PALETTE['info_bg'], anchor='w',
+                                       font=('Microsoft YaHei UI', 8, 'bold'), padx=8)
+            match_badge_lbl.pack(side='left')
+
+            def update_leverage_preview(*_args):
+                if not preview_box.winfo_exists():
+                    return
+                idx_l = lev_cb.current()
+                if 0 <= idx_l < len(allowed_nums):
+                    fields['leverage'].set(str(allowed_nums[idx_l]))
+                lev_int = int(fields['leverage'].get()) if fields['leverage'].get().isdigit() else 5
+                try:
+                    fx = Decimal(fields['fixed'].get().strip())
+                    if fx.is_finite() and fx > 0:
+                        notional = (fx * lev_int).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                        fx_fmt = fx.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                        preview_main.configure(text=f'预计每笔开仓金额：{notional:,.2f} USDT')
+                        preview_formula.configure(text=f'计算方式：{fx_fmt:,.2f} USDT保证金 × {lev_int}倍杠杆')
+                    else:
+                        raise ValueError()
+                except (InvalidOperation, ValueError):
+                    preview_main.configure(text='预计每笔开仓金额：—')
+                    preview_formula.configure(text=f'计算方式：请输入有效保证金 × {lev_int}倍杠杆')
+                act_l = e_ctx.actual_leverage
+                if act_l is None:
+                    actual_lev_lbl.configure(text='币安当前实际杠杆：暂未获取')
+                    match_badge_lbl.configure(text='', fg=PALETTE['muted'])
+                elif act_l == lev_int:
+                    actual_lev_lbl.configure(text=f'币安当前实际杠杆：{act_l}×')
+                    match_badge_lbl.configure(text='● 参数一致', fg=PALETTE['gain'])
+                else:
+                    actual_lev_lbl.configure(text=f'币安当前实际杠杆：{act_l}×')
+                    match_badge_lbl.configure(text='● 需要调整币安杠杆，启用前须保持一致', fg='#c2410c')
+
+            lev_cb.bind('<<ComboboxSelected>>', update_leverage_preview)
+            fixed_trace_id = fields['fixed'].trace_add('write', update_leverage_preview)
+            preview_box.bind('<Destroy>', lambda _e: fields['fixed'].trace_remove('write', fixed_trace_id) if _e.widget is preview_box else None, add='+')
+            update_leverage_preview()
+
+            tk.Label(
+                right_card, bg=PALETTE['card_bg'], fg=PALETTE['muted'], anchor='w', justify='left',
+                wraplength=450, font=('Microsoft YaHei UI', 8),
+                text='每次跟随纸盘开仓时，按照固定保证金×固定杠杆计算委托金额，不跟随纸盘策略自身的杠杆倍数。',
+            ).pack(fill='x', pady=(0, 6))
+
             env_display = '⚗ Binance Demo（虚拟资金）' if editing_env == DEMO_ENV else '⚡ Binance 正式实盘（真实资金）'
             form_row('交易环境', 'environment', readonly_text=env_display)
             form_row('执行账户', 'account', (defs['account'],))
-
-            callout = tk.Frame(right_card, bg=PALETTE['info_bg'], padx=12, pady=10, highlightbackground=PALETTE['info_border'], highlightthickness=1)
-            callout.pack(fill='x', pady=(14, 0))
-            tk.Label(
-                callout, bg=PALETTE['info_bg'], fg=PALETTE['text'], justify='left', wraplength=440,
-                font=('Microsoft YaHei UI', 8),
-                text=(
-                    'ⓘ 资金逻辑：定额跟单严格按每笔固定保证金与计划杠杆计算委托，不超过总资金上限；\n'
-                    '实际下单按当前交易环境的最小数量、数量步长和最小名义金额校验，不会为了凑单突破上限。\n'
-                    '同一交易环境（Demo 或正式实盘）最多运行一套策略，两个环境互不影响。'
-                ),
-            ).pack(anchor='w')
 
             ttk.Button(footer, text='← 返回主页', command=lambda: render(0)).pack(side='left')
             def go_next():
@@ -2332,13 +2393,30 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
             if editing_env == PROD_ENV
             else '虚拟资金跟单 · 生产下单关闭'
         )
+        lev_int = int(v['leverage']) if str(v['leverage']).isdigit() else 5
+        try:
+            est_notional_txt = money(Decimal(v['fixed']) * lev_int)
+        except (InvalidOperation, ValueError):
+            est_notional_txt = '—'
+        act_lev = e_ctx.actual_leverage
+        act_lev_txt = f'{act_lev}×' if act_lev is not None else '暂未获取'
+        if act_lev is None:
+            lev_match_txt, lev_match_fg = '暂未获取', PALETTE['muted']
+        elif act_lev == lev_int:
+            lev_match_txt, lev_match_fg = '参数一致', PALETTE['gain']
+        else:
+            lev_match_txt, lev_match_fg = '需要调整币安杠杆，启用前须保持一致', '#c2410c'
+
         summary_rows = [
             ('策略编号', code),
             ('策略名称', sname),
             ('跟单模式', v['mode']),
-            ('每笔保证金', money(v['fixed'])),
+            ('每笔跟单保证金', money(v['fixed'])),
             ('总资金上限', money(v['budget'])),
-            ('计划杠杆', f"{v['leverage']}×"),
+            ('固定开仓杠杆', f"{lev_int}×"),
+            ('预计每笔开仓金额', est_notional_txt),
+            ('币安当前实际杠杆', act_lev_txt),
+            ('杠杆匹配状态', lev_match_txt),
             ('交易环境', env_mode_txt),
             ('执行账户', v.get('account', e_ctx.paths.default_account_label)),
             ('退出与独立止盈/止损', exit_summary_var),
@@ -2346,16 +2424,21 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
             ('交易权限状态', perm_txt),
         ]
         sum_box = tk.Frame(right_card, bg=PALETTE['card_bg'], highlightbackground='#e2e8f0', highlightthickness=1)
-        sum_box.pack(fill='x', pady=(0, 12))
+        sum_box.pack(fill='x', pady=(0, 10))
         sum_box._exit_var = exit_summary_var
         for idx_r, (k_txt, v_txt) in enumerate(summary_rows):
             r_bg = '#f8fafd' if idx_r % 2 == 0 else '#ffffff'
-            rf = tk.Frame(sum_box, bg=r_bg, padx=10, pady=5)
+            rf = tk.Frame(sum_box, bg=r_bg, padx=10, pady=4)
             rf.pack(fill='x')
             tk.Label(rf, text=k_txt, bg=r_bg, fg=PALETTE['muted'], width=18, anchor='w', font=('Microsoft YaHei UI', 9)).pack(side='left')
-            v_fg = PALETTE['accent_red'] if (editing_env == PROD_ENV and k_txt in ('交易环境', '交易权限状态')) else PALETTE['text']
+            if k_txt == '杠杆匹配状态':
+                v_fg = lev_match_fg
+            elif editing_env == PROD_ENV and k_txt in ('交易环境', '交易权限状态'):
+                v_fg = PALETTE['accent_red']
+            else:
+                v_fg = PALETTE['text']
             lbl_opts = {'textvariable': v_txt} if isinstance(v_txt, tk.StringVar) else {'text': v_txt}
-            tk.Label(rf, **lbl_opts, bg=r_bg, fg=v_fg, anchor='w', font=('Microsoft YaHei UI', 9, 'bold' if k_txt in ('策略名称', '当前可用资金') else 'normal')).pack(side='left', fill='x', expand=True)
+            tk.Label(rf, **lbl_opts, bg=r_bg, fg=v_fg, anchor='w', font=('Microsoft YaHei UI', 9, 'bold' if k_txt in ('策略名称', '预计每笔开仓金额', '当前可用资金', '杠杆匹配状态') else 'normal')).pack(side='left', fill='x', expand=True)
 
         rules_box = tk.Frame(right_card, bg=PALETTE['info_bg'], padx=12, pady=9, highlightbackground=PALETTE['info_border'], highlightthickness=1)
         rules_box.pack(fill='x')
