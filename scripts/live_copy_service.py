@@ -111,16 +111,18 @@ class DryFollower:
         if not row or row[3] != 'OPEN':
             return {'action':'SKIPPED','reason':'NO_ASSOCIATED_POSITION'}
         before = Decimal(row[1])
-        if action == 'FULL_CLOSE' and qty == before:
+        if action in ('FULL_CLOSE', 'PARTIAL_CLOSE') and 0 < qty == before:
             fraction = Decimal(1)
+            effective_action = 'FULL_CLOSE'
         elif action == 'PARTIAL_CLOSE' and 0 < qty < before:
-            fraction = qty/before
+            fraction = qty / before
+            effective_action = 'PARTIAL_CLOSE'
         else:
             raise RuntimeError('UNVERIFIED_EXIT_QUANTITY')
-        reserved = Decimal(row[2]) * (1-fraction)
+        reserved = Decimal(row[2]) * (1 - fraction)
         db.execute('UPDATE trades SET remaining=?,reserved=?,state=? WHERE id=?',
-                   (str(before-qty),str(reserved),'CLOSED' if fraction==1 else 'OPEN',trade))
-        return {'action':action,'direction':direction,'fraction':fraction}
+                   (str(before - qty), str(reserved), 'CLOSED' if fraction == 1 else 'OPEN', trade))
+        return {'action': effective_action, 'direction': direction, 'fraction': fraction}
 
 
 def main():
@@ -392,28 +394,50 @@ def demo_run(args, parser):
             target_fraction=args.target_fraction,exit_mode='FOLLOW_PAPER')
         print(f'{mode_code}_CONTINUOUS',args.strategy,flush=True)
         startup = True
+        reconcile_paused = False
         try:
             while True:
                 def command():
                     return read_demo_command(runtime)
-                stopped,events = demo_poll(engine,command,publish,startup=startup)
-                startup = False
-                if stopped:
-                    return publish
-                for event,result in events:
-                    print(event,result,flush=True)
-                time.sleep(1)
+                try:
+                    if reconcile_paused:
+                        # Process stays alive with new openings paused while retrying reconciliation
+                        if command() == 'stop':
+                            try:
+                                if engine.can_stop():
+                                    return publish
+                            except Exception:
+                                pass
+                        stopped, events = demo_poll(engine, lambda: 'pause' if command() == 'run' else command(), publish, startup=True)
+                        reconcile_paused = False
+                    else:
+                        stopped, events = demo_poll(engine, command, publish, startup=startup)
+                    startup = False
+                    if stopped:
+                        return publish
+                    for event, result in events:
+                        print(event, result, flush=True)
+                    time.sleep(1)
+                except Exception as exc:
+                    from scripts.live_c_demo_exchange import DemoApiError
+                    code = str(exc)
+                    print(f'{mode_code}_RECONCILE', type(exc).__name__, code, flush=True)
+                    if isinstance(exc, DemoApiError):
+                        # Non-transient auth/permission errors cannot self-heal; exit cleanly
+                        raise
+                    if code in ('PROTECTION_INCOMPLETE', 'PROTECTION_REQUIRED'):
+                        publish('PROTECTION_INCOMPLETE', '已配置的交易所保护单缺失或与成交不符，已暂停新开仓并保持对账')
+                    elif code == 'EXCHANGE_UNKNOWN':
+                        publish('EXCHANGE_UNKNOWN', '委托结果未确认，已暂停新开仓并等待对账恢复')
+                    else:
+                        publish('RECONCILE_REQUIRED', f'本地委托与交易所尚未核对一致（{code}），已暂停新开仓并持续对账')
+                    reconcile_paused = True
+                    time.sleep(5)
         except Exception as exc:
             from scripts.live_c_demo_exchange import DemoApiError
-            print('DEMO_RECONCILE',type(exc).__name__,str(exc),flush=True)
-            if not isinstance(exc,DemoApiError):
-                code = str(exc)
-                if code in ('PROTECTION_INCOMPLETE','PROTECTION_REQUIRED'):
-                    publish('PROTECTION_INCOMPLETE','已配置的交易所保护单缺失或与成交不符')
-                elif code=='EXCHANGE_UNKNOWN':
-                    publish('EXCHANGE_UNKNOWN','委托结果未确认，暂停新开仓')
-                else:
-                    publish('RECONCILE_REQUIRED',f'本地委托与交易所尚未核对一致（{code}）')
+            print(f'{mode_code}_FATAL', type(exc).__name__, str(exc), flush=True)
+            if not isinstance(exc, DemoApiError):
+                publish('RECONCILE_REQUIRED', f'本地委托与交易所尚未核对一致（{exc}）')
             raise
 
 

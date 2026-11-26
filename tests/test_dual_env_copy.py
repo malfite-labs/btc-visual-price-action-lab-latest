@@ -555,3 +555,101 @@ def test_kline_feed_live_env_and_environment_isolation():
     finally:
         server.shutdown()
         server.server_close()
+
+
+def _make_g_db(path: Path):
+    with closing(sqlite3.connect(path)) as db, db:
+        db.execute(
+            """CREATE TABLE g_fills (
+                fill_id TEXT, source_fill_id TEXT, c_trade_id TEXT, g_trade_id TEXT,
+                effect TEXT, direction TEXT, quantity TEXT, price TEXT, fee TEXT,
+                slippage TEXT, pnl TEXT, reason TEXT, occurred_at TEXT
+            )"""
+        )
+
+
+def _insert_g_fill(path: Path, *, fill_id, g_trade_id, effect, direction='SHORT', qty='0.53937024', price='60787.24', reason='C_MIRROR_CLOSE:MIRROR_RISK_EXIT', occurred_at=None):
+    at = occurred_at or datetime.now(UTC).isoformat()
+    with closing(sqlite3.connect(path)) as db, db:
+        db.execute(
+            'INSERT INTO g_fills VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+            (fill_id, 'src-' + fill_id, 'c-' + g_trade_id, g_trade_id, effect, direction, qty, price, '1', '0', '0', reason, at),
+        )
+
+
+def test_g_mirror_risk_exit_full_qty_partial_close_and_delayed_exit_recovery(tmp_path):
+    """Exact reproduction of G MIRROR_RISK_EXIT (effect=PARTIAL_CLOSE, qty==before) + >60s delayed exit."""
+    g_db = tmp_path / 'mirror.sqlite3'
+    _make_g_db(g_db)
+    work = tmp_path / 'g_demo'
+    work.mkdir()
+    follower = DryFollower(g_db, work / 'demo-execution-inbox.sqlite3', Decimal('30'), Decimal('100'), strategy='G')
+    ex = FakeExchange('DEMO', hedge=True, leverage=5)
+    engine = FollowExecutor(follower, ex, work, 'DEMO-CONTINUOUS', leverage=5, stop_fraction=None, risk_cap=Decimal('5'), exit_mode='FOLLOW_PAPER')
+
+    # 1. Open SHORT on G
+    _insert_g_fill(g_db, fill_id='g1', g_trade_id='gt1', effect='OPEN', direction='SHORT', qty='0.53937024')
+    assert engine.tick() == [('G:g1', 'FOLLOW_PAPER')]
+    assert ex.position == Decimal('-0.002')
+
+    # 2. G emits MIRROR_RISK_EXIT labeled PARTIAL_CLOSE with 100% qty (and 2 hours delayed!)
+    old_ts = (datetime.now(UTC) - timedelta(hours=2)).isoformat()
+    _insert_g_fill(g_db, fill_id='g2', g_trade_id='gt1', effect='PARTIAL_CLOSE', direction='SHORT', qty='0.53937024', occurred_at=old_ts)
+    # Simulate restart recovery before processing the exit
+    restarted = FollowExecutor(follower, ex, work, 'DEMO-CONTINUOUS', leverage=5, stop_fraction=None, risk_cap=Decimal('5'), exit_mode='FOLLOW_PAPER')
+    assert restarted.tick() == [('G:g2', 'CLOSED')]
+    assert ex.position == Decimal(0)
+    assert restarted.can_stop() is True
+
+
+def test_unified_partial_close_proportional_and_min_order_skip(tmp_path):
+    """Test true proportional partial close (0.004 -> 0.002 -> 0) and sub-minimum partial skip."""
+    class PartialCapableExchange(FakeExchange):
+        def reduce(self, client_id, side, quantity):
+            self.writes.append(('reduce', client_id, str(quantity)))
+            oid = self.next_oid
+            self.next_oid += 1
+            pos_side = ('LONG' if side == 'SELL' else 'SHORT') if self.hedge else 'BOTH'
+            self.orders[client_id] = {
+                'clientOrderId': client_id, 'orderId': oid, 'symbol': 'BTCUSDT',
+                'side': side, 'positionSide': pos_side, 'origQty': str(quantity),
+                'executedQty': str(quantity), 'status': 'FILLED',
+            }
+            tid = self.next_tid
+            self.next_tid += 1
+            self.trades_by_oid[oid] = [{
+                'id': tid, 'orderId': oid, 'symbol': 'BTCUSDT', 'side': side, 'positionSide': pos_side,
+                'qty': str(quantity), 'price': str(self.price), 'commission': '0.02',
+                'commissionAsset': 'USDT', 'realizedPnl': '0.05', 'time': int(datetime.now(UTC).timestamp() * 1000),
+            }]
+            self.position = self.position - quantity if self.position > 0 else self.position + quantity
+            return self.orders[client_id]
+
+    g_db = tmp_path / 'mirror_part.sqlite3'
+    _make_g_db(g_db)
+    work = tmp_path / 'g_part'
+    work.mkdir()
+    # 50 USDT * 5x = 250 USDT -> 0.004 BTC at 60000
+    follower = DryFollower(g_db, work / 'demo-execution-inbox.sqlite3', Decimal('50'), Decimal('200'), strategy='G')
+    ex = PartialCapableExchange('DEMO', hedge=True, leverage=5)
+    engine = FollowExecutor(follower, ex, work, 'DEMO-CONTINUOUS', leverage=5, stop_fraction=None, risk_cap=Decimal('10'), exit_mode='FOLLOW_PAPER')
+
+    _insert_g_fill(g_db, fill_id='p1', g_trade_id='pt1', effect='OPEN', direction='LONG', qty='1.0000')
+    assert engine.tick() == [('G:p1', 'FOLLOW_PAPER')]
+    assert ex.position == Decimal('0.004')
+
+    # 10% partial close -> 0.0004 BTC < 0.001 min_qty -> skipped cleanly without crashing!
+    _insert_g_fill(g_db, fill_id='p2', g_trade_id='pt1', effect='PARTIAL_CLOSE', direction='LONG', qty='0.1000')
+    assert engine.tick() == [('G:p2', 'SKIPPED_MIN_ORDER')]
+    assert ex.position == Decimal('0.004')
+
+    # 50% of remaining 0.9000 = 0.4500 -> 0.004 * 0.5 = 0.002 BTC executed!
+    _insert_g_fill(g_db, fill_id='p3', g_trade_id='pt1', effect='PARTIAL_CLOSE', direction='LONG', qty='0.4500')
+    assert engine.tick() == [('G:p3', 'FOLLOW_PAPER')]
+    assert ex.position == Decimal('0.002')
+
+    # Final close of remaining 0.4500 -> closes remaining 0.002 BTC cleanly!
+    _insert_g_fill(g_db, fill_id='p4', g_trade_id='pt1', effect='CLOSE', direction='LONG', qty='0.4500')
+    assert engine.tick() == [('G:p4', 'CLOSED')]
+    assert ex.position == Decimal(0)
+    assert engine.can_stop() is True

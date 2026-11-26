@@ -2438,3 +2438,13 @@ C自然跟单排查：游标78到91读取10笔C，真实Demo五单，仍空头0.
   2. **最高跟单杠杆升级至 10×**：在 `scripts/live_copy_env.py` 定义统一常量 `MAX_COPY_LEVERAGE = 10`，全链路同步至 `live_copy_v2.py`、`live_copy_service.py`、`live_c_demo_exchange.py` 与 `live_copy_window.py`（默认新建杠杆保持 5×，已有 5× 配置不变）。正式账户 10× 只读预检实测 `PASS`（`blockers=[]`，`100.17 USDT`，`HEDGE`/`ISOLATED`/`10×`，估算最小保证金 `≥ 6.22 USDT`）。
   3. **实盘 K 线默认环境修复**：`kline_window.py` 新增 `/live-env`（带单调 `seq`），`live_copy_window.py` 传入当前环境，`KlineWindow.tsx` 监听并自动切换默认环境（新建与复用窗口均生效），正式实盘 K 线实测默认显示 `正式实盘` 与 `暂无正式实盘成交`。
 - 回归验证：`tests/test_dual_env_copy.py` 12/12 PASS（新增 1–10× 杠杆计算与 5× 兼容、10× 正式预检、暂停/恢复/带仓安全停止生命周期、`EXCHANGE_UNKNOWN` 与部分成交保护、K 线 `/live-env` 隔离）；纸盘系统、Demo 历史账本与遗留空单均未被破坏，生产真实下单保持关闭。
+
+
+### 2026-11-26 BTC V3.1 统一退出执行与 G Demo 仓位自动恢复
+- 备份位置：`.backups/v31-exit-fix-20261126-141037`。
+- 真实根因：纸盘 G 在 12:41:49 写入的 `MIRROR_RISK_EXIT`（`rowid=82`，`G:49dc7476-9966-462c-a7d1-9902ce91dc33`）将 100% 平仓标记为 `effect='PARTIAL_CLOSE'` 且 `qty == before (0.53937024)`；旧版 `DryFollower.plan()` 仅在 `PARTIAL_CLOSE` 分支允许 `0 < qty < before`，从而触发 `UNVERIFIED_EXIT_QUANTITY` 并退出进程，遗留 Demo 空单 `-0.0024 BTC`；同时 UI 在同配置有未平仓时也一并阻断了自恢复启动。
+- 核心修复：
+  1. `scripts/live_copy_service.py`：`DryFollower.plan()` 统一按实际平仓量与剩余量比例判定（`qty == before` 统一按 `FULL_CLOSE` 执行，`0 < qty < before` 按比例 `PARTIAL_CLOSE` 执行）；异常对账时进程保持存活、暂停新开仓并持续重试对账，不放弃已有仓位管理。
+  2. `scripts/live_c_demo_executor.py` & `scripts/live_copy_follow.py`：实现统一比例部分平仓 `partial_exit_position()`（按交易所步长向下取整，低于最小单量则记录 `SKIPPED_MIN_ORDER` 跳过而不崩溃），完整平仓按剩余确认仓位全额平出，60 秒时效仅限制开仓不限制关联平仓。
+  3. `scripts/live_c_demo_exchange.py` & `scripts/live_copy_window.py`：允许同配置在无其他配置冲突时安全恢复接管自有未平仓位并自动完成对账与挂起退出。
+- 实测证据：`tests/test_dual_env_copy.py` 14/14 PASS；受控启动新版 V3.1 G Demo 后台（PID `11456`）后自动完成 `G:49dc7476-9966-462c-a7d1-9902ce91dc33 CLOSED`（原 `-0.0024 BTC` 空单平仓，Demo 归零仓位/零挂单/零 Algo，可用余额回升至 `4,998.57 USDT`），自动跳过停机期历史事件 `rowid 83/84`（游标推进至 `84`，无补单），实测在线 `pause` ↔ `run` 状态切换正常；正式环境生产下单保持关闭。

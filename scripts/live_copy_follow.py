@@ -151,9 +151,32 @@ class FollowExecutor:
                 if result != 'CLOSED':
                     raise RuntimeError(result)
                 del active[fill.trade_id]
+            elif plan['action']=='PARTIAL_CLOSE' and fill.trade_id in active:
+                engine,intent = active[fill.trade_id]
+                info = next(row for row in self.exchange._read('exchange_info')['symbols'] if row['symbol'] == 'BTCUSDT')
+                filters = {r['filterType']: r for r in info['filters']}
+                lot, mlot = filters['LOT_SIZE'], filters['MARKET_LOT_SIZE']
+                step = max(Decimal(lot['stepSize']), Decimal(mlot['stepSize']))
+                min_qty = max(Decimal(lot['minQty']), Decimal(mlot['minQty']))
+                min_notional = Decimal(filters['MIN_NOTIONAL']['notional'])
+                price = Decimal(self.exchange._read('ticker')['price'])
+                outcome = engine.partial_exit_position(
+                    intent, Decimal(plan['fraction']), event_id=event,
+                    step=step, min_qty=min_qty, min_notional=min_notional, price=price,
+                )
+                if outcome == 'CLOSED':
+                    result = 'CLOSED'
+                    del active[fill.trade_id]
+                elif outcome in ('PROTECTED', 'FOLLOW_PAPER'):
+                    result = outcome
+                elif outcome == 'SKIPPED_MIN_ORDER':
+                    result = 'SKIPPED_MIN_ORDER'
+                    reason = 'MINIMUM_ORDER_REQUIREMENTS'
+                else:
+                    raise RuntimeError(outcome)
             elif plan['action']=='OPEN':
                 reason = 'PAUSED'
-            elif plan['action']=='FULL_CLOSE':
+            elif plan['action'] in ('FULL_CLOSE', 'PARTIAL_CLOSE'):
                 reason = 'NO_ACTIVE_LINKED_POSITION'
             if (result=='SKIPPED' and reason=='NO_ASSOCIATED_POSITION'
                     and fill.action in ('FULL_CLOSE','PARTIAL_CLOSE')

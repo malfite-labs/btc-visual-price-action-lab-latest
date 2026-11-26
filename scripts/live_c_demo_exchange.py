@@ -176,7 +176,7 @@ class BinanceFuturesExchange(BinanceReader):
                 'positions': [net] if net else [], 'orders': orders, 'conditional': conditional,
                 'permissions': {'enableFutures': self._request('GET','/fapi/v1/accountConfig').get('canTrade') is True}, 'symbol':symbol}
 
-    def preflight_report(self, *, planned_leverage=None, fixed_margin=None, budget=None):
+    def preflight_report(self, *, planned_leverage=None, fixed_margin=None, budget=None, allow_existing_exposure=False):
         """Strict GET-only preflight check against actual exchange specs. Never modifies account settings."""
         from decimal import ROUND_CEILING
         from scripts.live_copy_env import MAX_COPY_LEVERAGE
@@ -231,7 +231,10 @@ class BinanceFuturesExchange(BinanceReader):
             blockers.append(f'BTCUSDT 当前实际杠杆为 {actual_leverage}×，超过系统允许上限 {MAX_COPY_LEVERAGE}×，请在 Binance 调整至 ≤{MAX_COPY_LEVERAGE}×（系统不会自动修改）')
         elif actual_leverage > planned_lev:
             blockers.append(f'BTCUSDT 当前实际杠杆 {actual_leverage}× 高于配置计划杠杆 {planned_lev}×，请在 Binance 调整或提高配置计划杠杆（最高 {MAX_COPY_LEVERAGE}×）')
-        if btc_positions or other_positions or orders or algos:
+        if allow_existing_exposure:
+            if other_positions or len(btc_positions) > 1 or orders:
+                blockers.append(f'账户存在冲突敞口（BTC仓位 {len(btc_positions)} / 其他仓位 {len(other_positions)} / 普通单 {len(orders)}）')
+        elif btc_positions or other_positions or orders or algos:
             blockers.append(f'账户存在未结敞口（BTC仓位 {len(btc_positions)} / 其他仓位 {len(other_positions)} / 普通单 {len(orders)} / 条件单 {len(algos)}）')
         if fixed_margin is not None and Decimal(fixed_margin) < est_min_margin:
             blockers.append(f'单笔保证金 {Decimal(fixed_margin):.2f} USDT 低于按当前规格估算的最低需求 {est_min_margin:.2f} USDT')

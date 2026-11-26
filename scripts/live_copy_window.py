@@ -779,13 +779,14 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
             return '等待切换' if pending['state'] != 'BLOCKED' else '切换待核对'
         return '已保存'
 
-    def preflight_env(env_code, config):
+    def preflight_env(env_code, config, *, allow_existing_exposure=False):
         exchange, _, _ = make_exchange(env_code, account_id=config.get('account_id') or None,
                                        allow_writes=False, base_root=(env_roots or {}).get(env_code))
         report = exchange.preflight_report(
             planned_leverage=int(config['leverage']),
             fixed_margin=Decimal(config['fixed']),
             budget=Decimal(config['budget']),
+            allow_existing_exposure=allow_existing_exposure,
         )
         if report['status'] != 'PASS':
             raise ValueError('；'.join(report['blockers']))
@@ -1021,7 +1022,7 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
             except (OSError, ValueError) as exc:
                 messagebox.showerror('等待切换', str(exc), parent=root)
 
-    def switch_to_env(env_code, cid, config, source, extra, previous, confirmation):
+    def switch_to_env(env_code, cid, config, source, extra, previous, confirmation, *, allow_existing_exposure=False):
         c = ctx(env_code)
         c.transition = True
 
@@ -1042,8 +1043,8 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
                     raise ValueError('当前环境已有跟单服务或待对账状态，请核对后再试。')
                 if c.configs.get(cid) != config:
                     raise ValueError('核对期间配置已更改，请重新确认。')
-                if any(demo_ledger_busy(env_code, k) for k in c.configs):
-                    raise ValueError('当前环境本地账本仍有未结束交易或未知委托。')
+                if any(demo_ledger_busy(env_code, k) for k in c.configs if k != cid):
+                    raise ValueError('当前环境其他配置仍有未结束交易或未知委托。')
                 check_demo_cursor(env_code, cid, config['strategy'], source)
                 process = spawn_follower(env_code, cid, config, source, extra)
                 root.after(150, lambda: wait_for_start(process, time.monotonic() + 20))
@@ -1095,7 +1096,7 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
             else:
                 root.after(150, lambda: wait_for_stop(deadline, confirmed))
 
-        future = pool.submit(preflight_env, env_code, config)
+        future = pool.submit(preflight_env, env_code, config, allow_existing_exposure=allow_existing_exposure)
 
         def checked():
             if not root.winfo_exists():
@@ -1294,12 +1295,15 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
                     raise ValueError('正式纸盘账本不可用。')
                 extra = []
                 if command == 'enable':
-                    if not can_queue and any(demo_ledger_busy(c.env, k) for k in c.configs):
-                        raise ValueError('当前环境本地账本仍有未结束交易或未知委托，请先完成对账。')
+                    other_busy = any(demo_ledger_busy(c.env, k) for k in c.configs if k != cid)
+                    resuming_own = demo_ledger_busy(c.env, cid)
+                    if not can_queue and other_busy:
+                        raise ValueError('当前环境其他配置仍有未结束交易或未知委托，请先完成对账。')
                     stop = optional_exit(v, 'custom_sl', 'stop')
                     target = optional_exit(v, 'custom_tp', 'tp')
                     risk = Decimal(v['budget']) * Decimal('.02')
                     warning = '\n未设置独立止损，纸盘或网络中断时可能无法及时平仓。' if stop is None else ''
+                    resume_note = '\n检测到该配置存在未平关联仓位，确认后将自动对账并继续管理已有仓位退出（不补开历史开仓）。' if resuming_own else ''
                     order_flag = '--authorized-production-orders' if c.env == PROD_ENV else '--authorized-demo-orders'
                     env_warn = (
                         '⚠️ 注意：当前为【正式实盘真实资金】环境，确认后将跟随新纸盘成交提交真实订单！'
@@ -1313,7 +1317,7 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
                         f"独立止损：{str(stop) + '%（按价格变化）' if stop is not None else '关闭'}\n"
                         f"独立止盈：{str(target) + '%（按价格变化）' if target is not None else '关闭'}\n"
                         + ('确认后安全停止当前只读监测。\n' if can_switch else '')
-                        + env_warn + warning
+                        + env_warn + resume_note + warning
                     )
                     extra = [order_flag, '--leverage', v['leverage'], '--risk-cap', str(risk)]
                     if stop is not None:
@@ -1330,7 +1334,7 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
                     elif c.read_switch():
                         raise ValueError('当前环境已有等待切换，请先取消或等待队列完成。')
                     else:
-                        switch_to_env(c.env, cid, dict(v), source, extra, previous, confirmation)
+                        switch_to_env(c.env, cid, dict(v), source, extra, previous, confirmation, allow_existing_exposure=resuming_own)
                 else:
                     spawn_follower(c.env, cid, v, source, extra)
                 return

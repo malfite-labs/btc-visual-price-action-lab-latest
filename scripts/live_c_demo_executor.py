@@ -158,6 +158,8 @@ class DemoExecutor:
             average = sum(Decimal(t['qty']) * Decimal(t['price']) for t in trades) / qty
             evidence.update(average=str(average), entry_trades=trades)
             sign = 1 if intent.direction == 'LONG' else -1
+            partial_qty = sum((Decimal(t['qty']) for t in evidence.get('partial_exit_trades', [])), Decimal(0))
+            expected_qty = qty - partial_qty
             if not net and terminal and not orders:
                 if verify_only:
                     return failure('FLAT', 'Position already flat; closure evidence requires reconciliation')
@@ -166,7 +168,7 @@ class DemoExecutor:
             owned = {evidence[k]['client_algo_id'] for k in ('stop','target','retiring_stop') if k in evidence}
             if any(a.get('clientAlgoId') not in owned for a in algos) and owned:
                 return failure('RECONCILE_REQUIRED', 'Unexpected conditional order')
-            if net != qty*sign or any(o.get('clientOrderId') != oid for o in orders):
+            if net != expected_qty*sign or any(o.get('clientOrderId') != oid for o in orders):
                 return failure('RECONCILE_REQUIRED', 'Position or open entry order mismatch')
             if intent.exit_mode == 'FOLLOW_PAPER':
                 if any(a.get('clientAlgoId') not in owned for a in algos):
@@ -256,6 +258,10 @@ class DemoExecutor:
                 exit_ids.add(int(order['actualOrderId']))
         if evidence.get('manual_exit'):
             exit_ids.add(self.exchange.order(evidence['manual_exit'])['orderId'])
+        for p_cid in evidence.get('partial_exits', []):
+            p_ord = self.exchange.order(p_cid)
+            if p_ord and p_ord.get('orderId'):
+                exit_ids.add(p_ord['orderId'])
         trades = [trade for order_id in exit_ids for trade in self.exchange.trades(order_id)]
         if (sum(Decimal(trade['qty']) for trade in trades) != qty
                 or len({trade['id'] for trade in trades}) != len(trades)
@@ -284,7 +290,7 @@ class DemoExecutor:
         return self._set(oid, 'CLOSED', evidence)
 
     def exit_demo_position(self, intent):
-        """Explicit Demo-only reduce operation, including protected test exit."""
+        """Unified full-exit reduce operation for remaining linked position."""
         oid = intent.client_order_id
         self.exchange.synchronize()
         net, orders, _ = self.exchange.exposure()
@@ -296,10 +302,52 @@ class DemoExecutor:
         if not net:
             return self.reconcile(intent)
         order = self.exchange.order(oid)
-        if orders or order['status'] not in TERMINAL or net != Decimal(order['executedQty'])*(1 if intent.direction=='LONG' else -1):
+        sign = 1 if intent.direction == 'LONG' else -1
+        partial_qty = sum((Decimal(t['qty']) for t in e.get('partial_exit_trades', [])), Decimal(0))
+        expected_remaining = Decimal(order['executedQty']) - partial_qty
+        if orders or order['status'] not in TERMINAL or net != expected_remaining * sign:
             return self._set(oid, 'RECONCILE_REQUIRED', e)
         cid = 'c31x-' + sha256(oid.encode()).hexdigest()[:28]
         e['manual_exit'] = cid
         self._set(oid, 'RECONCILE_REQUIRED', e)
         self._once(cid, lambda: self.exchange.reduce(cid, 'SELL' if net > 0 else 'BUY', abs(net)))
+        return self.reconcile(intent)
+
+    def partial_exit_position(self, intent, fraction, *, event_id, step, min_qty, min_notional, price):
+        """Unified proportional partial exit; skips cleanly if below exchange minimum without crashing."""
+        oid = intent.client_order_id
+        self.exchange.synchronize()
+        net, orders, _ = self.exchange.exposure()
+        with self.connection() as db:
+            row = db.execute('SELECT evidence FROM cycles WHERE id=?', (oid,)).fetchone()
+        if not row:
+            raise ValueError('Unknown cycle')
+        e = json.loads(row[0])
+        if not net:
+            return self.reconcile(intent)
+        sign = 1 if intent.direction == 'LONG' else -1
+        if orders or (net > 0) != (sign > 0):
+            return self._set(oid, 'RECONCILE_REQUIRED', e)
+        remaining = abs(net)
+        planned = remaining * Decimal(str(fraction))
+        exec_qty = (planned / Decimal(step)).to_integral_value(rounding=ROUND_FLOOR) * Decimal(step)
+        if exec_qty >= remaining:
+            return self.exit_demo_position(intent)
+        if exec_qty <= 0 or exec_qty < Decimal(min_qty) or exec_qty * Decimal(price) < Decimal(min_notional):
+            return 'SKIPPED_MIN_ORDER'
+        cid = 'c31p-' + sha256(f'{oid}|{event_id}'.encode()).hexdigest()[:27]
+        partials = list(e.get('partial_exits', []))
+        if cid not in partials:
+            partials.append(cid)
+        e['partial_exits'] = partials
+        self._set(oid, 'RECONCILE_REQUIRED', e)
+        self._once(cid, lambda: self.exchange.reduce(cid, 'SELL' if net > 0 else 'BUY', exec_qty))
+        p_ord = self.exchange.order(cid)
+        if p_ord.get('status') not in TERMINAL:
+            return self._set(oid, 'RECONCILE_REQUIRED', e)
+        p_trades = self.exchange.trades(p_ord['orderId'])
+        seen_ids = {t['id'] for t in e.get('partial_exit_trades', [])}
+        merged = list(e.get('partial_exit_trades', [])) + [t for t in p_trades if t['id'] not in seen_ids]
+        e['partial_exit_trades'] = merged
+        self._set(oid, 'FOLLOW_PAPER', e)
         return self.reconcile(intent)
