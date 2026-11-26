@@ -653,3 +653,25 @@ def test_unified_partial_close_proportional_and_min_order_skip(tmp_path):
     assert engine.tick() == [('G:p4', 'CLOSED')]
     assert ex.position == Decimal(0)
     assert engine.can_stop() is True
+
+
+def test_allowed_leverage_range_intersection_and_mismatch_block():
+    class MockBracketExchange(ProductionExchange):
+        def __init__(self, tier_max):
+            super().__init__('k', 's')
+            self._tier_max = tier_max
+
+        def _read(self, op):
+            if op == 'brackets':
+                return [{'symbol': 'BTCUSDT', 'brackets': [
+                    {'bracket': 1, 'initialLeverage': self._tier_max, 'notionalFloor': 0, 'notionalCap': 50000},
+                ]}]
+            raise AssertionError(op)
+
+    # Exchange allows 150x, system cap 10x -> intersection 1..10
+    levs, ex_max = MockBracketExchange(150).allowed_leverage_range(notional=Decimal('1000'))
+    assert levs == tuple(range(1, 11)) and ex_max == 150
+
+    # Exchange tier restricts to 5x, system cap 10x -> intersection 1..5
+    levs5, ex_max5 = MockBracketExchange(5).allowed_leverage_range(notional=Decimal('1000'))
+    assert levs5 == (1, 2, 3, 4, 5) and ex_max5 == 5

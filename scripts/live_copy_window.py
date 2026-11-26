@@ -316,8 +316,10 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
     }
     state_labels_prod = {
         **state_labels_demo,
-        'DEMO_RUNNING': '正式实盘运行中',
-        'STOPPED': '真实资金交易关闭',
+        'DEMO_RUNNING': '正式实盘运行中（真实资金）',
+        'MONITORING': '正式只读监测中',
+        'STOPPED': '正式下单关闭',
+        'RECONCILE_REQUIRED': '对账异常',
     }
 
     def state_label(env_code, st):
@@ -408,6 +410,9 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
             self.queue_check = None
             self.chart_requested_strategy = None
             self.preflight_cache = None
+            self.allowed_leverages = tuple(range(1, MAX_COPY_LEVERAGE + 1))
+            self.exchange_max_leverage = None
+            self.actual_leverage = None
             self.load_configs()
 
         def persist(self):
@@ -591,7 +596,15 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
             asset = next((a for a in exchange.account()['assets'] if a['asset'] == 'USDT'), None)
             if asset is None:
                 raise ValueError('账户响应缺少 USDT')
-            return money(asset['availableBalance'])
+            lev_info = (None, None, None)
+            try:
+                allowed, ex_max = exchange.allowed_leverage_range()
+                sym_cfg = exchange._request('GET', '/fapi/v1/symbolConfig', {'symbol': 'BTCUSDT'})
+                act_lev = int(sym_cfg[0]['leverage']) if sym_cfg else None
+                lev_info = (allowed, ex_max, act_lev)
+            except Exception:
+                pass
+            return money(asset['availableBalance']), lev_info
 
         if c.account_line.get() in ('', '读取失败'):
             c.account_line.set('读取中…')
@@ -606,9 +619,13 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
                 return
             c.balance_mode = None
             try:
-                bal = future.result()
+                bal, (allowed, ex_max, act_lev) = future.result()
                 c.account_line.set(bal)
                 c.account_updated.set(f"更新于 {datetime.now():%H:%M:%S}")
+                if allowed:
+                    c.allowed_leverages = allowed
+                    c.exchange_max_leverage = ex_max
+                    c.actual_leverage = act_lev
             except Exception as exc:
                 c.account_line.set('读取失败')
                 c.account_updated.set(str(exc)[:28] or '点击刷新账户重试')
@@ -2184,7 +2201,20 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
             form_row('跟单模式', 'mode', ('定额跟单',))
             form_row('每笔跟单保证金（USDT）', 'fixed')
             form_row('总资金上限（USDT）', 'budget')
-            form_row(f'计划杠杆（最高 {MAX_COPY_LEVERAGE}×）', 'leverage', tuple(str(i) for i in range(1, MAX_COPY_LEVERAGE + 1)))
+            allowed_choices = tuple(str(i) for i in e_ctx.allowed_leverages)
+            lev_max_label = e_ctx.allowed_leverages[-1] if e_ctx.allowed_leverages else MAX_COPY_LEVERAGE
+            form_row(f'计划杠杆（允许 1–{lev_max_label}×）', 'leverage', allowed_choices)
+            if e_ctx.exchange_max_leverage is not None or e_ctx.actual_leverage is not None:
+                lev_hint = tk.Label(
+                    right_card, bg=PALETTE['card_bg'], fg=PALETTE['muted'], anchor='w',
+                    font=('Microsoft YaHei UI', 8),
+                    text=(
+                        f"交易所 BTCUSDT 档位上限 {e_ctx.exchange_max_leverage or MAX_COPY_LEVERAGE}×，"
+                        f"与系统 {MAX_COPY_LEVERAGE}× 上限取交集为 1–{lev_max_label}×"
+                        + (f"；当前账户实际杠杆 {e_ctx.actual_leverage}×" if e_ctx.actual_leverage is not None else '')
+                    ),
+                )
+                lev_hint.pack(fill='x', pady=(0, 4))
             env_display = '⚗ Binance Demo（虚拟资金）' if editing_env == DEMO_ENV else '⚡ Binance 正式实盘（真实资金）'
             form_row('交易环境', 'environment', readonly_text=env_display)
             form_row('执行账户', 'account', (defs['account'],))

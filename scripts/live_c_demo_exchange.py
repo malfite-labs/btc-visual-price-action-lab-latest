@@ -176,6 +176,23 @@ class BinanceFuturesExchange(BinanceReader):
                 'positions': [net] if net else [], 'orders': orders, 'conditional': conditional,
                 'permissions': {'enableFutures': self._request('GET','/fapi/v1/accountConfig').get('canTrade') is True}, 'symbol':symbol}
 
+    def allowed_leverage_range(self, *, notional=Decimal('1000')):
+        """Return (allowed_leverages_tuple, exchange_tier_max) intersected with MAX_COPY_LEVERAGE."""
+        from scripts.live_copy_env import MAX_COPY_LEVERAGE
+        br = self._read('brackets')
+        if isinstance(br, list):
+            br = next(item for item in br if item.get('symbol') == SYMBOL)
+        brackets = br.get('brackets') or []
+        if not brackets:
+            raise ValueError('杠杆档位信息缺失')
+        tier = next(
+            (b for b in brackets if Decimal(str(b['notionalFloor'])) <= Decimal(notional) < Decimal(str(b['notionalCap']))),
+            brackets[0],
+        )
+        exchange_max = int(tier['initialLeverage'])
+        effective_max = min(exchange_max, MAX_COPY_LEVERAGE)
+        return tuple(range(1, max(1, effective_max) + 1)), exchange_max
+
     def preflight_report(self, *, planned_leverage=None, fixed_margin=None, budget=None, allow_existing_exposure=False):
         """Strict GET-only preflight check against actual exchange specs. Never modifies account settings."""
         from decimal import ROUND_CEILING
@@ -217,8 +234,13 @@ class BinanceFuturesExchange(BinanceReader):
         min_notional = Decimal(filters['MIN_NOTIONAL']['notional'])
         price = Decimal(self._read('ticker')['price'])
         fee = Decimal(self._read('commission')['takerCommissionRate'])
+        plan_notional = (Decimal(budget) * planned_lev) if budget is not None else Decimal('1000')
+        try:
+            allowed_levs, exchange_max_lev = self.allowed_leverage_range(notional=plan_notional)
+        except Exception:
+            allowed_levs, exchange_max_lev = tuple(range(1, MAX_COPY_LEVERAGE + 1)), MAX_COPY_LEVERAGE
         req_qty = max(min_qty, (min_notional / price / step_size).to_integral_value(rounding=ROUND_CEILING) * step_size)
-        eff_lev = min(planned_lev, actual_leverage, MAX_COPY_LEVERAGE)
+        eff_lev = min(planned_lev, actual_leverage, allowed_levs[-1])
         est_min_notional = req_qty * price
         est_min_margin = (est_min_notional / eff_lev) + est_min_notional * fee * 2 + Decimal('0.10')
 
@@ -227,10 +249,10 @@ class BinanceFuturesExchange(BinanceReader):
             blockers.append('账户未开通合约交易权限（canTrade=false）')
         if margin_type != 'ISOLATED':
             blockers.append(f'BTCUSDT 当前为 {margin_type}，须在交易所切换为逐仓（ISOLATED）；系统不会自动修改')
-        if actual_leverage > MAX_COPY_LEVERAGE:
-            blockers.append(f'BTCUSDT 当前实际杠杆为 {actual_leverage}×，超过系统允许上限 {MAX_COPY_LEVERAGE}×，请在 Binance 调整至 ≤{MAX_COPY_LEVERAGE}×（系统不会自动修改）')
-        elif actual_leverage > planned_lev:
-            blockers.append(f'BTCUSDT 当前实际杠杆 {actual_leverage}× 高于配置计划杠杆 {planned_lev}×，请在 Binance 调整或提高配置计划杠杆（最高 {MAX_COPY_LEVERAGE}×）')
+        if actual_leverage > allowed_levs[-1]:
+            blockers.append(f'BTCUSDT 当前实际杠杆为 {actual_leverage}×，超过允许上限 {allowed_levs[-1]}×，请在 Binance 调整至 ≤{allowed_levs[-1]}×（系统不会自动修改）')
+        elif actual_leverage != planned_lev:
+            blockers.append(f'BTCUSDT 当前实际杠杆 {actual_leverage}× 与计划杠杆 {planned_lev}× 不一致，请在 Binance 调整至 {planned_lev}× 或将计划杠杆设为 {actual_leverage}×（系统不会自动修改）')
         if allow_existing_exposure:
             if other_positions or len(btc_positions) > 1 or orders:
                 blockers.append(f'账户存在冲突敞口（BTC仓位 {len(btc_positions)} / 其他仓位 {len(other_positions)} / 普通单 {len(orders)}）')
@@ -252,7 +274,9 @@ class BinanceFuturesExchange(BinanceReader):
             'margin_type': margin_type,
             'actual_leverage': actual_leverage,
             'planned_leverage': planned_lev,
-            'max_leverage': MAX_COPY_LEVERAGE,
+            'max_leverage': allowed_levs[-1],
+            'exchange_max_leverage': exchange_max_lev,
+            'allowed_leverages': list(allowed_levs),
             'available_usdt': str(available),
             'wallet_usdt': str(wallet),
             'price': str(price),

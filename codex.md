@@ -2448,3 +2448,9 @@ C自然跟单排查：游标78到91读取10笔C，真实Demo五单，仍空头0.
   2. `scripts/live_c_demo_executor.py` & `scripts/live_copy_follow.py`：实现统一比例部分平仓 `partial_exit_position()`（按交易所步长向下取整，低于最小单量则记录 `SKIPPED_MIN_ORDER` 跳过而不崩溃），完整平仓按剩余确认仓位全额平出，60 秒时效仅限制开仓不限制关联平仓。
   3. `scripts/live_c_demo_exchange.py` & `scripts/live_copy_window.py`：允许同配置在无其他配置冲突时安全恢复接管自有未平仓位并自动完成对账与挂起退出。
 - 实测证据：`tests/test_dual_env_copy.py` 14/14 PASS；受控启动新版 V3.1 G Demo 后台（PID `11456`）后自动完成 `G:49dc7476-9966-462c-a7d1-9902ce91dc33 CLOSED`（原 `-0.0024 BTC` 空单平仓，Demo 归零仓位/零挂单/零 Algo，可用余额回升至 `4,998.57 USDT`），自动跳过停机期历史事件 `rowid 83/84`（游标推进至 `84`，无补单），实测在线 `pause` ↔ `run` 状态切换正常；正式环境生产下单保持关闭。
+
+
+### 2026-11-26 BTC V3.1 杠杆档位交集与正式实盘状态口径统一
+- 通过 Binance 官方 `/fapi/v1/leverageBracket` 实测查询：Demo BTCUSDT 第一档允许 `1–125×`（当前实际 `5×`），正式账户第一档允许 `1–150×`（当前实际 `10×`）；两环境均与系统 `10×` 上限动态取交集（`1–10×`）驱动 UI 杠杆下拉列表，并在预检中强制核对实际杠杆与计划杠杆一致（不自动修改交易所参数）。
+- 正式实盘状态文案明确区分：`正式下单关闭`、`正式只读监测中`、`正式实盘运行中（真实资金）`、`已暂停新开仓`、`对账异常`；同时 `read_demo_command` 自动去除 UTF-8 BOM。
+- 实测状态：Demo V3.1（`PID 11456`，`G · C反向镜像`，`cursor=84`）稳定 `DEMO_RUNNING`，零持仓/零挂单/零 Algo，可用 `4,998.57 USDT`；正式实盘当前 `STOPPED`（`正式下单关闭`，可用 `100.17 USDT`，零持仓/零挂单/零 Algo，`10×` 预检 `PASS`）；回归测试 15/15 PASS。

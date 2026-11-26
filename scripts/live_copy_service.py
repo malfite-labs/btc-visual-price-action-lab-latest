@@ -235,7 +235,7 @@ def read_demo_command(runtime):
     if runtime is None:
         return 'run'
     try:
-        action = (runtime/'command.txt').read_text(encoding='utf8').strip()
+        action = (runtime/'command.txt').read_text(encoding='utf8').lstrip('\ufeff').strip()
     except (OSError, UnicodeError):
         return 'pause'
     return action if action in ('run', 'pause', 'stop') else 'pause'
