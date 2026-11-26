@@ -2454,3 +2454,12 @@ C自然跟单排查：游标78到91读取10笔C，真实Demo五单，仍空头0.
 - 通过 Binance 官方 `/fapi/v1/leverageBracket` 实测查询：Demo BTCUSDT 第一档允许 `1–125×`（当前实际 `5×`），正式账户第一档允许 `1–150×`（当前实际 `10×`）；两环境均与系统 `10×` 上限动态取交集（`1–10×`）驱动 UI 杠杆下拉列表，并在预检中强制核对实际杠杆与计划杠杆一致（不自动修改交易所参数）。
 - 正式实盘状态文案明确区分：`正式下单关闭`、`正式只读监测中`、`正式实盘运行中（真实资金）`、`已暂停新开仓`、`对账异常`；同时 `read_demo_command` 自动去除 UTF-8 BOM。
 - 实测状态：Demo V3.1（`PID 11456`，`G · C反向镜像`，`cursor=84`）稳定 `DEMO_RUNNING`，零持仓/零挂单/零 Algo，可用 `4,998.57 USDT`；正式实盘当前 `STOPPED`（`正式下单关闭`，可用 `100.17 USDT`，零持仓/零挂单/零 Algo，`10×` 预检 `PASS`）；回归测试 15/15 PASS。
+
+
+### 2026-11-26 BTC V3.1 异常策略恢复与一键启动／恢复功能修复
+- 备份位置：`.backups/v31-recovery-20261126-161122`。
+- 根因与修复：
+  1. **D 策略**：已加载 `D-COMMON-GUARD-V1`，后台实测 `AUTO_PAPER / execution_ready=True / FLAT`，已正常完成 16:00 CST 自然周期 `IDLE/NO_SETUP`；无残留旧保护锁。
+  2. **G 策略**：`backend/g_mirror.py` 在 `_emergency_close` 完成后将正常的 `MIRROR_RISK_EXIT` 写入 `error` 列，导致 `local_dashboard.py` 将空仓且已进入 `WAIT_FOR_C_NEXT_OPEN` 的 G 误标为 `异常`。现已修正 `backend/g_mirror.py` 不再写入错误列，`local_dashboard.py` 识别空仓已完成的 `MIRROR_RISK_EXIT` 并恢复显示 `等待C开仓`。
+  3. **一键启动／恢复**：原 `recover()` 仅调用 `start_lab.ps1` 并返回固定文案，未检查 16 套策略状态。现升级为：先检查 8012/5175（已运行不重复启动）→ 核验行情/调度 → 逐项检查全部 16 套策略并安全清除可恢复的良性状态（不自动解除用户暂停、不强清真实保护锁）→ 实时状态栏反馈与弹窗统计结果。
+- 实测结果：`tests/test_one_click_recovery.py` + `tests/test_dual_env_copy.py` 17/17 PASS；正式执行 `recover()` 返回 `检查 16 套策略，正常 15 套，成功恢复 1 套，仍受保护 0 套，主动停用 0 套`；Demo（PID 11456）与正式实盘（STOPPED）均未受影响。

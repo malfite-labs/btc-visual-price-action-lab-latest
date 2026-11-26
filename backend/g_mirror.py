@@ -209,7 +209,7 @@ class GMirror:
             result = self._close(db, fake, D(pos["quantity"]), quote, row, pos, pair, terminal=False)
             if result.get("accepted"):
                 db.execute("UPDATE g_pairs SET status='RISK_EXITED',last_event_id=? WHERE c_trade_id=?", (fake["source_fill_id"], pos["c_trade_id"]))
-                db.execute("UPDATE g_account SET follow_state='WAIT_FOR_C_NEXT_OPEN',last_cycle=?,last_action='MIRROR_RISK_EXIT',error='MIRROR_RISK_EXIT' WHERE singleton=1", (quote.get('event_at') or self._now(),))
+                db.execute("UPDATE g_account SET follow_state='WAIT_FOR_C_NEXT_OPEN',last_cycle=?,last_action='MIRROR_RISK_EXIT',error=NULL WHERE singleton=1", (quote.get('event_at') or self._now(),))
                 self._record_event(db, fake["source_fill_id"], pos["c_trade_id"], "RISK_EXIT", "MIRROR_RISK_EXIT", result)
                 db.commit(); return {**result, "reason": "MIRROR_RISK_EXIT"}
             db.rollback(); return result

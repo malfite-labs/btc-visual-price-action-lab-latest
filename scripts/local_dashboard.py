@@ -364,7 +364,19 @@ def console_rows(decisions, pa_items=(), pa_error=None, g_status=None, g_error=N
         g_status = g_status or {}
         direction = g_status.get('position_direction')
         follow = g_status.get('follow_state') or g_status.get('status')
-        label = '异常' if g_status.get('last_error') else '等待C开仓' if follow == 'WAIT_FOR_C_NEXT_OPEN' else '运行中' if follow in ('MIRRORING', 'PAIR_CLOSED') else '异常'
+        g_err = g_status.get('last_error')
+        benign_risk_exit = (
+            g_err == 'MIRROR_RISK_EXIT'
+            and follow == 'WAIT_FOR_C_NEXT_OPEN'
+            and not g_status.get('position')
+            and bool(g_status.get('enabled'))
+        )
+        label = (
+            '异常' if (g_err and not benign_risk_exit)
+            else '等待C开仓' if follow == 'WAIT_FOR_C_NEXT_OPEN'
+            else '运行中' if follow in ('MIRRORING', 'PAIR_CLOSED')
+            else '异常'
+        )
         rows['G'] = {'id': 'G', 'strategy_id': 'G', 'name': 'C反向镜像', 'status_label': label,
                      'control_label': '只读', 'control': 'G_MIRROR',
                      'state': {'LONG': '做多', 'SHORT': '做空'}.get(direction, '空仓'),
@@ -1310,16 +1322,128 @@ def listeners():
     return active
 
 
-def recover():
-    """Use the same serialized, ownership-aware launcher as the desktop shortcut."""
-    launcher = ROOT / 'scripts' / 'start_lab.ps1'
-    result = subprocess.run(
-        ['powershell.exe', '-NoProfile', '-NonInteractive', '-File', str(launcher)],
-        cwd=ROOT, capture_output=True, text=True, creationflags=NO_WINDOW, timeout=120,
+def _clear_benign_g_risk_exit_error(g_db_path=None):
+    """Clear only benign MIRROR_RISK_EXIT residue when G is FLAT, enabled, and WAIT_FOR_C_NEXT_OPEN."""
+    db_path = Path(g_db_path) if g_db_path is not None else ROOT / 'data' / 'g' / 'mirror.sqlite3'
+    if not db_path.is_file():
+        return False
+    try:
+        with sqlite3.connect(str(db_path), timeout=5) as db:
+            row = db.execute(
+                "SELECT enabled, position_json, follow_state, error FROM g_account WHERE singleton=1"
+            ).fetchone()
+            if not row:
+                return False
+            enabled, pos_json, follow_state, err = row
+            if enabled == 1 and not pos_json and follow_state == 'WAIT_FOR_C_NEXT_OPEN' and err == 'MIRROR_RISK_EXIT':
+                db.execute(
+                    "UPDATE g_account SET error=NULL WHERE singleton=1 AND enabled=1 AND position_json IS NULL "
+                    "AND follow_state='WAIT_FOR_C_NEXT_OPEN' AND error='MIRROR_RISK_EXIT'"
+                )
+                db.commit()
+                return True
+    except sqlite3.Error:
+        return False
+    return False
+
+
+def summarize_and_recover_strategies(system, rows, pool_items=(), *, g_db_path=None):
+    """Inspect all 16 strategies and recover only safe, empty-position benign states."""
+    healthy_count = 0
+    recovered = []
+    protected = []
+    paused = []
+
+    # 1. Recover benign G MIRROR_RISK_EXIT residue if present
+    g_row = rows.get('G') or {}
+    g_raw = g_row.get('raw') or {}
+    if (
+        g_raw.get('last_error') == 'MIRROR_RISK_EXIT'
+        and g_raw.get('follow_state') == 'WAIT_FOR_C_NEXT_OPEN'
+        and not g_raw.get('position')
+        and bool(g_raw.get('enabled'))
+    ):
+        if _clear_benign_g_risk_exit_error(g_db_path):
+            recovered.append('G · C反向镜像（已清除历史镜像风控退出错误标记，恢复等待C开仓）')
+
+    # 2. Classify A..E, G, PA-01..PA-08 from console_rows
+    seen_ids = set()
+    for sid, row in rows.items():
+        seen_ids.add(sid)
+        if sid == 'G' and any(item.startswith('G ·') for item in recovered):
+            continue
+        st = row.get('status_label') or '未知'
+        if st in ('运行中', '等待C开仓', '已启用待周期', '观察中'):
+            healthy_count += 1
+        elif st in ('已暂停', '未启用'):
+            paused.append(strategy_display_name(sid))
+        else:
+            reason = row.get('action') or st
+            protected.append(f'{strategy_display_name(sid)}（{st}：{reason}）')
+
+    # 3. Also include PA-09 / PA-10 from strategy-pool if present
+    for item in pool_items or ():
+        sid = item.get('id')
+        if not sid or sid in seen_ids:
+            continue
+        seen_ids.add(sid)
+        st = pa_status_label(item)
+        if st in ('运行中', '已启用待周期'):
+            healthy_count += 1
+        elif st in ('已暂停', '未启用'):
+            paused.append(strategy_display_name(sid))
+        else:
+            protected.append(f"{strategy_display_name(sid)}（{st}：{item.get('last_status') or '待核查'}）")
+
+    total = healthy_count + len(recovered) + len(protected) + len(paused)
+    summary = (
+        f'检查 {total} 套策略，正常 {healthy_count} 套，成功恢复 {len(recovered)} 套，'
+        f'仍受保护 {len(protected)} 套，主动停用 {len(paused)} 套。'
     )
-    if result.returncode != 0:
-        raise RuntimeError('V3 启动失败：' + (result.stderr or result.stdout or '请检查日志').strip())
-    return '后端8012和前端5175均已运行，未重复启动'
+    return {
+        'total': total,
+        'healthy': healthy_count,
+        'recovered': recovered,
+        'protected': protected,
+        'paused': paused,
+        'summary': summary,
+    }
+
+
+def recover():
+    """Check 8012/5175 (start only if missing), verify market/scheduler, and recover eligible strategies."""
+    active_ports = {item['port'] for item in listeners()}
+    started_note = '后端 8012 与前端 5175 均已运行（未重复启动）'
+    if not ({8012, 5175} <= active_ports):
+        launcher = ROOT / 'scripts' / 'start_lab.ps1'
+        result = subprocess.run(
+            ['powershell.exe', '-NoProfile', '-NonInteractive', '-File', str(launcher)],
+            cwd=ROOT, capture_output=True, text=True, creationflags=NO_WINDOW, timeout=120,
+        )
+        if result.returncode != 0:
+            raise RuntimeError('V3 启动失败：' + (result.stderr or result.stdout or '请检查日志').strip())
+        started_note = '缺失服务已启动，后端 8012 与前端 5175 均已就绪'
+
+    system, rows = snapshot()
+    pool_items = []
+    try:
+        pool_items = fetch('/api/v1/strategy-pool').get('items') or []
+    except Exception:
+        pool_items = []
+
+    report = summarize_and_recover_strategies(system, rows, pool_items)
+    market_line = (
+        f"行情 {system.get('feed_health', '未知')} / 报价 {system.get('quote_health', '未知')} / "
+        f"WS {system.get('websocket_recovery_state', '未知')} · 调度 {system.get('scheduler', '未知')}"
+    )
+    lines = [started_note, market_line, report['summary']]
+    if report['recovered']:
+        lines.append('成功恢复：' + '；'.join(report['recovered']))
+    if report['protected']:
+        lines.append('仍受保护：' + '；'.join(report['protected']))
+    if report['paused']:
+        lines.append('主动停用（保留原状态）：' + '、'.join(report['paused']))
+    return '\n'.join(lines)
 
 def node_label():
     # This deployment uses Binance public market data. Do not infer Binance
@@ -2568,12 +2692,25 @@ def main():
         threading.Thread(target=worker, daemon=True).start()
     def launch():
         if busy['value']: return
-        busy['value'] = True; status.set('正在检查并恢复缺失的服务…')
+        busy['value'] = True
+        status.set('正在检查系统及策略状态……')
+        status_label.configure(fg='#1d4ed8')
         def worker():
             try:
-                msg = recover(); root.after(0, lambda: messagebox.showinfo('服务检查', msg))
+                msg = recover()
+                def show_ok():
+                    headline = next((line for line in msg.splitlines() if line.startswith('检查 ')), msg.splitlines()[0])
+                    status.set(f"{headline}（{datetime.now().strftime('%H:%M:%S')}）")
+                    status_label.configure(fg='#15803d')
+                    messagebox.showinfo('一键启动 / 恢复结果', msg)
+                root.after(0, show_ok)
             except Exception as exc:
-                msg = str(exc); root.after(0, lambda: messagebox.showerror('未完成', msg))
+                msg = str(exc)
+                def show_err():
+                    status.set(f"恢复检查未完成：{msg}")
+                    status_label.configure(fg='#b42318')
+                    messagebox.showerror('未完成', msg)
+                root.after(0, show_err)
             finally:
                 busy['value'] = False; root.after(0, refresh)
         threading.Thread(target=worker, daemon=True).start()
