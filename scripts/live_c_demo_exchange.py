@@ -29,7 +29,7 @@ class DemoApiError(Exception):
 class BinanceFuturesExchange(BinanceReader):
     """Unified USD-M futures transport parameterized by execution environment."""
     def __init__(self, key, secret, *, opener=None, clock=time.time, hedge=False,
-                 base_url=DEMO_URL, environment='DEMO', allow_writes=True):
+                 base_url=DEMO_URL, environment='DEMO', allow_writes=True, allow_leverage_sync=False):
         if not key or not secret:
             raise ValueError(f'Independent {environment} credentials are required')
         if environment not in ('DEMO', 'PRODUCTION'):
@@ -42,6 +42,7 @@ class BinanceFuturesExchange(BinanceReader):
         self._base_url = base_url
         self.environment = environment
         self.allow_writes = bool(allow_writes)
+        self.allow_leverage_sync = bool(allow_leverage_sync)
         self.hedge = hedge
 
     @contextmanager
@@ -63,7 +64,11 @@ class BinanceFuturesExchange(BinanceReader):
 
     def _request(self, method, path, parameters=None, *, signed=True, clock_retry=True):
         if method != 'GET':
-            if not self.allow_writes:
+            is_leverage_write = (method == 'POST' and path == '/fapi/v1/leverage')
+            if is_leverage_write:
+                if not (self.allow_writes or self.allow_leverage_sync):
+                    raise RuntimeError(f'{self.environment}_LEVERAGE_SYNC_DISABLED')
+            elif not self.allow_writes:
                 raise RuntimeError('PRODUCTION_ORDER_DISABLED')
             if not signed or self._write_thread != get_ident():
                 raise RuntimeError(f'{self.environment}_WRITE_REQUIRES_ACCOUNT_OWNERSHIP')
@@ -294,13 +299,83 @@ class BinanceFuturesExchange(BinanceReader):
         }
 
 
+    def change_leverage(self, target_leverage: int):
+        """Invoke Binance POST /fapi/v1/leverage for BTCUSDT (requires ownership lock and sync/write permission)."""
+        from scripts.live_copy_env import MAX_COPY_LEVERAGE
+        target = int(target_leverage)
+        if not 1 <= target <= MAX_COPY_LEVERAGE:
+            raise ValueError(f'目标杠杆 {target}× 超出系统上限（1–{MAX_COPY_LEVERAGE}×）')
+        return self._request('POST', '/fapi/v1/leverage', {'symbol': SYMBOL, 'leverage': target})
+
+    def sync_leverage_safe(self, target_leverage: int, *, fixed_margin=None, budget=None):
+        """Safely synchronize BTCUSDT leverage with zero-exposure guard, account lock, and independent GET readback."""
+        from scripts.live_copy_env import MAX_COPY_LEVERAGE
+        target = int(target_leverage)
+        if not 1 <= target <= MAX_COPY_LEVERAGE:
+            raise ValueError(f'目标杠杆 {target}× 超出系统上限（1–{MAX_COPY_LEVERAGE}×）')
+        self.synchronize()
+        plan_notional = (Decimal(budget) * target) if budget is not None else Decimal('1000')
+        allowed_levs, exchange_max = self.allowed_leverage_range(notional=plan_notional)
+        if target not in allowed_levs:
+            raise ValueError(f'目标杠杆 {target}× 超出当前交易所与系统允许范围（1–{allowed_levs[-1]}×）')
+        sym_cfg = self._request('GET', '/fapi/v1/symbolConfig', {'symbol': SYMBOL})
+        if len(sym_cfg) != 1 or sym_cfg[0].get('symbol') != SYMBOL:
+            raise ValueError('BTCUSDT 合约配置无法核实')
+        actual_before = int(sym_cfg[0].get('leverage'))
+        if actual_before == target:
+            return {
+                'changed': False,
+                'before': actual_before,
+                'after': actual_before,
+                'verified': True,
+                'environment': self.environment,
+                'allowed_max': allowed_levs[-1],
+                'exchange_max': exchange_max,
+            }
+        with self.order_ownership():
+            positions = self._request('GET', '/fapi/v3/positionRisk')
+            btc_pos = [p for p in positions if p.get('symbol') == SYMBOL and Decimal(p.get('positionAmt', '0')) != 0]
+            other_pos = [p for p in positions if p.get('symbol') != SYMBOL and Decimal(p.get('positionAmt', '0')) != 0]
+            orders = self._request('GET', '/fapi/v1/openOrders')
+            algos = self._request('GET', '/fapi/v1/openAlgoOrders')
+            if btc_pos or other_pos or orders or algos:
+                raise ValueError(
+                    f'账户存在未平仓位或活动挂单（BTC仓位 {len(btc_pos)} / 其他仓位 {len(other_pos)} / '
+                    f'普通单 {len(orders)} / 条件单 {len(algos)}），禁止自动调整杠杆'
+                )
+            resp = self.change_leverage(target)
+        # Independent GET readback verification (never trust POST response alone)
+        verify_cfg = self._request('GET', '/fapi/v1/symbolConfig', {'symbol': SYMBOL})
+        if len(verify_cfg) != 1 or verify_cfg[0].get('symbol') != SYMBOL:
+            raise RuntimeError('LEVERAGE_READBACK_UNVERIFIED')
+        actual_after = int(verify_cfg[0].get('leverage'))
+        if actual_after != target:
+            raise RuntimeError(f'LEVERAGE_READBACK_MISMATCH: expected {target}, actual {actual_after}')
+        preflight = self.preflight_report(planned_leverage=target, fixed_margin=fixed_margin, budget=budget)
+        return {
+            'changed': True,
+            'before': actual_before,
+            'after': actual_after,
+            'verified': True,
+            'environment': self.environment,
+            'allowed_max': allowed_levs[-1],
+            'exchange_max': exchange_max,
+            'response': resp,
+            'preflight': preflight,
+        }
+
+
 class DemoExchange(BinanceFuturesExchange):
-    def __init__(self, key, secret, *, opener=None, clock=time.time, hedge=False):
+    def __init__(self, key, secret, *, opener=None, clock=time.time, hedge=False,
+                 allow_writes=True, allow_leverage_sync=False):
         super().__init__(key, secret, opener=opener, clock=clock, hedge=hedge,
-                         base_url=DEMO_URL, environment='DEMO', allow_writes=True)
+                         base_url=DEMO_URL, environment='DEMO',
+                         allow_writes=allow_writes, allow_leverage_sync=allow_leverage_sync)
 
 
 class ProductionExchange(BinanceFuturesExchange):
-    def __init__(self, key, secret, *, opener=None, clock=time.time, hedge=False, allow_writes=False):
+    def __init__(self, key, secret, *, opener=None, clock=time.time, hedge=False,
+                 allow_writes=False, allow_leverage_sync=False):
         super().__init__(key, secret, opener=opener, clock=clock, hedge=hedge,
-                         base_url=PRODUCTION_URL, environment='PRODUCTION', allow_writes=allow_writes)
+                         base_url=PRODUCTION_URL, environment='PRODUCTION',
+                         allow_writes=allow_writes, allow_leverage_sync=allow_leverage_sync)

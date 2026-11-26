@@ -27,78 +27,136 @@ def paper_fills(path, after=None, *, strategy='C'):
         db.execute('PRAGMA query_only=ON')
         if strategy.startswith('pa-'):
             db.execute('BEGIN')
-            return pa_pool_fills(db,strategy,after)
+            return pa_pool_fills(db, strategy, after)
+        if strategy in ('PA-09', 'PA-10'):
+            db.execute('BEGIN')
+            return pa_ext_fills(db, strategy, after)
         if strategy == 'G':
             if after is None:
                 return db.execute('SELECT coalesce(max(rowid),0) FROM g_fills').fetchone()[0]
             rows = db.execute("""SELECT rowid,fill_id,g_trade_id,'MIRROR',effect,direction,
-                quantity,price,occurred_at FROM g_fills WHERE rowid>? ORDER BY rowid LIMIT 500""",(after,))
-        elif after is None:
-            return db.execute("SELECT coalesce(max(rowid),0) FROM fills WHERE agent=?",(strategy,)).fetchone()[0]
+                quantity,price,occurred_at FROM g_fills WHERE rowid>? ORDER BY rowid LIMIT 500""", (after,))
+        elif strategy == 'D':
+            if after is None:
+                return db.execute('SELECT coalesce(max(rowid),0) FROM d_fills').fetchone()[0]
+            rows = db.execute("""SELECT rowid,fill_id,trade_id,'D-COMMON-GUARD-V1',effect,'LONG',
+                quantity,price,occurred_at FROM d_fills WHERE rowid>? ORDER BY rowid LIMIT 500""", (after,))
         else:
+            agent_key = 'A' if strategy == 'E' else strategy
+            if after is None:
+                return db.execute("SELECT coalesce(max(rowid),0) FROM fills WHERE agent=?", (agent_key,)).fetchone()[0]
             rows = db.execute("""SELECT f.rowid,f.fill_id,f.trade_id,
             coalesce(f.strategy_version, (SELECT min(o.strategy_version) FROM fills o
                 WHERE o.agent=f.agent AND o.trade_id=f.trade_id AND o.position_effect='OPEN'
                 AND o.position_direction=f.position_direction AND o.rowid<f.rowid
                 HAVING count(*)=1)),f.position_effect,f.position_direction,f.quantity,f.price,f.occurred_at
-                FROM fills f WHERE f.agent=? AND f.rowid>? ORDER BY f.rowid LIMIT 500""", (strategy,after))
+                FROM fills f WHERE f.agent=? AND f.rowid>? ORDER BY f.rowid LIMIT 500""", (agent_key, after))
         fills = []
         for cursor, fid, trade, version, effect, direction, qty, price, timestamp in rows:
-            action = {'OPEN':'OPEN', 'CLOSE':'FULL_CLOSE', 'ADD':'ADD',
-                      'PARTIAL_CLOSE':'PARTIAL_CLOSE'}.get(effect)
+            action = {'OPEN': 'OPEN', 'CLOSE': 'FULL_CLOSE', 'ADD': 'ADD',
+                      'PARTIAL_CLOSE': 'PARTIAL_CLOSE'}.get(effect)
             qty, price = Decimal(str(qty)), Decimal(str(price))
             at = datetime.fromisoformat(timestamp)
             if (not all((fid, trade, version, action, at.utcoffset() is not None))
-                    or direction not in ('LONG','SHORT')
+                    or direction not in ('LONG', 'SHORT')
                     or any(not n.is_finite() or n <= 0 for n in (qty, price))):
                 raise ValueError(f'UNVERIFIED_{strategy}_FILL at row {cursor}')
             fills.append(Fill(cursor, f'{strategy}:{fid}', trade, version, action, direction, qty, price, at))
         return fills
 
 
+def pa_ext_fills(db, strategy, after):
+    """Unified fill adapter for PA-09 and PA-10 isolated extension ledgers."""
+    snap_row = db.execute('SELECT value FROM snapshot LIMIT 1').fetchone()
+    if snap_row is None:
+        raise ValueError(f'{strategy}_SNAPSHOT_MISSING')
+    if after is None:
+        return db.execute('SELECT coalesce(max(rowid),0) FROM fills').fetchone()[0]
+    rows = db.execute('SELECT rowid,id,value FROM fills WHERE rowid>? ORDER BY rowid LIMIT 500', (after,)).fetchall()
+    events = []
+    for rowid, key_id, raw in rows:
+        rec = json.loads(raw)
+        kind = rec.get('kind')
+        action = {'OPEN': 'OPEN', 'CLOSE': 'FULL_CLOSE', 'PARTIAL_CLOSE': 'PARTIAL_CLOSE'}.get(kind)
+        direction = rec.get('direction')
+        trade_id = rec.get('trade_id')
+        qty = Decimal(str(rec.get('qty', '0')))
+        price = Decimal(str(rec.get('price', '0')))
+        stamp = rec.get('at')
+        at = datetime.fromisoformat(stamp) if stamp else None
+        if (rec.get('strategy') != strategy or not action or direction not in ('LONG', 'SHORT')
+                or not trade_id or at is None or at.utcoffset() is None
+                or any(not n.is_finite() or n <= 0 for n in (qty, price))):
+            raise ValueError(f'UNVERIFIED_{strategy}_FILL at row {rowid}')
+        events.append(Fill(rowid, f'{strategy}:{key_id}', str(trade_id), f'{strategy}-V1', action, direction, qty, price, at))
+    return events
+
+
 def pa_pool_fills(db, strategy, after):
-    """Use explicit writer action keys and the pool's single-position invariant."""
+    """Use explicit writer action keys and the pool's single-position invariant.
+
+    Historical closed mismatches prior to `after` (or prior to watermark subscription)
+    do not block new subscriptions or live fills, while live position consistency
+    and all new fills (`id > after`) remain strictly validated.
+    """
     rows = db.execute("""SELECT id,version,side,qty,price,reason,idempotency_key,created_at,cycle
-        FROM fills WHERE strategy_id=? ORDER BY id""",(strategy,)).fetchall()
-    account = db.execute('SELECT position FROM accounts WHERE strategy_id=?',(strategy,)).fetchone()
+        FROM fills WHERE strategy_id=? ORDER BY id""", (strategy,)).fetchall()
+    account = db.execute('SELECT position FROM accounts WHERE strategy_id=?', (strategy,)).fetchone()
     if account is None:
         raise ValueError('PA_ACCOUNT_MISSING')
     position = json.loads(account[0]) if account[0] else None
     active = None
     events = []
-    for fid,version,side,qty,price,reason,key,stamp,cycle in rows:
-        qty,price = Decimal(qty),Decimal(price)
+    for fid, version, side, qty, price, reason, key, stamp, cycle in rows:
+        is_new = after is not None and fid > after
+        qty, price = Decimal(qty), Decimal(price)
         at = datetime.fromisoformat(stamp)
-        if (side not in ('BUY','SELL') or not version or at.utcoffset() is None
-                or any(not n.is_finite() or n <= 0 for n in (qty,price))):
-            raise ValueError(f'PA_INVALID_FILL:{fid}')
-        if reason in ('ENTRY','ENTRY_NEXT_OPEN') and key.startswith(f'{strategy}:open:'):
+        if (side not in ('BUY', 'SELL') or not version or at.utcoffset() is None
+                or any(not n.is_finite() or n <= 0 for n in (qty, price))):
+            if is_new:
+                raise ValueError(f'PA_INVALID_FILL:{fid}')
+            continue
+        if reason in ('ENTRY', 'ENTRY_NEXT_OPEN') and key.startswith(f'{strategy}:open:'):
             if active is not None:
-                raise ValueError(f'PA_OVERLAPPING_OPEN:{fid}')
-            direction = 'LONG' if side=='BUY' else 'SHORT'
+                if is_new:
+                    raise ValueError(f'PA_OVERLAPPING_OPEN:{fid}')
+            direction = 'LONG' if side == 'BUY' else 'SHORT'
             trade = f'{strategy}:open:{fid}'
-            active = (trade,direction,qty,version,cycle)
+            active = (trade, direction, qty, version, cycle)
             action = 'OPEN'
-        elif ((reason in ('STOP','TARGET','TIME') and key==f'{strategy}:close:{cycle}')
-              or (reason in ('STOP_QUOTE','TARGET_QUOTE') and key.startswith(f'{strategy}:quote-{reason.lower()}:'))):
+        elif ((reason in ('STOP', 'TARGET', 'TIME') and key == f'{strategy}:close:{cycle}')
+              or (reason in ('STOP_QUOTE', 'TARGET_QUOTE') and key.startswith(f'{strategy}:quote-{reason.lower()}:'))):
             if active is None:
-                raise ValueError(f'PA_OPEN_LINK_MISSING:{fid}')
-            trade,direction,opened_qty,opened_version,_ = active
-            if qty != opened_qty or version != opened_version or side != ('SELL' if direction=='LONG' else 'BUY'):
-                raise ValueError(f'PA_FULL_CLOSE_MISMATCH:{fid}')
-            active = None
-            action = 'FULL_CLOSE'
+                if is_new:
+                    raise ValueError(f'PA_OPEN_LINK_MISSING:{fid}')
+                continue
+            trade, direction, opened_qty, opened_version, opened_cycle = active
+            expected_side = 'SELL' if direction == 'LONG' else 'BUY'
+            if side != expected_side or qty > opened_qty or (is_new and version != opened_version):
+                if is_new:
+                    raise ValueError(f'PA_FULL_CLOSE_MISMATCH:{fid}')
+                # Legacy closed history row: close out historical active state so newer fills remain clean
+                active = None
+                continue
+            if qty < opened_qty:
+                active = (trade, direction, opened_qty - qty, opened_version, opened_cycle)
+                action = 'PARTIAL_CLOSE'
+            else:
+                active = None
+                action = 'FULL_CLOSE'
         else:
-            raise ValueError(f'PA_ACTION_UNVERIFIED:{fid}')
-        events.append(Fill(fid,f'{strategy}:{fid}',trade,version,action,direction,qty,price,at))
+            if is_new:
+                raise ValueError(f'PA_ACTION_UNVERIFIED:{fid}')
+            continue
+        events.append(Fill(fid, f'{strategy}:{fid}', trade, version, action, direction, qty, price, at))
     if active is None and position is not None or active is not None and position is None:
         raise ValueError('PA_ACCOUNT_POSITION_MISMATCH')
-    if active is not None and (position.get('direction'),Decimal(position['qty']),position.get('version'),
+    if active is not None and (position.get('direction'), Decimal(position['qty']), position.get('version'),
             datetime.fromisoformat(position['opened_cycle'])) != (
-                active[1],active[2],active[3],datetime.fromisoformat(active[4])):
+                active[1], active[2], active[3], datetime.fromisoformat(active[4])):
         raise ValueError('PA_ACCOUNT_POSITION_MISMATCH')
     if after is None:
-        return events[-1].cursor if events else 0
+        return rows[-1][0] if rows else 0
     return [event for event in events if event.cursor > after][:500]
 
 

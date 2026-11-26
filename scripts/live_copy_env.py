@@ -101,14 +101,15 @@ def load_credentials(environment=DEMO_ENV, *, account_id=None, base_root=None, p
     raise ValueError(f'UNSUPPORTED_COPY_ENVIRONMENT:{environment}')
 
 
-def make_exchange(environment=DEMO_ENV, *, account_id=None, allow_writes=False, base_root=None, prod_config_path=None):
+def make_exchange(environment=DEMO_ENV, *, account_id=None, allow_writes=False, allow_leverage_sync=False,
+                  base_root=None, prod_config_path=None):
     from scripts.live_c_demo_exchange import DemoExchange, ProductionExchange
     key, secret, label, resolved_id = load_credentials(
         environment, account_id=account_id, base_root=base_root, prod_config_path=prod_config_path
     )
     if environment == DEMO_ENV:
-        return DemoExchange(key, secret), label, resolved_id
-    return ProductionExchange(key, secret, allow_writes=bool(allow_writes)), label, resolved_id
+        return DemoExchange(key, secret, allow_writes=bool(allow_writes), allow_leverage_sync=bool(allow_leverage_sync)), label, resolved_id
+    return ProductionExchange(key, secret, allow_writes=bool(allow_writes), allow_leverage_sync=bool(allow_leverage_sync)), label, resolved_id
 
 
 def config_ledger_dir(environment, cid, config, all_configs=None, *, base_root=None) -> Path:
@@ -132,6 +133,7 @@ def copy_config_payload(source_config, *, target_environment, new_cid, created_a
         'fixed': str(source_config.get('fixed', '20')),
         'budget': str(source_config.get('budget', '100')),
         'leverage': str(source_config.get('leverage', '5')),
+        'auto_sync_leverage': str(source_config.get('auto_sync_leverage', '1')),
         'stop': str(source_config.get('stop', '')),
         'tp': str(source_config.get('tp', '')),
         'emergency': '',

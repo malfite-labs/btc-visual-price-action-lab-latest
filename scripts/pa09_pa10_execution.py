@@ -81,14 +81,19 @@ class CandidateLedger:
         with self._transaction() as db:
             return [json.loads(x) for x, in db.execute('select value from fills order by rowid')]
 
-    def _fill(self, db, state, event, kind, price, fee, qty, reason, net=None):
+    def _fill(self, db, state, event, kind, price, fee, qty, reason, net=None, *, direction=None, trade_id=None):
         record=dict(strategy=self.sid,at=event.isoformat(),kind=kind,reason=reason,
                     price=str(price),fee=str(fee),qty=str(qty),net=None if net is None else str(net))
+        if direction is not None:
+            record['direction']=direction
+        if trade_id is not None:
+            record['trade_id']=trade_id
         db.execute('insert into fills values (?,?)',(kind+':'+event.isoformat(),json.dumps(record)))
 
     def _settle(self, db, state, event, outcome, reason):
         pos=state['position']
-        self._fill(db,state,event,'CLOSE',outcome['price'],outcome['fee'],pos['qty'],reason,outcome['net'])
+        self._fill(db,state,event,'CLOSE',outcome['price'],outcome['fee'],pos['qty'],reason,outcome['net'],
+                   direction=pos.get('direction'),trade_id=f"{self.sid}:{pos.get('opened_cycle')}")
         state['cash']=str(D(state['cash'])+outcome['gross']-outcome['fee'])
         state['position']=None
 
@@ -185,7 +190,8 @@ class CandidateLedger:
             return 'ENTRY_REJECTED'
         if not allowed():
             return 'ENTRY_BLOCKED'
-        self._fill(db,st,stamp,'OPEN',pos['entry'],fee,pos['qty'],'ENTRY_NEXT_OPEN')
+        self._fill(db,st,stamp,'OPEN',pos['entry'],fee,pos['qty'],'ENTRY_NEXT_OPEN',
+                   direction=pos.get('direction'),trade_id=f"{self.sid}:{pos.get('opened_cycle')}")
         st.update(position=pos,cash=str(D(st['cash'])-fee))
         return 'OPEN'
 

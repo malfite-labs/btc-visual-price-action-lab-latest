@@ -2463,3 +2463,14 @@ C自然跟单排查：游标78到91读取10笔C，真实Demo五单，仍空头0.
   2. **G 策略**：`backend/g_mirror.py` 在 `_emergency_close` 完成后将正常的 `MIRROR_RISK_EXIT` 写入 `error` 列，导致 `local_dashboard.py` 将空仓且已进入 `WAIT_FOR_C_NEXT_OPEN` 的 G 误标为 `异常`。现已修正 `backend/g_mirror.py` 不再写入错误列，`local_dashboard.py` 识别空仓已完成的 `MIRROR_RISK_EXIT` 并恢复显示 `等待C开仓`。
   3. **一键启动／恢复**：原 `recover()` 仅调用 `start_lab.ps1` 并返回固定文案，未检查 16 套策略状态。现升级为：先检查 8012/5175（已运行不重复启动）→ 核验行情/调度 → 逐项检查全部 16 套策略并安全清除可恢复的良性状态（不自动解除用户暂停、不强清真实保护锁）→ 实时状态栏反馈与弹窗统计结果。
 - 实测结果：`tests/test_one_click_recovery.py` + `tests/test_dual_env_copy.py` 17/17 PASS；正式执行 `recover()` 返回 `检查 16 套策略，正常 15 套，成功恢复 1 套，仍受保护 0 套，主动停用 0 套`；Demo（PID 11456）与正式实盘（STOPPED）均未受影响。
+
+
+## 2026-11-26｜V3.1 全部16套策略统一跟单适配与Binance杠杆自动同步
+- **全部16套策略统一适配 (`STRATEGY_ADAPTER_PASS = 16/16`)**：
+  - `scripts/live_copy_v2.py`：统一 `paper_fills()` 接入 `D` (`d_fills`)、`E` (`e/formal.sqlite3` `agent='A'`)、`PA-09`/`PA-10` (`pa_ext_fills`)；修复 `pa_pool_fills()` 使 PA-03/PA-07/PA-08 的旧历史已平仓记录不阻塞新订阅游标及后续有效成交，同时严格校验实时持仓及新增成交（支持开仓、部分平仓、完整平仓）。
+  - `scripts/pa09_pa10_execution.py`：在 `_fill()` 增量补充 `direction` 与 `trade_id` 关联字段，不改变任何策略交易规则与历史账本。
+  - `scripts/live_copy_service.py` / `scripts/live_copy_window.py`：放开 16 套策略统一适配校验与账本路径解析，新建跟单界面「待适配」归零（16/16 可启用/已有配置）。
+- **Binance API 自动同步杠杆 (`POST /fapi/v1/leverage`)**：
+  - `scripts/live_c_demo_exchange.py` / `scripts/live_copy_env.py`：新增与 `allow_writes` 严格隔离的 `allow_leverage_sync` 权限开关、`change_leverage()` 及 `sync_leverage_safe()`（强制账户锁、零敞口核查、单次 POST、独立 `GET /fapi/v1/symbolConfig` 回读校验与重新预检；一致时不发 POST）。
+  - `scripts/live_copy_window.py`：新建跟单页新增「启用跟单时自动同步币安杠杆」复选框与实时动态提示，确认页展示自动同步状态；启用确认后及排队切换原仓平仓对账完成后执行安全杠杆同步，保存/切页/取消排队绝不改动交易所杠杆。
+- **验证**：`tests/test_v31_adapters_and_leverage_sync.py` + `tests/test_dual_env_copy.py` 共 27 项隔离测试全部通过；Demo `PID 11456`（5×）与正式实盘（STOPPED，10×）及 16 套纸盘运行态均未受干扰。

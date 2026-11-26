@@ -333,25 +333,34 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
             return rows[sid]
         return strategy_display_name(sid)
 
-    def adapter_status(sid):
-        if sid in supported:
-            return True, ''
+    def strategy_source_path(sid):
         if sid.startswith('pa-'):
-            from scripts.live_copy_v2 import paper_fills
-            try:
-                if paper_fills(project / 'data/strategy-pool.sqlite3', strategy=sid):
-                    return True, ''
-                if sid == 'pa-trend-false-break-reclaim':
-                    return True, '统一流水适配已隔离验证，尚无自然成交'
-                return False, '正式账本暂无可核实成交'
-            except (ValueError, ArithmeticError, KeyError, OSError, sqlite3.Error) as exc:
-                if str(exc).startswith('PA_FULL_CLOSE_MISMATCH:'):
-                    number = str(exc).split(':', 1)[1]
-                    return False, f'第 {number} 条平仓的买卖方向、数量或版本与开仓不符'
-                return False, f'成交关联未核实（{exc}）'
+            return project / 'data' / 'strategy-pool.sqlite3'
         if sid in ('PA-09', 'PA-10'):
-            return False, '独立账本成交缺少方向及生命周期关联；平仓后持仓快照无法还原历史方向'
-        return False, '尚无经过验证的开平仓及交易关联适配器'
+            return project / 'data' / 'pa-v1-extensions' / f'{sid}.sqlite3'
+        if sid == 'G':
+            return project / 'data' / 'g' / 'mirror.sqlite3'
+        if sid == 'D':
+            return project / 'data' / 'd' / 'trading.sqlite3'
+        if sid == 'E':
+            return project / 'data' / 'e' / 'formal.sqlite3'
+        return project / 'data' / 'paper.sqlite3'
+
+    def adapter_status(sid):
+        from scripts.live_copy_v2 import paper_fills
+        source = strategy_source_path(sid)
+        if not source.is_file():
+            return False, '正式纸盘账本文件不存在'
+        try:
+            watermark = paper_fills(source, strategy=sid)
+            if isinstance(watermark, int) and watermark >= 0:
+                return True, ''
+            return False, '成交游标核验异常'
+        except (ValueError, ArithmeticError, KeyError, OSError, sqlite3.Error) as exc:
+            if str(exc).startswith('PA_FULL_CLOSE_MISMATCH:'):
+                number = str(exc).split(':', 1)[1]
+                return False, f'第 {number} 条平仓的买卖方向、数量或版本与开仓不符'
+            return False, f'成交关联未核实（{exc}）'
 
     def env_defaults(env_code):
         p = env_paths(env_code, base_root=(env_roots or {}).get(env_code))
@@ -364,6 +373,7 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
             'fixed': '20',
             'budget': '100',
             'leverage': '5',
+            'auto_sync_leverage': '1',
             'stop': '',
             'tp': '',
             'emergency': '',
@@ -796,18 +806,46 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
             return '等待切换' if pending['state'] != 'BLOCKED' else '切换待核对'
         return '已保存'
 
-    def preflight_env(env_code, config, *, allow_existing_exposure=False):
+    def preflight_env(env_code, config, *, allow_existing_exposure=False, allow_leverage_sync_mismatch=False):
         exchange, _, _ = make_exchange(env_code, account_id=config.get('account_id') or None,
-                                       allow_writes=False, base_root=(env_roots or {}).get(env_code))
+                                       allow_writes=False, allow_leverage_sync=False,
+                                       base_root=(env_roots or {}).get(env_code))
         report = exchange.preflight_report(
             planned_leverage=int(config['leverage']),
             fixed_margin=Decimal(config['fixed']),
             budget=Decimal(config['budget']),
             allow_existing_exposure=allow_existing_exposure,
         )
-        if report['status'] != 'PASS':
-            raise ValueError('；'.join(report['blockers']))
+        blockers = list(report['blockers'])
+        will_sync = False
+        if (
+            allow_leverage_sync_mismatch
+            and config.get('auto_sync_leverage') == '1'
+            and not allow_existing_exposure
+            and int(config['leverage']) in report.get('allowed_leverages', ())
+            and report['actual_leverage'] != int(config['leverage'])
+            and report['btc_positions'] == 0
+            and report['other_positions'] == 0
+            and report['open_orders'] == 0
+            and report['open_algos'] == 0
+        ):
+            blockers = [b for b in blockers if '当前实际杠杆' not in b]
+            will_sync = True
+        if blockers:
+            raise ValueError('；'.join(blockers))
+        report['will_sync_leverage'] = will_sync
         return report['account_fingerprint'], report
+
+    def sync_leverage_env(env_code, config):
+        """Explicitly synchronize Binance BTCUSDT leverage after user confirmation (order writes remain disabled)."""
+        exchange, _, _ = make_exchange(env_code, account_id=config.get('account_id') or None,
+                                       allow_writes=False, allow_leverage_sync=True,
+                                       base_root=(env_roots or {}).get(env_code))
+        return exchange.sync_leverage_safe(
+            int(config['leverage']),
+            fixed_margin=Decimal(config['fixed']),
+            budget=Decimal(config['budget']),
+        )
 
     def current_env_identity(env_code, config=None):
         exchange, _, _ = make_exchange(env_code, account_id=(config or {}).get('account_id') or None,
@@ -963,6 +1001,10 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
                     dialog.destroy()
 
                 replacement = f"\n将替换已排队的 {display_strategy(prior['target']['strategy'])} 配置。" if prior else ''
+                sync_queue_note = (
+                    f"\n原仓平仓并对账完成后，系统将自动同步币安BTCUSDT杠杆至 {config['leverage']}倍 再启用新策略。"
+                    if config.get('auto_sync_leverage') == '1' else ''
+                )
                 body_box = tk.Frame(dialog, bg=PALETTE['card_bg'], padx=20, pady=16)
                 body_box.pack(fill='both', expand=True)
                 tk.Label(body_box, text='确认安全切换跟单策略', bg=PALETTE['card_bg'], fg=PALETTE['text'],
@@ -980,7 +1022,7 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
                         f"交易环境：{c.paths.env_title}（账户校验标识 {identity}）\n"
                         f"参数摘要：{details_text}\n\n"
                         f"确认后将安全切换跟单策略：暂停原策略新增开仓，继续管理已有关联仓位。"
-                        f"如当前仍有持仓，将在平仓及对账完成后自动启用新策略。{replacement}"
+                        f"如当前仍有持仓，将在平仓及对账完成后自动启用新策略。{sync_queue_note}{replacement}"
                     ),
                 ).pack(anchor='w')
                 btn_row = tk.Frame(dialog, bg=PALETTE['bg'], padx=16, pady=10)
@@ -1054,6 +1096,30 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
         original = ownership(previous)
 
         def launch(confirmed):
+            report = confirmed[1]
+            if report.get('will_sync_leverage'):
+                c.status_note.set(f"正在同步币安杠杆（{report['actual_leverage']}倍 → {config['leverage']}倍）……")
+                sync_future = pool.submit(sync_leverage_env, env_code, config)
+
+                def after_sync():
+                    if not root.winfo_exists():
+                        return
+                    if not sync_future.done():
+                        root.after(150, after_sync)
+                        return
+                    try:
+                        res = sync_future.result()
+                        c.actual_leverage = res['after']
+                        c.status_note.set(f"币安杠杆已同步：{res['after']}倍。")
+                        _spawn_verified()
+                    except Exception as exc:
+                        finish(f'币安杠杆同步失败，已中止启用（未下任何订单）：{exc}')
+
+                root.after(150, after_sync)
+                return
+            _spawn_verified()
+
+        def _spawn_verified():
             try:
                 row = running(env_code)
                 if row['state'] != 'STOPPED' or service_pid_alive(row.get('pid')):
@@ -1113,7 +1179,11 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
             else:
                 root.after(150, lambda: wait_for_stop(deadline, confirmed))
 
-        future = pool.submit(preflight_env, env_code, config, allow_existing_exposure=allow_existing_exposure)
+        future = pool.submit(
+            preflight_env, env_code, config,
+            allow_existing_exposure=allow_existing_exposure,
+            allow_leverage_sync_mismatch=(config.get('auto_sync_leverage') == '1'),
+        )
 
         def checked():
             if not root.winfo_exists():
@@ -1123,14 +1193,21 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
                 return
             try:
                 confirmed = future.result()
-                account_fp = confirmed[0]
+                account_fp, report = confirmed[0], confirmed[1]
+                c.actual_leverage = report.get('actual_leverage')
                 row = running(env_code)
                 if ownership(row) != original:
                     raise ValueError('核对期间跟单服务已更换，请重新确认。')
+                sync_notice = ''
+                if report.get('will_sync_leverage'):
+                    if env_code == PROD_ENV:
+                        sync_notice = f"\n⚠️ 真实账户杠杆同步：确认后将自动把 Binance 正式账户 BTCUSDT 杠杆从 {report['actual_leverage']}倍 调整为 {config['leverage']}倍。\n"
+                    else:
+                        sync_notice = f"\n杠杆自动同步：确认后将自动把 Binance Demo BTCUSDT 杠杆从 {report['actual_leverage']}倍 调整为 {config['leverage']}倍。\n"
                 title_txt = '明确启用 Binance 正式实盘（真实资金）' if env_code == PROD_ENV else '明确启用 Binance Demo'
                 if not messagebox.askyesno(
                     title_txt,
-                    f"账户：{config.get('account', c.paths.default_account_label)}（校验标识 {account_fp}）\n" + confirmation,
+                    f"账户：{config.get('account', c.paths.default_account_label)}（校验标识 {account_fp}）\n" + confirmation + sync_notice,
                     parent=root,
                 ):
                     finish()
@@ -1193,7 +1270,18 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
                 return
             if any(demo_ledger_busy(env_code, k) for k in c.configs):
                 return
-            c.queue_check = pool.submit(preflight_env, env_code, config)
+            def check_and_maybe_sync():
+                identity, report = preflight_env(
+                    env_code, config,
+                    allow_leverage_sync_mismatch=(config.get('auto_sync_leverage') == '1'),
+                )
+                if stopped and report.get('will_sync_leverage'):
+                    res = sync_leverage_env(env_code, config)
+                    report = res.get('preflight') or report
+                    c.actual_leverage = res['after']
+                return identity, report
+
+            c.queue_check = pool.submit(check_and_maybe_sync)
 
             def checked():
                 if not root.winfo_exists():
@@ -1303,11 +1391,7 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
                 ready, reason = adapter_status(sid)
                 if not ready:
                     raise ValueError(reason)
-                source = project / 'data' / (
-                    'strategy-pool.sqlite3' if sid.startswith('pa-')
-                    else 'g/mirror.sqlite3' if sid == 'G'
-                    else 'paper.sqlite3'
-                )
+                source = strategy_source_path(sid)
                 if not source.is_file():
                     raise ValueError('正式纸盘账本不可用。')
                 extra = []
@@ -2247,6 +2331,32 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
                                        font=('Microsoft YaHei UI', 8, 'bold'), padx=8)
             match_badge_lbl.pack(side='left')
 
+            # Auto-sync Binance leverage checkbox + dynamic status hint
+            sync_row = tk.Frame(right_card, bg=PALETTE['card_bg'])
+            sync_row.pack(fill='x', pady=(2, 2))
+            auto_sync_var = fields['auto_sync_leverage']
+            if auto_sync_var.get() not in ('0', '1'):
+                auto_sync_var.set('1')
+            sync_chk_btn = tk.Button(
+                sync_row,
+                text='☑' if auto_sync_var.get() == '1' else '☐',
+                bd=0, relief='flat', cursor='hand2',
+                bg=PALETTE['card_bg'],
+                fg=PALETTE['primary'] if auto_sync_var.get() == '1' else '#94a3b8',
+                font=('Segoe UI', 12, 'bold'),
+            )
+            sync_chk_btn.pack(side='left', padx=(0, 6))
+            sync_chk_lbl = tk.Label(
+                sync_row, text='启用跟单时自动同步币安杠杆', bg=PALETTE['card_bg'], fg=PALETTE['text'],
+                font=('Microsoft YaHei UI', 9, 'bold'), cursor='hand2',
+            )
+            sync_chk_lbl.pack(side='left')
+            sync_hint_lbl = tk.Label(
+                right_card, bg=PALETTE['card_bg'], fg=PALETTE['muted'], anchor='w', justify='left',
+                wraplength=450, font=('Microsoft YaHei UI', 8),
+            )
+            sync_hint_lbl.pack(fill='x', padx=(24, 0), pady=(0, 4))
+
             def update_leverage_preview(*_args):
                 if not preview_box.winfo_exists():
                     return
@@ -2267,15 +2377,50 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
                     preview_main.configure(text='预计每笔开仓金额：—')
                     preview_formula.configure(text=f'计算方式：请输入有效保证金 × {lev_int}倍杠杆')
                 act_l = e_ctx.actual_leverage
+                is_auto = auto_sync_var.get() == '1'
+                env_run = running(editing_env)
+                has_active_strategy = env_run.get('state') in active_states
                 if act_l is None:
                     actual_lev_lbl.configure(text='币安当前实际杠杆：暂未获取')
                     match_badge_lbl.configure(text='', fg=PALETTE['muted'])
+                    sync_hint_lbl.configure(
+                        text='启用确认时系统将实时核对币安BTCUSDT杠杆并按需自动同步。' if is_auto else '未勾选自动同步，启用前须在币安手动调整杠杆保持一致。',
+                        fg=PALETTE['muted'],
+                    )
                 elif act_l == lev_int:
                     actual_lev_lbl.configure(text=f'币安当前实际杠杆：{act_l}×')
                     match_badge_lbl.configure(text='● 参数一致', fg=PALETTE['gain'])
+                    sync_hint_lbl.configure(text='当前杠杆一致，无需调整。', fg=PALETTE['gain'])
                 else:
                     actual_lev_lbl.configure(text=f'币安当前实际杠杆：{act_l}×')
-                    match_badge_lbl.configure(text='● 需要调整币安杠杆，启用前须保持一致', fg='#c2410c')
+                    if is_auto:
+                        match_badge_lbl.configure(text='● 启用时自动同步', fg=PALETTE['primary'])
+                        if has_active_strategy:
+                            sync_hint_lbl.configure(
+                                text=f'等待原策略平仓后自动同步杠杆（{act_l}倍 → {lev_int}倍）。',
+                                fg=PALETTE['primary'],
+                            )
+                        else:
+                            sync_hint_lbl.configure(
+                                text=f'确认启用后，系统将自动把币安BTCUSDT杠杆从 {act_l}倍 调整为 {lev_int}倍。',
+                                fg=PALETTE['primary'],
+                            )
+                    else:
+                        match_badge_lbl.configure(text='● 需要调整币安杠杆，启用前须保持一致', fg='#c2410c')
+                        sync_hint_lbl.configure(
+                            text=f'未勾选自动同步，启用前须在币安手动调整BTCUSDT杠杆至 {lev_int}倍。',
+                            fg='#c2410c',
+                        )
+
+            def toggle_auto_sync(_e=None):
+                nxt = '0' if auto_sync_var.get() == '1' else '1'
+                auto_sync_var.set(nxt)
+                on = nxt == '1'
+                sync_chk_btn.configure(text='☑' if on else '☐', fg=PALETTE['primary'] if on else '#94a3b8')
+                update_leverage_preview()
+
+            sync_chk_btn.configure(command=toggle_auto_sync)
+            sync_chk_lbl.bind('<Button-1>', toggle_auto_sync)
 
             lev_cb.bind('<<ComboboxSelected>>', update_leverage_preview)
             fixed_trace_id = fields['fixed'].trace_add('write', update_leverage_preview)
@@ -2400,10 +2545,14 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
             est_notional_txt = '—'
         act_lev = e_ctx.actual_leverage
         act_lev_txt = f'{act_lev}×' if act_lev is not None else '暂未获取'
+        is_auto_sync = v.get('auto_sync_leverage', '1') == '1'
+        auto_sync_txt = '开启（启用时自动调整）' if is_auto_sync else '关闭（需手动保持一致）'
         if act_lev is None:
             lev_match_txt, lev_match_fg = '暂未获取', PALETTE['muted']
         elif act_lev == lev_int:
-            lev_match_txt, lev_match_fg = '参数一致', PALETTE['gain']
+            lev_match_txt, lev_match_fg = '参数一致（无需调整）', PALETTE['gain']
+        elif is_auto_sync:
+            lev_match_txt, lev_match_fg = f'启用后自动调整：{act_lev}倍 → {lev_int}倍', PALETTE['primary']
         else:
             lev_match_txt, lev_match_fg = '需要调整币安杠杆，启用前须保持一致', '#c2410c'
 
@@ -2416,6 +2565,7 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
             ('固定开仓杠杆', f"{lev_int}×"),
             ('预计每笔开仓金额', est_notional_txt),
             ('币安当前实际杠杆', act_lev_txt),
+            ('自动同步币安杠杆', auto_sync_txt),
             ('杠杆匹配状态', lev_match_txt),
             ('交易环境', env_mode_txt),
             ('执行账户', v.get('account', e_ctx.paths.default_account_label)),

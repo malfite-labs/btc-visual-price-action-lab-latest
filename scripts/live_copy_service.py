@@ -21,7 +21,7 @@ class DryFollower:
         if self.ledger == self.source or not 0 < fixed <= budget:
             raise ValueError('INVALID_DRY_RUN_CONFIGURATION')
         self.fixed, self.budget = fixed, budget
-        if strategy not in ('A','B','C','G') and not strategy.startswith('pa-'):
+        if strategy not in ('A', 'B', 'C', 'D', 'E', 'G', 'PA-09', 'PA-10') and not strategy.startswith('pa-'):
             raise ValueError('FILL_ADAPTER_UNVERIFIED')
         self.strategy = strategy
         with self.connect() as db, db:
@@ -362,9 +362,6 @@ def demo_run(args, parser):
     from contextlib import ExitStack
     with ExitStack() as ownership:
         alias = demo_read_retry(lambda _: ownership.enter_context(exchange.order_ownership()),publish)
-        if (args.strategy.startswith('pa-') and not paper_fills(args.source,strategy=args.strategy)
-                and args.strategy!='pa-trend-false-break-reclaim'):
-            raise RuntimeError('PA_ADAPTER_HAS_NO_VERIFIED_FILLS')
         if not ledger.exists() and any(demo_read_retry(lambda _: exchange.exposure(),publish)):
             raise RuntimeError('UNASSOCIATED_EXPOSURE')
         follower = DryFollower(args.source,ledger,args.fixed,args.budget,strategy=args.strategy)
