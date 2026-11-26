@@ -388,7 +388,44 @@ def console_rows(decisions, pa_items=(), pa_error=None, g_status=None, g_error=N
                      'cycle_health': '事件驱动', 'sync_at': cycle_label(g_status.get('last_cycle')),
                      'enabled': bool(g_status.get('enabled')), 'raw': g_status, 'category': '镜像策略'}
     ordered = ('A', 'B', 'C', 'D', 'E', 'G', *PA_STRATEGY_IDS)
-    return {key: rows[key] for key in ordered if key in rows}
+    result = {key: rows[key] for key in ordered if key in rows}
+    if not pa_error:
+        position_labels = {
+            'FLAT': '空仓', 'LONG': '做多', 'SHORT': '做空',
+            'PENDING_LONG': '待开多', 'PENDING_SHORT': '待开空',
+            'UNKNOWN': '状态未知',
+        }
+        for item in pa_items:
+            sid = item.get('id')
+            if not sid or sid in result or item.get('archived_at'):
+                continue
+            label = pa_status_label(item)
+            direction = item.get('position_direction') or 'UNKNOWN'
+            enabled = bool(item.get('enabled'))
+            dyn_row = {
+                'id': sid, 'strategy_id': sid,
+                'name': item.get('name') or strategy_display_name(sid),
+                'status_label': label,
+                'control_label': '暂停' if enabled else '启动',
+                'control': item.get('status'),
+                'state': position_labels.get(direction, direction),
+                'amount': money_label(item.get('position_amount') if direction not in ('FLAT', 'PENDING_LONG', 'PENDING_SHORT') else '0'),
+                'leverage': leverage_label(item.get('leverage'), direction),
+                'equity': money_label(item.get('equity')), 'realized': money_label(item.get('realized')),
+                'unrealized': money_label(item.get('unrealized')), 'fees': money_label(item.get('fees')),
+                'action': item.get('last_action') or item.get('action') or 'WAIT',
+                'cycle': cycle_label(item.get('last_cycle')),
+                'enabled': enabled, 'raw': item, 'is_pool_strategy': True,
+            }
+            if enabled and confirmed_cycle:
+                reason = str(item.get('last_status') or '')
+                dyn_row['cycle_health'] = cycle_health(item.get('last_cycle'), confirmed_cycle, now=now, blocked='GAP' in reason)
+                if dyn_row['cycle_health'] == '正常' and reason.startswith('BLOCKED'):
+                    dyn_row['cycle_health'] = '等待数据'
+            elif not enabled and item.get('paused_at'):
+                dyn_row['cycle_health'] = '已暂停'
+            result[sid] = dyn_row
+    return result
 
 
 def strategy_view(row_id, row):
@@ -1505,6 +1542,32 @@ def open_strategy_pool(root):
                     item.get('equity','—'),item.get('realized','0'),item.get('unrealized','0'),item.get('fees','0'),item.get('action','—'),item.get('last_cycle') or '—'))
             info.set(f'共 {len(items)} 条策略。暂停只阻止新开仓；已有仓位仍由开仓版本管理，并继续由共享新鲜报价止损。')
         except Exception as exc:info.set('读取策略池失败：'+str(exc))
+    def download_template():
+        from scripts.strategy_template_bundle import TEMPLATE_ZIP_NAME, export_strategy_template_zip
+        dest = filedialog.asksaveasfilename(
+            parent=window,
+            title='保存 BTC V3 策略开发模板包',
+            initialfile=TEMPLATE_ZIP_NAME,
+            defaultextension='.zip',
+            filetypes=[('ZIP 策略模板包', '*.zip')],
+        )
+        if not dest:
+            return
+        try:
+            saved = export_strategy_template_zip(dest)
+            messagebox.showinfo(
+                '模板包已导出',
+                f'已导出至：\n{saved}\n\n包含文件：\n'
+                '• strategy.template.json（空白策略模板，不可直接启用）\n'
+                '• strategy.schema.json（JSON Schema 格式校验规范）\n'
+                '• 策略开发与上传规范.md（完整开发与接入规范）\n'
+                '• AI策略开发指令.md（AI Agent 策略开发标准指令）',
+                parent=window,
+            )
+            info.set(f'已导出策略开发模板包：{saved.name}')
+        except Exception as exc:
+            messagebox.showerror('导出模板失败', str(exc), parent=window)
+
     def upload_file():
         path=filedialog.askopenfilename(parent=window,title='选择版本化 JSON 策略',filetypes=[('JSON 策略','*.json')])
         if not path:return
@@ -1513,7 +1576,12 @@ def open_strategy_pool(root):
             result=api_json('/api/v1/strategy-pool/upload',method='POST',raw=raw)
             diff=result.get('version_diff') or {};changes=diff.get('changes') or []
             document=result['document']
-            lines=[f"校验：{'通过' if result.get('validation',{}).get('valid') else '失败'}",f"名称：{document['name']}",f"ID/版本：{result['strategy_id']} / {result['version']}",f"市场/周期：{document['market']} / {document['timeframe']}",f"风险设置：{json.dumps(document['risk'],ensure_ascii=False)}",f"摘要：{result['sha256']}","入场表达式："+json.dumps(document['entry'],ensure_ascii=False),"退出表达式："+json.dumps(document['exit'],ensure_ascii=False),f"状态：已登记，默认暂停",'版本差异：'+('；'.join(x['field'] for x in changes) if changes else '首个版本/无差异')]
+            exit_or_pos = (
+                "仓位/退出规则：" + json.dumps(document['position'], ensure_ascii=False)
+                if 'position' in document
+                else "退出表达式：" + json.dumps(document.get('exit'), ensure_ascii=False)
+            )
+            lines=[f"校验：{'通过' if result.get('validation',{}).get('valid') else '失败'}",f"名称：{document['name']}",f"ID/版本：{result['strategy_id']} / {result['version']}",f"市场/周期：{document['market']} / {document['timeframe']}",f"风险设置：{json.dumps(document['risk'],ensure_ascii=False)}",f"摘要：{result['sha256']}","入场表达式："+json.dumps(document['entry'],ensure_ascii=False),exit_or_pos,f"状态：已登记，默认暂停",'版本差异：'+('；'.join(x['field'] for x in changes) if changes else '首个版本/无差异')]
             messagebox.showinfo('策略文件校验', '\n'.join(lines),parent=window);refresh()
         except Exception as exc:messagebox.showerror('上传或校验失败',str(exc),parent=window)
     def backtest():
@@ -1569,6 +1637,11 @@ def open_strategy_pool(root):
             messagebox.showinfo('策略成交明细',json.dumps(items[:100],ensure_ascii=False,indent=2),parent=window)
         except Exception as exc:messagebox.showerror('读取明细失败',str(exc),parent=window)
     buttons=ttk.Frame(window);buttons.pack(fill='x',padx=8,pady=7)
+    tk.Button(
+        buttons, text='下载模板', command=download_template,
+        bg='#1d5ef0', fg='#ffffff', activebackground='#164bc4', activeforeground='#ffffff',
+        relief='flat', padx=12, pady=4, font=('Microsoft YaHei UI', 9, 'bold'), cursor='hand2',
+    ).pack(side='left', padx=(4, 6))
     ttk.Button(buttons,text='添加策略文件',command=upload_file).pack(side='left',padx=4)
     ttk.Button(buttons,text='更新策略（上传新版本）',command=upload_file).pack(side='left',padx=4)
     ttk.Button(buttons,text='查看版本差异',command=show_diff).pack(side='left',padx=4)

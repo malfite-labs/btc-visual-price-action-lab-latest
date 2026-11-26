@@ -2474,3 +2474,14 @@ C自然跟单排查：游标78到91读取10笔C，真实Demo五单，仍空头0.
   - `scripts/live_c_demo_exchange.py` / `scripts/live_copy_env.py`：新增与 `allow_writes` 严格隔离的 `allow_leverage_sync` 权限开关、`change_leverage()` 及 `sync_leverage_safe()`（强制账户锁、零敞口核查、单次 POST、独立 `GET /fapi/v1/symbolConfig` 回读校验与重新预检；一致时不发 POST）。
   - `scripts/live_copy_window.py`：新建跟单页新增「启用跟单时自动同步币安杠杆」复选框与实时动态提示，确认页展示自动同步状态；启用确认后及排队切换原仓平仓对账完成后执行安全杠杆同步，保存/切页/取消排队绝不改动交易所杠杆。
 - **验证**：`tests/test_v31_adapters_and_leverage_sync.py` + `tests/test_dual_env_copy.py` 共 27 项隔离测试全部通过；Demo `PID 11456`（5×）与正式实盘（STOPPED，10×）及 16 套纸盘运行态均未受干扰。
+
+
+## 2026-11-26｜V3.1 策略池下载模板与统一策略开发规范
+- **策略池「下载模板」与规范包 (`scripts/strategy_template_bundle.py`, `scripts/local_dashboard.py`)**：
+  - 在「可扩展策略池」窗口底部「添加策略文件」左侧新增蓝色「下载模板」按钮，调用 Windows 文件保存对话框导出 `BTC_V3_策略开发模板.zip`，内含 `strategy.template.json`（空白占位模板，不可误启用）、`strategy.schema.json`（Draft 2020-12 机器校验规范）、`策略开发与上传规范.md` 与 `AI策略开发指令.md`。
+  - 修复策略池 `upload_file()` 对 v2 策略上传回执的 `position` 展示兼容性。
+- **上传校验与执行一致性加固 (`backend/strategy_pool.py`)**：
+  - v2 上传校验严格拦截未实现的 `crosses_above`/`crosses_below` 及未定义 `param` 参数引用；修复 `StrategyPool.cycle()` 空头周期平仓方向为 `BUY`（与报价退出、回测及统一 `paper_fills()` 保持一致）。
+- **动态注册与统一跟单适配 (`scripts/local_dashboard.py`, `scripts/live_copy_v2.py`, `scripts/live_copy_service.py`, `scripts/live_copy_window.py`)**：
+  - 新上传至策略池的自定义 ID 策略自动进入策略池、纸盘控制台及实盘跟单策略选择器，并直接复用 `paper_fills()` 统一成交触发器与定额跟单引擎。
+- **验证**：`tests/test_strategy_template_and_pool.py` + `tests/test_v31_adapters_and_leverage_sync.py` + `tests/test_dual_env_copy.py` 共 31 项隔离测试全部通过；正式 16 套策略、Demo（PID 15964）及正式实盘（STOPPED）运行态完全不受影响。

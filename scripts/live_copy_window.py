@@ -334,8 +334,6 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
         return strategy_display_name(sid)
 
     def strategy_source_path(sid):
-        if sid.startswith('pa-'):
-            return project / 'data' / 'strategy-pool.sqlite3'
         if sid in ('PA-09', 'PA-10'):
             return project / 'data' / 'pa-v1-extensions' / f'{sid}.sqlite3'
         if sid == 'G':
@@ -344,7 +342,9 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
             return project / 'data' / 'd' / 'trading.sqlite3'
         if sid == 'E':
             return project / 'data' / 'e' / 'formal.sqlite3'
-        return project / 'data' / 'paper.sqlite3'
+        if sid in ('A', 'B', 'C'):
+            return project / 'data' / 'paper.sqlite3'
+        return project / 'data' / 'strategy-pool.sqlite3'
 
     def adapter_status(sid):
         from scripts.live_copy_v2 import paper_fills

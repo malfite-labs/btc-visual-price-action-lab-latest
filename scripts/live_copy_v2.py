@@ -25,7 +25,7 @@ def paper_fills(path, after=None, *, strategy='C'):
     """Without a cursor, return the current watermark for a new subscription."""
     with closing(sqlite3.connect(Path(path).resolve().as_uri() + '?mode=ro', uri=True)) as db:
         db.execute('PRAGMA query_only=ON')
-        if strategy.startswith('pa-'):
+        if strategy not in ('A', 'B', 'C', 'D', 'E', 'G', 'PA-09', 'PA-10'):
             db.execute('BEGIN')
             return pa_pool_fills(db, strategy, after)
         if strategy in ('PA-09', 'PA-10'):

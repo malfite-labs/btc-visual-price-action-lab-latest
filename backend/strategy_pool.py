@@ -17,7 +17,7 @@ FORMAT = 'btc-lab-declarative-strategy/v1'
 FORMAT_V2 = 'btc-lab-declarative-strategy/v2'
 MAX_BYTES, MAX_DEPTH, MAX_NODES, MAX_LOOKBACK = 64_000, 12, 256, 200
 OPS_V1 = {'and','or','not','gt','gte','lt','lte','eq','crosses_above','crosses_below','sma','ema','rsi','close','volume','param'}
-OPS_V2 = OPS_V1 | {'open','high','low','atr','highest_high','lowest_low','body_fraction'}
+OPS_V2 = (OPS_V1 - {'crosses_above', 'crosses_below'}) | {'open','high','low','atr','highest_high','lowest_low','body_fraction'}
 FIELDS_V1 = {'format','strategy_id','version','name','market','timeframe','description','parameters','risk','entry','exit'}
 FIELDS_V2 = FIELDS_V1 - {'exit'} | {'position'}
 
@@ -38,7 +38,7 @@ def _finite(x):
         raise StrategyValidationError('数值必须为有限数字')
     return Decimal(str(x))
 
-def _walk(node, depth=0, count=None, version=1):
+def _walk(node, depth=0, count=None, version=1, defined_params=None):
     if count is None: count=[0]
     count[0]+=1
     if depth>MAX_DEPTH or count[0]>MAX_NODES: raise StrategyValidationError('表达式深度或节点数超限')
@@ -46,12 +46,12 @@ def _walk(node, depth=0, count=None, version=1):
         _finite(node); return
     if isinstance(node, list):
         if len(node)>MAX_NODES: raise StrategyValidationError('数组长度超限')
-        for x in node: _walk(x,depth+1,count,version)
+        for x in node: _walk(x,depth+1,count,version,defined_params)
         return
     if not isinstance(node,dict): raise StrategyValidationError('表达式必须为对象或有限数字')
     if set(node)!={'op','args'}: raise StrategyValidationError('表达式仅允许 op/args 字段')
     op,args=node['op'],node['args']
-    if op not in (OPS_V2 if version == 2 else OPS_V1) or not isinstance(args,list): raise StrategyValidationError('未知运算符或 args 格式错误')
+    if op not in (OPS_V2 if version == 2 else OPS_V1) or not isinstance(args,list): raise StrategyValidationError(f'未知或当前版本不支持的运算符：{op}')
     arity={'not':1,'gt':2,'gte':2,'lt':2,'lte':2,'eq':2,'crosses_above':2,'crosses_below':2,'sma':1,'ema':1,'rsi':1,'close':1,'volume':1,'param':1}
     if version == 2:
         arity.update({'open':1,'high':1,'low':1,'atr':(1,2),'highest_high':2,'lowest_low':2,'body_fraction':1})
@@ -78,8 +78,10 @@ def _walk(node, depth=0, count=None, version=1):
     for x in args:
         if isinstance(x,str) and op=='param':
             if not x.isidentifier(): raise StrategyValidationError('参数引用名无效')
+            if defined_params is not None and x not in defined_params:
+                raise StrategyValidationError(f'参数引用未定义：{x}')
             continue
-        _walk(x,depth+1,count,version)
+        _walk(x,depth+1,count,version,defined_params)
 
 def validate_strategy(raw: bytes|str|dict):
     if isinstance(raw,bytes):
@@ -106,12 +108,13 @@ def validate_strategy(raw: bytes|str|dict):
         _finite(v)
     risk=doc['risk']
     if risk!={'initial_equity':'10000','currency':'USD_RESEARCH','max_leverage':5,'risk_fraction':'0.02'}: raise StrategyValidationError('风险设置必须使用固定研究账户：$10000、5x 上限、2% 风险')
+    defined_params=set(params.keys())
     if version == 1:
-        _walk(doc['entry'],version=1);_walk(doc['exit'],version=1)
+        _walk(doc['entry'],version=1,defined_params=defined_params);_walk(doc['exit'],version=1,defined_params=defined_params)
     else:
         entry=doc['entry']
         if not isinstance(entry,dict) or set(entry)!={'long','short'}: raise StrategyValidationError('v2 entry 必须包含 long 和 short 条件')
-        _walk(entry['long'],version=2);_walk(entry['short'],version=2)
+        _walk(entry['long'],version=2,defined_params=defined_params);_walk(entry['short'],version=2,defined_params=defined_params)
         _validate_v2_position(doc['position'])
     encoded=json.dumps(doc,sort_keys=True,separators=(',',':'),ensure_ascii=False,allow_nan=False).encode()
     return doc,hashlib.sha256(encoded).hexdigest()
@@ -744,7 +747,8 @@ class StrategyPool:
                         closed=self._close_position(pos,doc,checked,Decimal(pos.get('fee_rate',fee_rate)),Decimal(pos.get('slippage_rate',slippage)))
                         if closed:
                             idem=f'{sid}:close:{key}'
-                            cursor=c.execute('insert or ignore into fills(strategy_id,version,cycle,side,qty,price,fee,slippage,reason,idempotency_key,created_at) values(?,?,?,?,?,?,?,?,?,?,?)',(sid,version,key,'SELL',pos['qty'],str(closed['price']),str(closed['fee']),str(closed['slippage']),closed['reason'],idem,datetime.now(timezone.utc).isoformat()))
+                            close_side='SELL' if pos.get('direction','LONG')=='LONG' else 'BUY'
+                            cursor=c.execute('insert or ignore into fills(strategy_id,version,cycle,side,qty,price,fee,slippage,reason,idempotency_key,created_at) values(?,?,?,?,?,?,?,?,?,?,?)',(sid,version,key,close_side,pos['qty'],str(closed['price']),str(closed['fee']),str(closed['slippage']),closed['reason'],idem,datetime.now(timezone.utc).isoformat()))
                             if cursor.rowcount!=1:raise StrategyValidationError('平仓订单幂等冲突')
                             c.execute('update accounts set cash=?,position=NULL,realized=?,last_cycle=?,last_status=?,last_action=? where strategy_id=?',(str(Decimal(strategy['cash'])+(closed['gross']-closed['fee'])),str(Decimal(strategy['realized'])+closed['net']),key,closed['reason'],'CLOSE_'+closed['reason'],sid));decision='CLOSE_'+closed['reason']
                         else:

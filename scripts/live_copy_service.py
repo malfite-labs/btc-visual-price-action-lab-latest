@@ -21,7 +21,7 @@ class DryFollower:
         if self.ledger == self.source or not 0 < fixed <= budget:
             raise ValueError('INVALID_DRY_RUN_CONFIGURATION')
         self.fixed, self.budget = fixed, budget
-        if strategy not in ('A', 'B', 'C', 'D', 'E', 'G', 'PA-09', 'PA-10') and not strategy.startswith('pa-'):
+        if not isinstance(strategy, str) or not strategy.strip():
             raise ValueError('FILL_ADAPTER_UNVERIFIED')
         self.strategy = strategy
         with self.connect() as db, db:
