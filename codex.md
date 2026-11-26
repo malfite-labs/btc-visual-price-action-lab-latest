@@ -2507,3 +2507,13 @@ C自然跟单排查：游标78到91读取10笔C，真实Demo五单，仍空头0.
   - 在实盘跟单中心底部「刷新账户」与「查看记录」之间新增蓝色描边「⚙ 配置API」按钮（Demo/正式双环境均显示，按入口自动选中对应标签）。
   - 实现 760×700 居中「配置 API」弹窗：顶部 Demo/正式双标签切换、多账户选择/新增、API Key 掩码与 Secret Key 加密隐藏（支持输入时眼睛图标临时查看）、实时只读连接检测区（连接状态/延迟/认证/权限/可用 USDT/模式杠杆/最近检测时间）、安全提示区及「测试连接」「保存配置」「清空」「取消」四按钮；同步接入新建跟单页面的执行账户下拉列表。
 - **验证**：`tests/test_api_config_ui.py` 4/4 隔离测试通过；4 张正式 Windows 窗口截图已实测核验（所有密钥均安全掩码）；Demo `PID 5532`（C 策略）与正式实盘 `PID 19844`（PA-08 策略）及 8012/5175 运行态零扰动。
+
+
+## 2026-11-26｜V3.1 启动故障根因修复与独立运行机制完善
+- **根因**：
+  1. 原维护过程在 Gemini 宿主会话下启动 `8012` 后端，导致 `8012` 依附于 Gemini Job Object；关闭 Gemini 后 `8012` 被级联终止，而 `5175` 仍独立运行。
+  2. `scripts/launch_v3.ps1` 遇到部分运行态（`API 8012: False; Web 5175: True`）时直接弹窗并 `exit 1`，未自动恢复缺失服务。
+- **修复 (`scripts/service_lifecycle.ps1`, `scripts/launch_v3.ps1`)**：
+  - `Start-V3Service` 改用 `Win32_Process.Create`（`WmiPrvSE.exe` 独立进程树）启动 `8012` 后端与 `5175` 前端，与 Gemini、Codex 或任何临时终端彻底解耦；自动读取 `HKCU:\Environment` 持久代理与 `data/d/auto-paper.json`，内置 45s/35s 健康轮询、有限重试、不健康 V3 残留进程精准清理与生命周期日志 `logs/launcher-lifecycle.log`。
+  - `launch_v3.ps1` 实现完整 5 态幂等自愈矩阵（双正常直进、仅后端停自动恢复后端、仅前端停自动恢复前端、双停顺序拉起、异常 V3 进程安全清理恢复），按实际命令行去重控制台进程且以交互会话 `Start-Process` 正常展示桌面窗口。
+- **实机验证**：T01（完整停启）、T04（仅后端停自愈）、T05（仅前端停自愈）、T06（连续 3 次点击无重复进程）、T02/T03（进程树完全挂载于 `WmiPrvSE.exe <- svchost.exe <- services.exe`，零 Gemini 父进程依赖）、T07/T08（全部 8 个 SQLite 账本 `PRAGMA quick_check = ok`，PA-08 持仓及 16+ 策略状态完整保留）、T09/T10（Demo `PID 5532` 与正式实盘 `PID 18808` 全程持续运行未受影响）。
