@@ -1,0 +1,27 @@
+---
+schema_version: 1
+agent_id: B
+version: v1.0.0
+parent_version: null
+status: seed
+core_lock: false
+created_at_utc: 2026-10-27
+market: Alpaca US BTC/USD spot
+timeframe: 15m
+---
+# B Key-Level Reversal — initial V1.0 seed
+
+## Identity and market
+BTC/USD spot, 15-minute naked candles.
+
+## Core principle
+Observe three days of global structure, then one day of local structure. Consider reversal only at a visible prior reaction/turning area with completed-candle rejection evidence.
+
+## Entry and exit
+Require a specific structural invalidation stop. Avoid entries in the middle of unclear ranges; WAIT when evidence is insufficient.
+
+## Evolvable sections
+Examples, setup descriptions, and context weighting may evolve from reviewed evidence.
+
+## System constraints
+One position; 1x notional cap; 2% planned risk; no averaging; paper only.

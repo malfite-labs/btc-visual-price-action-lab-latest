@@ -1,0 +1,36 @@
+{
+  "strategy_id": "thc-ay03-15m",
+  "source_experiment": "AY03",
+  "name": "熬鹰研究·恐慌反转代理 15M",
+  "group": "AY系列",
+  "family": "AY03",
+  "timeframe": "15m",
+  "version": "1.0.0",
+  "observation_tier": "熬鹰量化研究假设 / 前向纸盘观察",
+  "original_evidence_status": "BLOCKED_RULE_INCOMPLETE",
+  "source_config_sha256": "24e467b9bb2895ab506c8699ca2349b00603c4e0f9b8ee486dab9c354e06196f",
+  "source_metrics_sha256": "b4e96c74b7c59e22f44003f05bd938a42bf364f9d2a0c33097c542335ba8a94e",
+  "min_daily_warmup": 120,
+  "cooldown_bars": 4,
+  "max_hold_bars": 32,
+  "target_r": 2.0,
+  "parameters": {
+    "atr_n": 14,
+    "shock_atr": 3,
+    "lookback": 8,
+    "wick_ratio": 0.4,
+    "sl_buffer_atr": 0.25,
+    "tp_r": 2,
+    "max_hold_bars": 32,
+    "cooldown_bars": 4,
+    "variant": "BASELINE"
+  },
+  "risk": {
+    "currency": "USD_RESEARCH",
+    "initial_equity": "10000",
+    "risk_fraction": "0.02",
+    "max_leverage": 5,
+    "capital_model": "PAPER_10000_RISK_2PCT_5X"
+  },
+  "description": "[熬鹰量化研究假设 / 前向纸盘观察] AY03 恐慌反转代理（仅做多；8 根累计跌幅>3 ATR、下影>=40%、收盘突破前高，近 8 根低点-0.25 ATR 止损，2R 止盈，最长 32 根，4 根冷却；冻结 BASELINE；原始规则状态 BLOCKED_RULE_INCOMPLETE）。"
+}

@@ -1,0 +1,35 @@
+{
+  "strategy_id": "thc-ay04-15m",
+  "source_experiment": "AY04",
+  "name": "熬鹰研究·震荡区间反转 15M",
+  "group": "AY系列",
+  "family": "AY04",
+  "timeframe": "15m",
+  "version": "1.0.0",
+  "observation_tier": "熬鹰量化研究假设 / 前向纸盘观察",
+  "original_evidence_status": "BLOCKED_RULE_INCOMPLETE",
+  "source_config_sha256": "1c483895f6fc745579f76298a951a9701b2c332cb2b0177de02b0364c40b5903",
+  "source_metrics_sha256": "b4e96c74b7c59e22f44003f05bd938a42bf364f9d2a0c33097c542335ba8a94e",
+  "min_daily_warmup": 120,
+  "cooldown_bars": 4,
+  "max_hold_bars": 48,
+  "target_r": null,
+  "parameters": {
+    "channel_n": 48,
+    "adx_n": 14,
+    "adx_max": 20,
+    "atr_n": 14,
+    "sl_buffer_atr": 0.25,
+    "max_hold_bars": 48,
+    "cooldown_bars": 4,
+    "variant": "BASELINE"
+  },
+  "risk": {
+    "currency": "USD_RESEARCH",
+    "initial_equity": "10000",
+    "risk_fraction": "0.02",
+    "max_leverage": 5,
+    "capital_model": "PAPER_10000_RISK_2PCT_5X"
+  },
+  "description": "[熬鹰量化研究假设 / 前向纸盘观察] AY04 震荡区间反转（ADX14<20，触及 48 根前序区间边缘并收回，区间中点止盈、区间外 0.25 ATR 止损，成本后至少 1R，最长 48 根，4 根冷却；冻结 BASELINE；原始规则状态 BLOCKED_RULE_INCOMPLETE）。"
+}

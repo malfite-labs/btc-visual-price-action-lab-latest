@@ -1,0 +1,650 @@
+{
+  "description": "源自缠论中枢震荡做多思路的15m声明式研究近似版。三个连续8根历史K线区间严格重叠作为中枢代理，非严格笔/线段中枢。入场A：前后两次下探中枢下沿，后低点更低、三根收盘均值更高（背驰代理），阳线突破前高确认；入场B：向上突破中枢外包络后，三根回抽低点不回中枢且反弹确认（第三类买点代理）。只做多，下一根开盘执行；摆动ATR止损、1.5R止盈、最多48根。现有v2不支持顶背驰/第三类卖点即时退出、动态成本或分批交易，故采用公共固定退出，不声称复现原图全部交易过程。参数为未回测研究初值；公共行情保护、账本、退出和成交由系统接管。",
+  "entry": {
+    "long": {
+      "args": [
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "args": [
+                    8,
+                    12
+                  ],
+                  "op": "lowest_low"
+                },
+                {
+                  "args": [
+                    8,
+                    20
+                  ],
+                  "op": "highest_high"
+                }
+              ],
+              "op": "lt"
+            },
+            {
+              "args": [
+                {
+                  "args": [
+                    8,
+                    12
+                  ],
+                  "op": "lowest_low"
+                },
+                {
+                  "args": [
+                    8,
+                    28
+                  ],
+                  "op": "highest_high"
+                }
+              ],
+              "op": "lt"
+            },
+            {
+              "args": [
+                {
+                  "args": [
+                    8,
+                    20
+                  ],
+                  "op": "lowest_low"
+                },
+                {
+                  "args": [
+                    8,
+                    12
+                  ],
+                  "op": "highest_high"
+                }
+              ],
+              "op": "lt"
+            },
+            {
+              "args": [
+                {
+                  "args": [
+                    8,
+                    20
+                  ],
+                  "op": "lowest_low"
+                },
+                {
+                  "args": [
+                    8,
+                    28
+                  ],
+                  "op": "highest_high"
+                }
+              ],
+              "op": "lt"
+            },
+            {
+              "args": [
+                {
+                  "args": [
+                    8,
+                    28
+                  ],
+                  "op": "lowest_low"
+                },
+                {
+                  "args": [
+                    8,
+                    12
+                  ],
+                  "op": "highest_high"
+                }
+              ],
+              "op": "lt"
+            },
+            {
+              "args": [
+                {
+                  "args": [
+                    8,
+                    28
+                  ],
+                  "op": "lowest_low"
+                },
+                {
+                  "args": [
+                    8,
+                    20
+                  ],
+                  "op": "highest_high"
+                }
+              ],
+              "op": "lt"
+            },
+            {
+              "args": [
+                {
+                  "args": [
+                    8,
+                    12
+                  ],
+                  "op": "lowest_low"
+                },
+                {
+                  "args": [
+                    8,
+                    12
+                  ],
+                  "op": "highest_high"
+                }
+              ],
+              "op": "lt"
+            },
+            {
+              "args": [
+                {
+                  "args": [
+                    8,
+                    20
+                  ],
+                  "op": "lowest_low"
+                },
+                {
+                  "args": [
+                    8,
+                    20
+                  ],
+                  "op": "highest_high"
+                }
+              ],
+              "op": "lt"
+            },
+            {
+              "args": [
+                {
+                  "args": [
+                    8,
+                    28
+                  ],
+                  "op": "lowest_low"
+                },
+                {
+                  "args": [
+                    8,
+                    28
+                  ],
+                  "op": "highest_high"
+                }
+              ],
+              "op": "lt"
+            }
+          ],
+          "op": "and"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "args": [
+                    0
+                  ],
+                  "op": "close"
+                },
+                {
+                  "args": [
+                    0
+                  ],
+                  "op": "open"
+                }
+              ],
+              "op": "gt"
+            },
+            {
+              "args": [
+                {
+                  "args": [
+                    0
+                  ],
+                  "op": "close"
+                },
+                {
+                  "args": [
+                    1
+                  ],
+                  "op": "high"
+                }
+              ],
+              "op": "gt"
+            },
+            {
+              "args": [
+                {
+                  "args": [
+                    0
+                  ],
+                  "op": "low"
+                },
+                {
+                  "args": [
+                    1
+                  ],
+                  "op": "low"
+                }
+              ],
+              "op": "gt"
+            },
+            {
+              "args": [
+                {
+                  "args": [
+                    0
+                  ],
+                  "op": "body_fraction"
+                },
+                {
+                  "args": [
+                    "confirm_body_min"
+                  ],
+                  "op": "param"
+                }
+              ],
+              "op": "gte"
+            }
+          ],
+          "op": "and"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "args": [
+                    {
+                      "args": [
+                        5
+                      ],
+                      "op": "low"
+                    },
+                    {
+                      "args": [
+                        7,
+                        5
+                      ],
+                      "op": "lowest_low"
+                    }
+                  ],
+                  "op": "eq"
+                },
+                {
+                  "args": [
+                    {
+                      "args": [
+                        4
+                      ],
+                      "op": "low"
+                    },
+                    {
+                      "args": [
+                        5
+                      ],
+                      "op": "low"
+                    }
+                  ],
+                  "op": "gt"
+                },
+                {
+                  "args": [
+                    {
+                      "args": [
+                        {
+                          "args": [
+                            5
+                          ],
+                          "op": "low"
+                        },
+                        {
+                          "args": [
+                            8,
+                            12
+                          ],
+                          "op": "lowest_low"
+                        }
+                      ],
+                      "op": "lt"
+                    },
+                    {
+                      "args": [
+                        {
+                          "args": [
+                            5
+                          ],
+                          "op": "low"
+                        },
+                        {
+                          "args": [
+                            8,
+                            20
+                          ],
+                          "op": "lowest_low"
+                        }
+                      ],
+                      "op": "lt"
+                    },
+                    {
+                      "args": [
+                        {
+                          "args": [
+                            5
+                          ],
+                          "op": "low"
+                        },
+                        {
+                          "args": [
+                            8,
+                            28
+                          ],
+                          "op": "lowest_low"
+                        }
+                      ],
+                      "op": "lt"
+                    }
+                  ],
+                  "op": "or"
+                },
+                {
+                  "args": [
+                    {
+                      "args": [
+                        1
+                      ],
+                      "op": "low"
+                    },
+                    {
+                      "args": [
+                        5
+                      ],
+                      "op": "low"
+                    }
+                  ],
+                  "op": "lt"
+                },
+                {
+                  "args": [
+                    {
+                      "args": [
+                        {
+                          "args": [
+                            1
+                          ],
+                          "op": "low"
+                        },
+                        {
+                          "args": [
+                            8,
+                            12
+                          ],
+                          "op": "lowest_low"
+                        }
+                      ],
+                      "op": "lt"
+                    },
+                    {
+                      "args": [
+                        {
+                          "args": [
+                            1
+                          ],
+                          "op": "low"
+                        },
+                        {
+                          "args": [
+                            8,
+                            20
+                          ],
+                          "op": "lowest_low"
+                        }
+                      ],
+                      "op": "lt"
+                    },
+                    {
+                      "args": [
+                        {
+                          "args": [
+                            1
+                          ],
+                          "op": "low"
+                        },
+                        {
+                          "args": [
+                            8,
+                            28
+                          ],
+                          "op": "lowest_low"
+                        }
+                      ],
+                      "op": "lt"
+                    }
+                  ],
+                  "op": "or"
+                },
+                {
+                  "args": [
+                    {
+                      "args": [
+                        3,
+                        1
+                      ],
+                      "op": "sma"
+                    },
+                    {
+                      "args": [
+                        3,
+                        5
+                      ],
+                      "op": "sma"
+                    }
+                  ],
+                  "op": "gt"
+                }
+              ],
+              "op": "and"
+            },
+            {
+              "args": [
+                {
+                  "args": [
+                    {
+                      "args": [
+                        4
+                      ],
+                      "op": "close"
+                    },
+                    {
+                      "args": [
+                        8,
+                        12
+                      ],
+                      "op": "highest_high"
+                    }
+                  ],
+                  "op": "gt"
+                },
+                {
+                  "args": [
+                    {
+                      "args": [
+                        4
+                      ],
+                      "op": "close"
+                    },
+                    {
+                      "args": [
+                        8,
+                        20
+                      ],
+                      "op": "highest_high"
+                    }
+                  ],
+                  "op": "gt"
+                },
+                {
+                  "args": [
+                    {
+                      "args": [
+                        4
+                      ],
+                      "op": "close"
+                    },
+                    {
+                      "args": [
+                        8,
+                        28
+                      ],
+                      "op": "highest_high"
+                    }
+                  ],
+                  "op": "gt"
+                },
+                {
+                  "args": [
+                    {
+                      "args": [
+                        {
+                          "args": [
+                            3,
+                            1
+                          ],
+                          "op": "lowest_low"
+                        },
+                        {
+                          "args": [
+                            8,
+                            12
+                          ],
+                          "op": "highest_high"
+                        }
+                      ],
+                      "op": "gt"
+                    },
+                    {
+                      "args": [
+                        {
+                          "args": [
+                            3,
+                            1
+                          ],
+                          "op": "lowest_low"
+                        },
+                        {
+                          "args": [
+                            8,
+                            20
+                          ],
+                          "op": "highest_high"
+                        }
+                      ],
+                      "op": "gt"
+                    },
+                    {
+                      "args": [
+                        {
+                          "args": [
+                            3,
+                            1
+                          ],
+                          "op": "lowest_low"
+                        },
+                        {
+                          "args": [
+                            8,
+                            28
+                          ],
+                          "op": "highest_high"
+                        }
+                      ],
+                      "op": "gt"
+                    }
+                  ],
+                  "op": "or"
+                },
+                {
+                  "args": [
+                    {
+                      "args": [
+                        1
+                      ],
+                      "op": "low"
+                    },
+                    {
+                      "args": [
+                        2
+                      ],
+                      "op": "low"
+                    }
+                  ],
+                  "op": "lt"
+                },
+                {
+                  "args": [
+                    {
+                      "args": [
+                        1
+                      ],
+                      "op": "close"
+                    },
+                    {
+                      "args": [
+                        4
+                      ],
+                      "op": "close"
+                    }
+                  ],
+                  "op": "lt"
+                }
+              ],
+              "op": "and"
+            }
+          ],
+          "op": "or"
+        }
+      ],
+      "op": "and"
+    },
+    "short": {
+      "args": [
+        0,
+        1
+      ],
+      "op": "eq"
+    }
+  },
+  "format": "btc-lab-declarative-strategy/v2",
+  "market": "BTC/USD",
+  "name": "中枢震荡与背驰回抽（量化近似）",
+  "parameters": {
+    "confirm_body_min": 0.35
+  },
+  "position": {
+    "direction": "long",
+    "entry_timing": "next_open",
+    "max_hold_bars": 48,
+    "same_bar_priority": "stop",
+    "stop": {
+      "atr_period": 14,
+      "buffer_atr": 0.15,
+      "kind": "swing_atr",
+      "lookback": 4,
+      "max_distance_atr": 5.0,
+      "min_distance_atr": 0.5
+    },
+    "target_r": 1.5
+  },
+  "risk": {
+    "currency": "USD_RESEARCH",
+    "initial_equity": "10000",
+    "max_leverage": 5,
+    "risk_fraction": "0.02"
+  },
+  "strategy_id": "pa-chan-center-divergence",
+  "timeframe": "15m",
+  "version": "1.0.0"
+}

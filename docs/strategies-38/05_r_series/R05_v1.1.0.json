@@ -1,0 +1,51 @@
+{
+  "algorithm_baseline": {
+    "commit_sha": "2716ca374068607c3ac3b9bf5eeef2ac5e72f235",
+    "license": "MIT",
+    "repo": "https://github.com/moolish-com/td-sequential-python",
+    "version": "1.0.1"
+  },
+  "background_timeframe": null,
+  "candidate_ref": "C1_R05_PlanC_align_base",
+  "description": "1h 已收盘正式完成 TD13 候选 + 16 根 15m 反转确认 + 活跃 TDST 同向结构背书 + 0.5 ATR 止损缓冲 / 2.0R 止盈 / 32 根持仓上限。",
+  "exec_timeframe": "15m",
+  "frozen_paper_observation": true,
+  "group": "R系列",
+  "live_trading_disabled": true,
+  "market": "BTC/USD",
+  "name": "R05 · 双周期 TD13 结构背书策略 (V1.1)",
+  "observation_tier": "EXPERIMENTAL_OBSERVE",
+  "parameters": {
+    "atr_period": 14,
+    "candidate_ref": "C1_R05_PlanC_align_base",
+    "confirm_window": 16,
+    "exec_tf": "15m",
+    "max_hold_bars": 32,
+    "require_exact_td13": true,
+    "signal_tf": "1h",
+    "stop_atr_mult": 0.5,
+    "target_r": 2.0,
+    "tdst_filter": "align_level",
+    "vol_mult": 0.0
+  },
+  "position": {
+    "direction": "both",
+    "entry_timing": "next_open",
+    "max_hold_bars": 32,
+    "same_bar_priority": "stop",
+    "stop_atr_mult": 0.5,
+    "target_r": 2.0
+  },
+  "provider_symbol": "BTCUSDT",
+  "risk": {
+    "capital_model": "PAPER_10000_RISK_2PCT_5X",
+    "currency": "USD_RESEARCH",
+    "initial_equity": "10000",
+    "max_leverage": 5,
+    "risk_fraction": "0.02"
+  },
+  "signal_timeframe": "1h",
+  "source": "BINANCE_USDM_PERP",
+  "strategy_id": "R05",
+  "version": "1.1.0"
+}

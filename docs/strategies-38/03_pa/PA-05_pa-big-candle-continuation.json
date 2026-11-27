@@ -1,0 +1,223 @@
+{
+  "description": "量化假设：SMA20/60同向且20均线较5根前有利，当前实体占全幅至少0.75、收盘越过前一根最高最低价。 信号仅用已收盘K线；v2下一根开盘入场；固定信号时摆动+ATR止损、2R止盈、最长96根K线、同根止损优先。上传保持未启用；自然周期下一开盘执行待代码修复验收。",
+  "entry": {
+    "long": {
+      "args": [
+        {
+          "args": [
+            {
+              "args": [
+                20,
+                0
+              ],
+              "op": "sma"
+            },
+            {
+              "args": [
+                60,
+                0
+              ],
+              "op": "sma"
+            }
+          ],
+          "op": "gt"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                20,
+                0
+              ],
+              "op": "sma"
+            },
+            {
+              "args": [
+                20,
+                5
+              ],
+              "op": "sma"
+            }
+          ],
+          "op": "gt"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                0
+              ],
+              "op": "close"
+            },
+            {
+              "args": [
+                0
+              ],
+              "op": "open"
+            }
+          ],
+          "op": "gt"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                0
+              ],
+              "op": "body_fraction"
+            },
+            {
+              "args": [
+                "min_body"
+              ],
+              "op": "param"
+            }
+          ],
+          "op": "gte"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                0
+              ],
+              "op": "close"
+            },
+            {
+              "args": [
+                1
+              ],
+              "op": "high"
+            }
+          ],
+          "op": "gt"
+        }
+      ],
+      "op": "and"
+    },
+    "short": {
+      "args": [
+        {
+          "args": [
+            {
+              "args": [
+                20,
+                0
+              ],
+              "op": "sma"
+            },
+            {
+              "args": [
+                60,
+                0
+              ],
+              "op": "sma"
+            }
+          ],
+          "op": "lt"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                20,
+                0
+              ],
+              "op": "sma"
+            },
+            {
+              "args": [
+                20,
+                5
+              ],
+              "op": "sma"
+            }
+          ],
+          "op": "lt"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                0
+              ],
+              "op": "close"
+            },
+            {
+              "args": [
+                0
+              ],
+              "op": "open"
+            }
+          ],
+          "op": "lt"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                0
+              ],
+              "op": "body_fraction"
+            },
+            {
+              "args": [
+                "min_body"
+              ],
+              "op": "param"
+            }
+          ],
+          "op": "gte"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                0
+              ],
+              "op": "close"
+            },
+            {
+              "args": [
+                1
+              ],
+              "op": "low"
+            }
+          ],
+          "op": "lt"
+        }
+      ],
+      "op": "and"
+    }
+  },
+  "format": "btc-lab-declarative-strategy/v2",
+  "market": "BTC/USD",
+  "name": "PA 大实体K顺势推进",
+  "parameters": {
+    "min_body": 0.75
+  },
+  "position": {
+    "direction": "both",
+    "entry_timing": "next_open",
+    "max_hold_bars": 96,
+    "same_bar_priority": "stop",
+    "stop": {
+      "atr_period": 14,
+      "buffer_atr": 0.1,
+      "kind": "swing_atr",
+      "lookback": 2,
+      "max_distance_atr": 4,
+      "min_distance_atr": 0.6
+    },
+    "target_r": 2
+  },
+  "risk": {
+    "currency": "USD_RESEARCH",
+    "initial_equity": "10000",
+    "max_leverage": 5,
+    "risk_fraction": "0.02"
+  },
+  "strategy_id": "pa-big-candle-continuation",
+  "timeframe": "15m",
+  "version": "1.0.0"
+}

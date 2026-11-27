@@ -1,0 +1,40 @@
+{
+  "strategy_id": "thc-s02-1h",
+  "source_experiment": "S02_Q_BTC_1H",
+  "name": "熬鹰研究·右侧突破追击 1H",
+  "group": "S系列",
+  "family": "S02",
+  "timeframe": "1h",
+  "version": "1.0.0",
+  "observation_tier": "熬鹰量化研究假设 / 前向纸盘观察",
+  "original_evidence_status": "BLOCKED_RULE_INCOMPLETE",
+  "source_config_sha256": "4f2f2ae99c6ccaefa7d554948f41331be5998b7644e66a76cc915ce9e5818339",
+  "source_metrics_sha256": "e409f71fea02a91908b15e3e1ccfa3b9ceb1dcd3f69298236c959505f35a260c",
+  "min_daily_warmup": 200,
+  "cooldown_bars": 0,
+  "max_hold_bars": null,
+  "target_r": null,
+  "parameters": {
+    "regime_mode": "adx_below",
+    "adx_thresh": 25.0,
+    "s02_ignore_regime": true,
+    "breakout_n": 20,
+    "s02_entry_mode": "close_break_n",
+    "s02_stop_mode": "signal_bar_extreme_plus_buffer",
+    "s02_stop_buffer_atr": 0.2,
+    "s02_stop_atr_k": 1.5,
+    "s02_tp_mode": "atr_tp",
+    "s02_tp_atr_k": 3.0,
+    "use_ma120_filter": false,
+    "ma_type": "sma",
+    "cooldown_bars": 0
+  },
+  "risk": {
+    "currency": "USD_RESEARCH",
+    "initial_equity": "10000",
+    "risk_fraction": "0.02",
+    "max_leverage": 5,
+    "capital_model": "PAPER_10000_RISK_2PCT_5X"
+  },
+  "description": "[熬鹰量化研究假设 / 前向纸盘观察] S02 右侧突破跟随（1H 原周期 UTC 收盘决策；20 根前序高低点收盘突破，信号 K 极值 ±0.2 ATR 止损，3.0 ATR 止盈；原始规则状态 BLOCKED_RULE_INCOMPLETE）。"
+}

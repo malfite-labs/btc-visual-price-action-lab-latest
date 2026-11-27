@@ -1,0 +1,50 @@
+{
+  "algorithm_baseline": {
+    "commit_sha": "2716ca374068607c3ac3b9bf5eeef2ac5e72f235",
+    "license": "MIT",
+    "repo": "https://github.com/moolish-com/td-sequential-python",
+    "version": "1.0.1"
+  },
+  "background_timeframe": null,
+  "candidate_ref": "C6_R04_PlanCD_combo",
+  "description": "【重点前瞻研究候选】1h 已收盘 TD9 候选 + 16 根 15m 反转确认 + 活跃 TDST 同向结构背书（多单需 support < close，空单需 resistance > close）+ 确认成交量 >= 1.2×SMA20 + 1.5 ATR 止损缓冲 / 2.0R 止盈 / 64 根持仓上限。",
+  "exec_timeframe": "15m",
+  "frozen_paper_observation": true,
+  "group": "R系列",
+  "live_trading_disabled": true,
+  "market": "BTC/USD",
+  "name": "R04 · 双周期 TD9 结构放量策略 (V1.1 重点候选)",
+  "observation_tier": "PRIMARY_FORWARD_CANDIDATE",
+  "parameters": {
+    "atr_period": 14,
+    "candidate_ref": "C6_R04_PlanCD_combo",
+    "confirm_window": 16,
+    "exec_tf": "15m",
+    "max_hold_bars": 64,
+    "signal_tf": "1h",
+    "stop_atr_mult": 1.5,
+    "target_r": 2.0,
+    "tdst_filter": "align_level",
+    "vol_mult": 1.2
+  },
+  "position": {
+    "direction": "both",
+    "entry_timing": "next_open",
+    "max_hold_bars": 64,
+    "same_bar_priority": "stop",
+    "stop_atr_mult": 1.5,
+    "target_r": 2.0
+  },
+  "provider_symbol": "BTCUSDT",
+  "risk": {
+    "capital_model": "PAPER_10000_RISK_2PCT_5X",
+    "currency": "USD_RESEARCH",
+    "initial_equity": "10000",
+    "max_leverage": 5,
+    "risk_fraction": "0.02"
+  },
+  "signal_timeframe": "1h",
+  "source": "BINANCE_USDM_PERP",
+  "strategy_id": "R04",
+  "version": "1.1.0"
+}

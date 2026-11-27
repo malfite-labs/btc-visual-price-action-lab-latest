@@ -1,0 +1,289 @@
+{
+  "description": "量化假设：首根强阴/阳实体比至少0.6，中根小实体不超过0.25，末根反向强K实体比至少0.55且收盘超首根开盘；不要求24小时市场罕见的缺口。 信号仅用已收盘K线；v2下一根开盘入场；固定信号时摆动+ATR止损、2R止盈、最长96根K线、同根止损优先。上传保持未启用；自然周期下一开盘执行待代码修复验收。",
+  "entry": {
+    "long": {
+      "args": [
+        {
+          "args": [
+            {
+              "args": [
+                20,
+                0
+              ],
+              "op": "sma"
+            },
+            {
+              "args": [
+                60,
+                0
+              ],
+              "op": "sma"
+            }
+          ],
+          "op": "lt"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                2
+              ],
+              "op": "close"
+            },
+            {
+              "args": [
+                2
+              ],
+              "op": "open"
+            }
+          ],
+          "op": "lt"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                2
+              ],
+              "op": "body_fraction"
+            },
+            {
+              "args": [
+                "first_body"
+              ],
+              "op": "param"
+            }
+          ],
+          "op": "gte"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                1
+              ],
+              "op": "body_fraction"
+            },
+            {
+              "args": [
+                "middle_body"
+              ],
+              "op": "param"
+            }
+          ],
+          "op": "lte"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                0
+              ],
+              "op": "close"
+            },
+            {
+              "args": [
+                0
+              ],
+              "op": "open"
+            }
+          ],
+          "op": "gt"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                0
+              ],
+              "op": "body_fraction"
+            },
+            {
+              "args": [
+                "min_body"
+              ],
+              "op": "param"
+            }
+          ],
+          "op": "gte"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                0
+              ],
+              "op": "close"
+            },
+            {
+              "args": [
+                2
+              ],
+              "op": "open"
+            }
+          ],
+          "op": "gt"
+        }
+      ],
+      "op": "and"
+    },
+    "short": {
+      "args": [
+        {
+          "args": [
+            {
+              "args": [
+                20,
+                0
+              ],
+              "op": "sma"
+            },
+            {
+              "args": [
+                60,
+                0
+              ],
+              "op": "sma"
+            }
+          ],
+          "op": "gt"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                2
+              ],
+              "op": "close"
+            },
+            {
+              "args": [
+                2
+              ],
+              "op": "open"
+            }
+          ],
+          "op": "gt"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                2
+              ],
+              "op": "body_fraction"
+            },
+            {
+              "args": [
+                "first_body"
+              ],
+              "op": "param"
+            }
+          ],
+          "op": "gte"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                1
+              ],
+              "op": "body_fraction"
+            },
+            {
+              "args": [
+                "middle_body"
+              ],
+              "op": "param"
+            }
+          ],
+          "op": "lte"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                0
+              ],
+              "op": "close"
+            },
+            {
+              "args": [
+                0
+              ],
+              "op": "open"
+            }
+          ],
+          "op": "lt"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                0
+              ],
+              "op": "body_fraction"
+            },
+            {
+              "args": [
+                "min_body"
+              ],
+              "op": "param"
+            }
+          ],
+          "op": "gte"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                0
+              ],
+              "op": "close"
+            },
+            {
+              "args": [
+                2
+              ],
+              "op": "open"
+            }
+          ],
+          "op": "lt"
+        }
+      ],
+      "op": "and"
+    }
+  },
+  "format": "btc-lab-declarative-strategy/v2",
+  "market": "BTC/USD",
+  "name": "PA 无缺口三K反转",
+  "parameters": {
+    "first_body": 0.6,
+    "middle_body": 0.25,
+    "min_body": 0.55
+  },
+  "position": {
+    "direction": "both",
+    "entry_timing": "next_open",
+    "max_hold_bars": 96,
+    "same_bar_priority": "stop",
+    "stop": {
+      "atr_period": 14,
+      "buffer_atr": 0.1,
+      "kind": "swing_atr",
+      "lookback": 3,
+      "max_distance_atr": 4,
+      "min_distance_atr": 0.5
+    },
+    "target_r": 2
+  },
+  "risk": {
+    "currency": "USD_RESEARCH",
+    "initial_equity": "10000",
+    "max_leverage": 5,
+    "risk_fraction": "0.02"
+  },
+  "strategy_id": "pa-gapless-three-bar-reversal",
+  "timeframe": "15m",
+  "version": "1.0.0"
+}

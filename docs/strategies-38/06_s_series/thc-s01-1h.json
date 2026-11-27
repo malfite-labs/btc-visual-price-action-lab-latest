@@ -1,0 +1,40 @@
+{
+  "strategy_id": "thc-s01-1h",
+  "source_experiment": "S01_Q_BTC_1H",
+  "name": "熬鹰研究·区间高空低多 1H",
+  "group": "S系列",
+  "family": "S01",
+  "timeframe": "1h",
+  "version": "1.0.0",
+  "observation_tier": "熬鹰量化研究假设 / 前向纸盘观察",
+  "original_evidence_status": "BLOCKED_RULE_INCOMPLETE",
+  "source_config_sha256": "aeaedaa5cdb3514cf413fdfdb83fa85a0e3810da7dc18a23ec1bc1cefe0e9784",
+  "source_metrics_sha256": "b8ac929058093b859e48aeb0ade80714e929360f98e6a676997b539d7cdd5a77",
+  "min_daily_warmup": 200,
+  "cooldown_bars": 0,
+  "max_hold_bars": null,
+  "target_r": null,
+  "parameters": {
+    "regime_mode": "adx_below",
+    "adx_thresh": 25.0,
+    "entry_mode": "donchian_n",
+    "range_n": 48,
+    "quantile_lo": 0.1,
+    "quantile_hi": 0.9,
+    "stop_mode": "pct",
+    "stop_pct": 0.1,
+    "tp_mode": "opposite_band",
+    "use_ma120_filter": false,
+    "ma_type": "sma",
+    "exit_on_flip": false,
+    "cooldown_bars": 0
+  },
+  "risk": {
+    "currency": "USD_RESEARCH",
+    "initial_equity": "10000",
+    "risk_fraction": "0.02",
+    "max_leverage": 5,
+    "capital_model": "PAPER_10000_RISK_2PCT_5X"
+  },
+  "description": "[熬鹰量化研究假设 / 前向纸盘观察] S01 震荡边界回归（1H 原周期 UTC 收盘决策；ADX14<25 判震荡，48 根前序唐奇安上下轨反向入场，10% 止损，对侧轨道止盈；原始规则状态 BLOCKED_RULE_INCOMPLETE）。"
+}

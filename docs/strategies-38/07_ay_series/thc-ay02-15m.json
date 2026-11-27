@@ -1,0 +1,37 @@
+{
+  "strategy_id": "thc-ay02-15m",
+  "source_experiment": "AY02",
+  "name": "熬鹰研究·日线过滤与收敛突破 15M",
+  "group": "AY系列",
+  "family": "AY02",
+  "timeframe": "15m",
+  "version": "1.0.0",
+  "observation_tier": "熬鹰量化研究假设 / 前向纸盘观察",
+  "original_evidence_status": "BLOCKED_RULE_INCOMPLETE",
+  "source_config_sha256": "bdc673a3dc8a5a362abcf46b5b9c7004429a2ef86ce84eafb1fc7e2daebda4cd",
+  "source_metrics_sha256": "b4e96c74b7c59e22f44003f05bd938a42bf364f9d2a0c33097c542335ba8a94e",
+  "min_daily_warmup": 120,
+  "cooldown_bars": 4,
+  "max_hold_bars": 96,
+  "target_r": 2.0,
+  "parameters": {
+    "daily_sma": 120,
+    "channel_n": 32,
+    "atr_n": 14,
+    "compression_quantile": 0.3,
+    "compression_lookback": 192,
+    "sl_atr": 1.5,
+    "tp_r": 2,
+    "max_hold_bars": 96,
+    "cooldown_bars": 4,
+    "variant": "BASELINE"
+  },
+  "risk": {
+    "currency": "USD_RESEARCH",
+    "initial_equity": "10000",
+    "risk_fraction": "0.02",
+    "max_leverage": 5,
+    "capital_model": "PAPER_10000_RISK_2PCT_5X"
+  },
+  "description": "[熬鹰量化研究假设 / 前向纸盘观察] AY02 日线 SMA120 方向过滤 + 32 根通道宽度<=192 历史 30% 分位收敛突破，1.5 ATR 止损，2R 止盈，最长 96 根，4 根冷却（冻结 BASELINE；原始规则状态 BLOCKED_RULE_INCOMPLETE）。"
+}
