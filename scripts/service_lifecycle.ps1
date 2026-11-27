@@ -1,15 +1,27 @@
-# Shared, ownership-aware, Job-Object-decoupled lifecycle helpers for standalone BTC Paper Lab V3.
+# Shared, ownership-aware, proxy-immune, Job-Object-decoupled lifecycle helpers for standalone BTC Paper Lab V3.
 $ErrorActionPreference = 'Stop'
 $script:V3Root = Split-Path -Parent $PSScriptRoot
 $script:V3Run = Join-Path $script:V3Root '.run'
 $script:V3Logs = Join-Path $script:V3Root 'logs'
 $script:V3LifecycleLog = Join-Path $script:V3Logs 'launcher-lifecycle.log'
+$script:V3StartupStateFile = Join-Path $script:V3Run 'startup-state.json'
 
 function Write-V3LifecycleLog([string]$Message) {
   try {
     $null = New-Item -ItemType Directory -Force -Path $script:V3Logs
     $ts = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss.fff')
     Add-Content -LiteralPath $script:V3LifecycleLog -Value "[$ts] $Message" -Encoding utf8
+  } catch {}
+}
+
+function Write-V3StartupState([hashtable]$State) {
+  try {
+    $null = New-Item -ItemType Directory -Force -Path $script:V3Run
+    $State['updated_at'] = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() / 1000.0
+    $json = $State | ConvertTo-Json -Compress -Depth 4
+    $tmp = "$script:V3StartupStateFile.$PID.tmp"
+    [System.IO.File]::WriteAllText($tmp, $json, [System.Text.UTF8Encoding]::new($false))
+    Move-Item -LiteralPath $tmp -Destination $script:V3StartupStateFile -Force
   } catch {}
 }
 
@@ -25,10 +37,57 @@ function Get-V3VenvHome() {
   return ''
 }
 
+function Test-V3PortOpen([int]$Port, [int]$TimeoutMs = 120) {
+  $client = [System.Net.Sockets.TcpClient]::new()
+  try {
+    $ar = $client.BeginConnect('127.0.0.1', $Port, $null, $null)
+    if ($ar.AsyncWaitHandle.WaitOne($TimeoutMs, $false)) {
+      $client.EndConnect($ar)
+      return $true
+    }
+    return $false
+  } catch {
+    return $false
+  } finally {
+    $client.Dispose()
+  }
+}
+
+function Test-V3Health([string]$Service) {
+  $port = if ($Service -eq 'backend') { 8012 } else { 5175 }
+  if (-not (Test-V3PortOpen $port 120)) { return $false }
+  $url = if ($Service -eq 'backend') { 'http://127.0.0.1:8012/api/v1/health' } else { 'http://127.0.0.1:5175/' }
+  $resp = $null
+  try {
+    $req = [System.Net.HttpWebRequest]::Create($url)
+    # Explicitly bypass WinINET / IE / Clash proxy so local loopback checks never stall on cold boot!
+    $req.Proxy = $null
+    $req.Timeout = 1500
+    $req.ReadWriteTimeout = 1500
+    $req.KeepAlive = $false
+    $resp = $req.GetResponse()
+    if ([int]$resp.StatusCode -ne 200) { return $false }
+    if ($Service -eq 'frontend') { return $true }
+    $reader = [System.IO.StreamReader]::new($resp.GetResponseStream())
+    try {
+      $body = $reader.ReadToEnd()
+    } finally {
+      $reader.Dispose()
+    }
+    $obj = $body | ConvertFrom-Json
+    return ($obj.status -eq 'ok' -and $obj.live_trading_disabled -eq $true)
+  } catch {
+    return $false
+  } finally {
+    if ($resp) { $resp.Dispose() }
+  }
+}
+
 function Get-V3ListenerPids([int]$Port) {
+  if (-not (Test-V3PortOpen $Port 100)) { return @() }
   $found = @()
   try {
-    $found += @(Get-NetTCPConnection -State Listen -ErrorAction Stop | Where-Object { $_.LocalPort -eq $Port } |
+    $found += @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction Stop |
       ForEach-Object { [int]$_.OwningProcess })
   } catch {
     $found += @(& netstat.exe -ano -p tcp 2>$null | ForEach-Object {
@@ -65,9 +124,11 @@ function Test-V3OwnedListener([string]$Service, [int]$ProcessId) {
 }
 
 function Get-V3ConsolePids() {
+  # Fast path: only scan WMI if pythonw.exe actually exists (~5ms when none or fast filtered query)
+  $pyw = @(Get-Process -Name 'pythonw' -ErrorAction SilentlyContinue)
+  if (-not $pyw.Count) { return @() }
   $root = [IO.Path]::GetFullPath($script:V3Root).TrimEnd('\')
-  $procs = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
-    ($_.Name -match '(?i)^pythonw?\.exe$') -and
+  $procs = @(Get-CimInstance Win32_Process -Filter "Name='pythonw.exe'" -ErrorAction SilentlyContinue | Where-Object {
     ([string]$_.CommandLine -match '(?i)local_dashboard\.py') -and
     ([string]$_.CommandLine -match [regex]::Escape($root))
   })
@@ -129,9 +190,7 @@ public static class V3ConsoleSignal {
 '@
   }
   [void][V3ConsoleSignal]::FreeConsole()
-  if (-not [V3ConsoleSignal]::AttachConsole([uint32]$Listener)) {
-    throw "NO_CONSOLE"
-  }
+  if (-not [V3ConsoleSignal]::AttachConsole([uint32]$Listener)) { throw "NO_CONSOLE" }
   try {
     $ids = New-Object 'uint32[]' 32
     $count = [V3ConsoleSignal]::GetConsoleProcessList($ids,32)
@@ -140,19 +199,6 @@ public static class V3ConsoleSignal {
     if (-not [V3ConsoleSignal]::SetConsoleCtrlHandler([IntPtr]::Zero,$true)) { throw 'HANDLER_FAILED' }
     if (-not [V3ConsoleSignal]::GenerateConsoleCtrlEvent(0,0)) { throw 'CTRL_FAILED' }
   } finally { [void][V3ConsoleSignal]::FreeConsole() }
-}
-
-function Test-V3Health([string]$Service) {
-  $env:NO_PROXY = 'localhost,127.0.0.1,::1'
-  $env:no_proxy = $env:NO_PROXY
-  try {
-    if ($Service -eq 'backend') {
-      $h = Invoke-RestMethod 'http://127.0.0.1:8012/api/v1/health' -TimeoutSec 3
-      return ($h.status -eq 'ok' -and $h.live_trading_disabled -eq $true)
-    }
-    $w = Invoke-WebRequest 'http://127.0.0.1:5175/' -UseBasicParsing -TimeoutSec 3
-    return ($w.StatusCode -eq 200)
-  } catch { return $false }
 }
 
 function Stop-V3Service([string]$Service, [switch]$AllowUnhealthy) {
@@ -182,7 +228,6 @@ function Stop-V3Service([string]$Service, [switch]$AllowUnhealthy) {
     try {
       Stop-V3BackendGracefully $listener
     } catch {
-      # Detached hidden backend has no attached console; terminate verified V3 listener cleanly.
       Stop-Process -Id $listener -Force -ErrorAction SilentlyContinue
       if ($parentId -gt 0 -and (Test-V3OwnedListener 'backend' $parentId)) {
         Stop-Process -Id $parentId -Force -ErrorAction SilentlyContinue
@@ -192,12 +237,12 @@ function Stop-V3Service([string]$Service, [switch]$AllowUnhealthy) {
     Stop-Process -Id $listener -Force -ErrorAction SilentlyContinue
   }
   $deadline = (Get-Date).AddSeconds(10)
-  do { Start-Sleep -Milliseconds 250; $remaining = @(Get-V3ListenerPids $port); $stillRunning = [bool](Get-V3ProcessInfo $listener) } while (($remaining.Count -or $stillRunning) -and (Get-Date) -lt $deadline)
+  do { Start-Sleep -Milliseconds 150; $remaining = @(Get-V3ListenerPids $port); $stillRunning = [bool](Get-Process -Id $listener -ErrorAction SilentlyContinue) } while (($remaining.Count -or $stillRunning) -and (Get-Date) -lt $deadline)
   if ($remaining.Count -or $stillRunning) {
     Stop-Process -Id $listener -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Milliseconds 500
+    Start-Sleep -Milliseconds 300
     $remaining = @(Get-V3ListenerPids $port)
-    $stillRunning = [bool](Get-V3ProcessInfo $listener)
+    $stillRunning = [bool](Get-Process -Id $listener -ErrorAction SilentlyContinue)
   }
   if ($remaining.Count) { throw "V3 $Service PID $($remaining -join ',') did not release port $port." }
   if ($stillRunning) { throw "V3 $Service process $listener has not exited; do not start another instance." }
@@ -206,6 +251,49 @@ function Stop-V3Service([string]$Service, [switch]$AllowUnhealthy) {
   }
   Write-V3LifecycleLog "Stop-V3Service($Service): stopped cleanly; ledgers untouched."
   Write-Host "V3 $Service stopped; ledger files were not changed."
+}
+
+function Invoke-V3SpawnService([string]$Service, [string]$Proxy = '') {
+  $port = if ($Service -eq 'backend') { 8012 } else { 5175 }
+  if (Test-V3Health $Service) {
+    $live = @(Get-V3ListenerPids $port)
+    if ($live.Count -eq 1 -and (Test-V3OwnedListener $Service $live[0])) {
+      Set-Content -LiteralPath (Join-Path $script:V3Run "$Service.pid") -Value $live[0] -NoNewline -Encoding ascii
+      return @{ Status = 'already_running'; Pid = $live[0]; ErrLog = '' }
+    }
+  }
+  $pids = @(Get-V3ListenerPids $port)
+  if ($pids.Count) {
+    if ($pids.Count -eq 1 -and (Test-V3OwnedListener $Service $pids[0])) {
+      Write-V3LifecycleLog "Invoke-V3SpawnService($Service): cleaning unhealthy V3 PID $($pids[0]) on port $port."
+      Stop-V3Service $Service -AllowUnhealthy
+    } else {
+      throw "Port $port is occupied by non-V3 process ($($pids -join ',')); V3 $Service was not started."
+    }
+  }
+  $null = New-Item -ItemType Directory -Force -Path $script:V3Run
+  $null = New-Item -ItemType Directory -Force -Path $script:V3Logs
+  $stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssfffZ')
+  $outLog = Join-Path $script:V3Logs "$Service-$stamp.log"
+  $errLog = Join-Path $script:V3Logs "$Service-error-$stamp.log"
+
+  if ($Service -eq 'backend') {
+    $py = Join-Path $script:V3Root '.venv\Scripts\python.exe'
+    if (-not (Test-Path -LiteralPath $py)) { throw 'V3 Python environment is missing.' }
+    $dAuto = Get-V3DAutoEnabled
+    $proxyPrefix = if ($Proxy) { "set `"HTTP_PROXY=$Proxy`" && set `"HTTPS_PROXY=$Proxy`" && set `"ALL_PROXY=$Proxy`" && " } else { '' }
+    $cmdLine = "cmd.exe /d /c `"${proxyPrefix}set `"NO_PROXY=localhost,127.0.0.1,::1`" && set `"no_proxy=localhost,127.0.0.1,::1`" && set `"PAPER_AUTOMATION_ENABLED=true`" && set `"BTC_REQUIRE_STARTUP_MONITOR=true`" && set `"D_AUTO_PAPER_ENABLED=$dAuto`" && `"$py`" -m uvicorn backend.app:app --host 127.0.0.1 --port 8012 >> `"$outLog`" 2>> `"$errLog`"`""
+    $spawnPid = Start-V3DetachedCommand -CommandLine $cmdLine -WorkingDirectory $script:V3Root -ShowWindow 0
+  } else {
+    $vite = Join-Path $script:V3Root 'frontend\node_modules\vite\bin\vite.js'
+    if (-not (Test-Path -LiteralPath $vite)) { throw 'V3 frontend dependencies are missing.' }
+    $node = (Get-Command node.exe -ErrorAction Stop).Source
+    $feDir = Join-Path $script:V3Root 'frontend'
+    $cmdLine = "cmd.exe /d /c `"set `"NO_PROXY=localhost,127.0.0.1,::1`" && set `"VITE_API_BASE=http://127.0.0.1:8012/api/v1`" && `"$node`" `"$vite`" --host 127.0.0.1 --port 5175 >> `"$outLog`" 2>> `"$errLog`"`""
+    $spawnPid = Start-V3DetachedCommand -CommandLine $cmdLine -WorkingDirectory $feDir -ShowWindow 0
+  }
+  Write-V3LifecycleLog "Invoke-V3SpawnService($Service): spawned detached PID $spawnPid (errLog=$errLog)."
+  return @{ Status = 'spawned'; Pid = $spawnPid; ErrLog = $errLog }
 }
 
 function Start-V3Service([string]$Service) {
@@ -217,84 +305,33 @@ function Start-V3Service([string]$Service) {
     catch [System.Threading.AbandonedMutexException] { $held = $true }
     if (-not $held) { throw "V3 $Service startup is already in progress." }
 
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
     $port = if ($Service -eq 'backend') { 8012 } else { 5175 }
-    $pids = @(Get-V3ListenerPids $port)
-    if ($pids.Count) {
-      if ($pids.Count -eq 1 -and (Test-V3OwnedListener $Service ([int]$pids[0])) -and (Test-V3Health $Service)) {
-        Set-Content -LiteralPath (Join-Path $script:V3Run "$Service.pid") -Value $pids[0] -NoNewline -Encoding ascii
-        Write-V3LifecycleLog "Start-V3Service($Service): already healthy (PID $($pids[0]))."
-        Write-Host "V3 $Service is already running (PID $($pids[0]))."
-        return
-      }
-      if ($pids.Count -eq 1 -and (Test-V3OwnedListener $Service ([int]$pids[0]))) {
-        Write-V3LifecycleLog "Start-V3Service($Service): found unhealthy V3-owned PID $($pids[0]) on port $port; cleaning up before restart."
-        Stop-V3Service $Service -AllowUnhealthy
-      } else {
-        throw "Port $port is occupied by an unverified non-V3 process ($($pids -join ',')); V3 $Service was not started."
-      }
-    }
-    if (Test-V3Health $Service) {
-      throw "Port $port responds over HTTP, but no local Windows listener PID is visible; refusing to start a duplicate V3 $Service."
-    }
-
-    if ($Service -eq 'backend') {
-      $pyPath = Join-Path $script:V3Root '.venv\Scripts\python.exe'
-      $residual = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
-        $_.ExecutablePath -eq $pyPath -and $_.CommandLine -match '(?i)uvicorn\s+backend\.app:app.*--port\s+8012'
-      })
-      foreach ($r in $residual) {
-        Write-V3LifecycleLog "Start-V3Service(backend): stopping residual non-listening V3 backend PID $($r.ProcessId)."
-        Stop-Process -Id $r.ProcessId -Force -ErrorAction SilentlyContinue
-      }
-      if ($residual.Count) { Start-Sleep -Milliseconds 500 }
-    }
-
-    $null = New-Item -ItemType Directory -Force -Path $script:V3Run
-    $null = New-Item -ItemType Directory -Force -Path $script:V3Logs
-    $proxy = Get-V3UserProxy
+    $proxy = if ($Service -eq 'backend') { Get-V3UserProxy } else { '' }
+    $waitSec = if ($Service -eq 'backend') { 45 } else { 35 }
     $maxAttempts = 2
 
     for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
-      $stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssfffZ')
-      $outLog = Join-Path $script:V3Logs "$Service-$stamp.log"
-      $errLog = Join-Path $script:V3Logs "$Service-error-$stamp.log"
-
-      if ($Service -eq 'backend') {
-        $py = Join-Path $script:V3Root '.venv\Scripts\python.exe'
-        if (-not (Test-Path -LiteralPath $py)) { throw 'V3 Python environment is missing.' }
-        $dAuto = Get-V3DAutoEnabled
-        $proxyPrefix = if ($proxy) { "set `"HTTP_PROXY=$proxy`" && set `"HTTPS_PROXY=$proxy`" && set `"ALL_PROXY=$proxy`" && " } else { '' }
-        $cmdLine = "cmd.exe /d /c `"${proxyPrefix}set `"NO_PROXY=localhost,127.0.0.1,::1`" && set `"no_proxy=localhost,127.0.0.1,::1`" && set `"PAPER_AUTOMATION_ENABLED=true`" && set `"BTC_REQUIRE_STARTUP_MONITOR=true`" && set `"D_AUTO_PAPER_ENABLED=$dAuto`" && `"$py`" -m uvicorn backend.app:app --host 127.0.0.1 --port 8012 >> `"$outLog`" 2>> `"$errLog`"`""
-        Write-V3LifecycleLog "Start-V3Service(backend): attempt $attempt/$maxAttempts via Win32_Process.Create (detached)."
-        $spawnPid = Start-V3DetachedCommand -CommandLine $cmdLine -WorkingDirectory $script:V3Root
-        $waitSec = 45
-      } else {
-        $vite = Join-Path $script:V3Root 'frontend\node_modules\vite\bin\vite.js'
-        if (-not (Test-Path -LiteralPath $vite)) { throw 'V3 frontend dependencies are missing.' }
-        $node = (Get-Command node.exe -ErrorAction Stop).Source
-        $feDir = Join-Path $script:V3Root 'frontend'
-        $cmdLine = "cmd.exe /d /c `"set `"NO_PROXY=localhost,127.0.0.1,::1`" && set `"VITE_API_BASE=http://127.0.0.1:8012/api/v1`" && `"$node`" `"$vite`" --host 127.0.0.1 --port 5175 >> `"$outLog`" 2>> `"$errLog`"`""
-        Write-V3LifecycleLog "Start-V3Service(frontend): attempt $attempt/$maxAttempts via Win32_Process.Create (detached)."
-        $spawnPid = Start-V3DetachedCommand -CommandLine $cmdLine -WorkingDirectory $feDir
-        $waitSec = 35
-      }
-
-      $ok = $false
-      for ($i = 0; $i -lt $waitSec; $i++) {
-        if (Test-V3Health $Service) { $ok = $true; break }
-        Start-Sleep -Seconds 1
-      }
-      if ($ok) {
-        $livePids = @(Get-V3ListenerPids $port)
-        $recordedPid = if ($livePids.Count -eq 1) { $livePids[0] } else { $spawnPid }
-        Set-Content -LiteralPath (Join-Path $script:V3Run "$Service.pid") -Value $recordedPid -NoNewline -Encoding ascii
-        Write-V3LifecycleLog "Start-V3Service($Service): healthy on port $port (PID $recordedPid)."
-        Write-Host "V3 $Service started (PID $recordedPid)."
+      $sp = Invoke-V3SpawnService -Service $Service -Proxy $proxy
+      if ($sp.Status -eq 'already_running') {
+        Write-Host "V3 $Service is already running (PID $($sp.Pid))."
         return
       }
-      Write-V3LifecycleLog "Start-V3Service($Service): attempt $attempt did not become healthy within ${waitSec}s (errLog=$errLog)."
-      $leftover = @(Get-V3ListenerPids $port)
-      foreach ($lp in $leftover) {
+      $deadline = (Get-Date).AddSeconds($waitSec)
+      while ((Get-Date) -lt $deadline) {
+        if (Test-V3Health $Service) {
+          $live = @(Get-V3ListenerPids $port)
+          $recPid = if ($live.Count -eq 1) { $live[0] } else { $sp.Pid }
+          Set-Content -LiteralPath (Join-Path $script:V3Run "$Service.pid") -Value $recPid -NoNewline -Encoding ascii
+          Write-V3LifecycleLog "Start-V3Service($Service): healthy on port $port (PID $recPid) in $($sw.ElapsedMilliseconds)ms."
+          Write-Host "V3 $Service started (PID $recPid) in $($sw.ElapsedMilliseconds)ms."
+          return
+        }
+        Start-Sleep -Milliseconds 250
+      }
+      Write-V3LifecycleLog "Start-V3Service($Service): attempt $attempt timed out after ${waitSec}s (errLog=$($sp.ErrLog))."
+      $left = @(Get-V3ListenerPids $port)
+      foreach ($lp in $left) {
         if (Test-V3OwnedListener $Service $lp) { Stop-Process -Id $lp -Force -ErrorAction SilentlyContinue }
       }
     }
@@ -306,10 +343,10 @@ function Start-V3Service([string]$Service) {
 }
 
 function Start-V3DesktopConsole() {
+  $sw = [System.Diagnostics.Stopwatch]::StartNew()
   $existing = @(Get-V3ConsolePids)
   if ($existing.Count -gt 0) {
-    Write-V3LifecycleLog "Start-V3DesktopConsole: already running (PID $($existing -join ',')); skipping duplicate launch."
-    # Bring existing console window to foreground if possible
+    Write-V3LifecycleLog "Start-V3DesktopConsole: already running (PID $($existing -join ',')) checked in $($sw.ElapsedMilliseconds)ms."
     try {
       Add-Type -TypeDefinition @'
 using System;
@@ -334,12 +371,10 @@ public static class V3WinFocus {
   if (-not (Test-Path -LiteralPath $pythonw) -or -not (Test-Path -LiteralPath $dashboard)) {
     throw 'V3 Python environment or BTC paper console entrypoint is missing.'
   }
-  # Launch desktop GUI in the caller's interactive Windows session (never Session 0 WMI)
-  # so the Tkinter console window is immediately visible on the user's desktop.
   $console = Start-Process -FilePath $pythonw -ArgumentList @($dashboard) -WorkingDirectory $script:V3Root -PassThru
   $consolePid = [int]$console.Id
   $null = New-Item -ItemType Directory -Force -Path $script:V3Run
   Set-Content -LiteralPath (Join-Path $script:V3Run 'desktop_console.pid') -Value $consolePid -NoNewline -Encoding ascii
-  Write-V3LifecycleLog "Start-V3DesktopConsole: launched interactive desktop console (PID $consolePid)."
+  Write-V3LifecycleLog "Start-V3DesktopConsole: launched interactive desktop console (PID $consolePid) in $($sw.ElapsedMilliseconds)ms."
   return $consolePid
 }

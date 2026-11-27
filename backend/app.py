@@ -1258,12 +1258,22 @@ async def strategy_pool_list():
 async def strategy_pool_versions(strategy_id: str):
     return {'items': strategy_pool.versions(strategy_id)}
 
-@app.post('/api/v1/strategy-pool/upload')
-async def strategy_pool_upload(request: Request):
+@app.post('/api/v1/strategy-pool/upload/validate')
+async def strategy_pool_upload_validate(request: Request, expected_strategy_id: str | None = None):
     try:
         raw = await request.body()
         if len(raw) > 64000: raise StrategyValidationError('文件超过 64KB')
-        result = strategy_pool.upload(raw)
+        result = strategy_pool.upload(raw, expected_strategy_id=expected_strategy_id, validate_only=True)
+        return {'validation': {'valid': True, 'checks': ['结构与字段', '策略ID匹配', '受限规则', '市场与周期', '固定风险配置'], 'errors': []}, **result}
+    except StrategyValidationError as exc:
+        raise HTTPException(status_code=422, detail={'valid': False, 'errors': [str(exc)]}) from exc
+
+@app.post('/api/v1/strategy-pool/upload')
+async def strategy_pool_upload(request: Request, expected_strategy_id: str | None = None, activate: bool = False):
+    try:
+        raw = await request.body()
+        if len(raw) > 64000: raise StrategyValidationError('文件超过 64KB')
+        result = strategy_pool.upload(raw, expected_strategy_id=expected_strategy_id, validate_only=False, activate=activate)
         history = strategy_pool.versions(result['strategy_id'])
         result['previous_version'] = history[-2]['version'] if len(history) > 1 else None
         result['change_summary'] = '首个版本' if len(history) == 1 else '新版本已保存；旧版本及其持仓归属不变'
@@ -1333,19 +1343,233 @@ async def strategy_pool_decisions(strategy_id: str, limit: int = 100):
     if not 1 <= limit <= 1000: raise HTTPException(400,'LIMIT_INVALID')
     return {'items':strategy_pool.diagnostics(strategy_id,limit)}
 
+import calendar as _calendar
+import threading as _threading
+import time as _time
+import uuid as _uuid
+
+_BACKTEST_JOBS: dict[str, dict[str, Any]] = {}
+_BACKTEST_JOBS_LOCK = _threading.Lock()
+
+
+def _add_calendar_months(dt: datetime, months: int) -> datetime:
+    month_idx = dt.month - 1 + months
+    year = dt.year + month_idx // 12
+    month = month_idx % 12 + 1
+    day = min(dt.day, _calendar.monthrange(year, month)[1])
+    return dt.replace(year=year, month=month, day=day)
+
+
+def _validate_backtest_window(start: str, end: str) -> tuple[datetime, datetime]:
+    begin = archive_utc(start)
+    finish = archive_utc(end)
+    now = datetime.now(UTC)
+    if begin >= finish:
+        raise StrategyValidationError('结束日期必须晚于开始日期')
+    if finish > now + timedelta(minutes=15):
+        raise StrategyValidationError('结束时间不能超过当前可用最新行情时间')
+    max_finish = _add_calendar_months(begin, 3)
+    if finish > max_finish:
+        raise StrategyValidationError('回测时间跨度不能超过三个自然月，请缩短区间（不会静默截断）')
+    if begin.minute % 15 or begin.second or begin.microsecond or finish.minute % 15 or finish.second or finish.microsecond:
+        raise StrategyValidationError('起止时间必须对齐 15 分钟 K 线边界')
+    return begin, min(finish, now.replace(minute=(now.minute // 15) * 15, second=0, microsecond=0))
+
+
+async def _load_backtest_bars(strategy_id: str, version: str, begin: datetime, finish: datetime, *, allow_backfill: bool = True, progress_cb=None):
+    import sqlite3 as _sq
+    with _sq.connect(strategy_pool.path, timeout=10) as conn:
+        doc = strategy_pool._doc(conn, strategy_id, version)
+    req_bars = max(strategy_pool._required_bars(doc) + 4, 60)
+    warmup_begin = begin - timedelta(minutes=15 * req_bars)
+    if progress_cb:
+        progress_cb('正在读取历史数据', 0, int((finish - begin).total_seconds() // 900), '')
+    rows = candle_archive.read(begin, finish)
+    warm_rows = candle_archive.read(warmup_begin, begin)
+    expected = int((finish - begin).total_seconds() // 900)
+    if allow_backfill and (len(rows) < expected or len(warm_rows) < req_bars):
+        try:
+            if progress_cb:
+                progress_cb('正在从 Binance 公共历史 K 线归档补齐数据', len(rows), expected, '')
+            fetched = await market.bars(warmup_begin, finish)
+            candle_archive.store([x.__dict__ for x in fetched if x.is_closed and warmup_begin <= archive_utc(x.open_at) < finish])
+            rows = candle_archive.read(begin, finish)
+            warm_rows = candle_archive.read(warmup_begin, begin)
+        except Exception as exc:
+            logger.warning('Backtest backfill failed for %s: %s', strategy_id, exc)
+    if not rows:
+        raise StrategyValidationError('所选时间区间无可用历史 K 线数据')
+    return warm_rows, rows
+
+
+@app.get('/api/v1/strategy-pool/backtest/range')
+async def strategy_pool_backtest_range():
+    info = candle_archive.summary()
+    now = datetime.now(UTC).replace(second=0, microsecond=0)
+    latest_closed = now.replace(minute=(now.minute // 15) * 15)
+    return {
+        'symbol': 'BTC/USD',
+        'timeframe': '15m',
+        'data_source': 'BINANCE_USDM_PERP',
+        'archive_min_open_at': info.get('min_open_at'),
+        'archive_max_close_at': info.get('max_close_at') or latest_closed.isoformat(),
+        'archive_bar_count': info.get('count', 0),
+        'max_months': 3,
+        'backfill_supported': True,
+        'initial_equity': '10000',
+        'cost_model': {
+            'fee_rate': str(COST_MODEL.fee_rate),
+            'adverse_slippage_bps': str(COST_MODEL.adverse_slippage_bps),
+            'quantity_step': str(COST_MODEL.quantity_step),
+            'minimum_quantity': str(COST_MODEL.minimum_quantity),
+            'minimum_notional': str(COST_MODEL.minimum_notional),
+        },
+    }
+
+
 @app.post('/api/v1/strategy-pool/{strategy_id}/backtest')
 async def strategy_pool_backtest(strategy_id: str, request: Request):
     body=await request.json();version=body.get('version');start=body.get('start');end=body.get('end')
+    allow_backfill = body.get('allow_backfill', True) is not False
+    if not version:
+        raise HTTPException(422, detail='缺少策略版本号')
     try:
-        begin=archive_utc(start);finish=archive_utc(end);now=datetime.now(UTC)
-        if not version or begin>=finish or finish-begin>timedelta(days=30) or begin.minute%15 or begin.second or begin.microsecond or finish.minute%15 or finish.second or finish.microsecond or finish>now:
-            raise ValueError('INVALID_RANGE')
-        rows=candle_archive.read(begin,finish)
-        expected=int((finish-begin).total_seconds()//900)
-        if len(rows)!=expected: raise StrategyValidationError(f'历史数据不完整：需要 {expected} 根，当前 {len(rows)} 根；未请求补取数据')
-        return strategy_pool.backtest(strategy_id,version,rows,start=begin.isoformat(),end=finish.isoformat(),fee_rate=Decimal(str(COST_MODEL.fee_rate)),slippage=Decimal(str(COST_MODEL.adverse_slippage_bps))/Decimal(10000),quantity_step=Decimal(str(COST_MODEL.quantity_step)),min_quantity=Decimal(str(COST_MODEL.minimum_quantity)),min_notional=Decimal(str(COST_MODEL.minimum_notional)))
+        begin, finish = _validate_backtest_window(start, end)
+        warm_rows, rows = await _load_backtest_bars(strategy_id, version, begin, finish, allow_backfill=allow_backfill)
+        return await asyncio.to_thread(
+            strategy_pool.backtest,
+            strategy_id, version, rows,
+            start=begin.isoformat(), end=finish.isoformat(),
+            warmup_bars=warm_rows,
+            fee_rate=Decimal(str(COST_MODEL.fee_rate)),
+            slippage=Decimal(str(COST_MODEL.adverse_slippage_bps))/Decimal(10000),
+            quantity_step=Decimal(str(COST_MODEL.quantity_step)),
+            min_quantity=Decimal(str(COST_MODEL.minimum_quantity)),
+            min_notional=Decimal(str(COST_MODEL.minimum_notional)),
+        )
     except StrategyValidationError as exc: raise HTTPException(422,detail=str(exc)) from exc
-    except (ValueError,TypeError) as exc: raise HTTPException(400,'INVALID_BACKTEST_RANGE_OR_DATA') from exc
+    except (ValueError,TypeError) as exc: raise HTTPException(400,detail='回测日期或参数格式无效: ' + str(exc)) from exc
+
+
+@app.post('/api/v1/strategy-pool/{strategy_id}/backtest/jobs')
+async def strategy_pool_backtest_start_job(strategy_id: str, request: Request):
+    body = await request.json()
+    version = body.get('version')
+    start = body.get('start')
+    end = body.get('end')
+    allow_backfill = body.get('allow_backfill', True) is not False
+    if not version:
+        raise HTTPException(422, detail='缺少策略版本号')
+    try:
+        begin, finish = _validate_backtest_window(start, end)
+    except StrategyValidationError as exc:
+        raise HTTPException(422, detail=str(exc)) from exc
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(400, detail='回测日期或参数格式无效: ' + str(exc)) from exc
+    job_id = _uuid.uuid4().hex[:16]
+    cancel_evt = _threading.Event()
+    started_at = _time.perf_counter()
+    job = {
+        'job_id': job_id, 'strategy_id': strategy_id, 'version': version,
+        'status': 'RUNNING', 'stage': '正在读取历史数据',
+        'processed_bars': 0, 'total_bars': int((finish - begin).total_seconds() // 900),
+        'current_cycle': '', 'elapsed_ms': 0, 'report': None, 'error': None,
+        '_cancel': cancel_evt, '_started': started_at,
+    }
+    with _BACKTEST_JOBS_LOCK:
+        # Keep only the latest 30 jobs in memory
+        if len(_BACKTEST_JOBS) > 30:
+            for old_key in list(_BACKTEST_JOBS.keys())[:-25]:
+                _BACKTEST_JOBS.pop(old_key, None)
+        _BACKTEST_JOBS[job_id] = job
+
+    def update_progress(stage, processed, total, cycle):
+        with _BACKTEST_JOBS_LOCK:
+            j = _BACKTEST_JOBS.get(job_id)
+            if j and j['status'] == 'RUNNING':
+                j['stage'] = stage
+                j['processed_bars'] = int(processed)
+                j['total_bars'] = int(total)
+                j['current_cycle'] = str(cycle or '')
+                j['elapsed_ms'] = int((_time.perf_counter() - j['_started']) * 1000)
+
+    async def runner():
+        try:
+            warm_rows, rows = await _load_backtest_bars(
+                strategy_id, version, begin, finish,
+                allow_backfill=allow_backfill, progress_cb=update_progress,
+            )
+            if cancel_evt.is_set():
+                raise StrategyValidationError('BACKTEST_CANCELED')
+            report = await asyncio.to_thread(
+                strategy_pool.backtest,
+                strategy_id, version, rows,
+                start=begin.isoformat(), end=finish.isoformat(),
+                warmup_bars=warm_rows,
+                progress_cb=update_progress,
+                cancel_event=cancel_evt,
+                fee_rate=Decimal(str(COST_MODEL.fee_rate)),
+                slippage=Decimal(str(COST_MODEL.adverse_slippage_bps)) / Decimal(10000),
+                quantity_step=Decimal(str(COST_MODEL.quantity_step)),
+                min_quantity=Decimal(str(COST_MODEL.minimum_quantity)),
+                min_notional=Decimal(str(COST_MODEL.minimum_notional)),
+            )
+            with _BACKTEST_JOBS_LOCK:
+                j = _BACKTEST_JOBS.get(job_id)
+                if j:
+                    j['status'] = 'DONE'
+                    j['stage'] = '回测完成'
+                    j['report'] = report
+                    j['elapsed_ms'] = int((_time.perf_counter() - j['_started']) * 1000)
+        except StrategyValidationError as exc:
+            with _BACKTEST_JOBS_LOCK:
+                j = _BACKTEST_JOBS.get(job_id)
+                if j:
+                    if str(exc) == 'BACKTEST_CANCELED':
+                        j['status'] = 'CANCELED'
+                        j['stage'] = '已取消回测'
+                    else:
+                        j['status'] = 'FAILED'
+                        j['error'] = str(exc)
+                    j['elapsed_ms'] = int((_time.perf_counter() - j['_started']) * 1000)
+        except Exception as exc:
+            with _BACKTEST_JOBS_LOCK:
+                j = _BACKTEST_JOBS.get(job_id)
+                if j:
+                    j['status'] = 'FAILED'
+                    j['error'] = f'回测执行异常：{exc}'
+                    j['elapsed_ms'] = int((_time.perf_counter() - j['_started']) * 1000)
+
+    asyncio.create_task(runner())
+    return {'job_id': job_id, 'status': 'RUNNING'}
+
+
+@app.get('/api/v1/strategy-pool/backtest/jobs/{job_id}')
+async def strategy_pool_backtest_job_status(job_id: str):
+    with _BACKTEST_JOBS_LOCK:
+        j = _BACKTEST_JOBS.get(job_id)
+        if not j:
+            raise HTTPException(404, detail='回测任务不存在')
+        elapsed = int((_time.perf_counter() - j['_started']) * 1000) if j['status'] == 'RUNNING' else j['elapsed_ms']
+        return {
+            'job_id': j['job_id'], 'strategy_id': j['strategy_id'], 'version': j['version'],
+            'status': j['status'], 'stage': j['stage'],
+            'processed_bars': j['processed_bars'], 'total_bars': j['total_bars'],
+            'current_cycle': j['current_cycle'], 'elapsed_ms': elapsed,
+            'report': j['report'], 'error': j['error'],
+        }
+
+
+@app.post('/api/v1/strategy-pool/backtest/jobs/{job_id}/cancel')
+async def strategy_pool_backtest_job_cancel(job_id: str):
+    with _BACKTEST_JOBS_LOCK:
+        j = _BACKTEST_JOBS.get(job_id)
+        if not j:
+            raise HTTPException(404, detail='回测任务不存在')
+        j['_cancel'].set()
+        if j['status'] == 'RUNNING':
+            j['stage'] = '正在取消回测…'
+        return {'job_id': job_id, 'canceling': True}
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[

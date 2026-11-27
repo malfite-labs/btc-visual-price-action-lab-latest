@@ -27,4 +27,8 @@ class CandleArchive:
         with sqlite3.connect(self.path,timeout=10) as c:
             rows=c.execute('select payload from candles where symbol=? and open_at>=? and open_at<? order by open_at',('BTC/USD',start.astimezone(timezone.utc).isoformat(),end.astimezone(timezone.utc).isoformat())).fetchall()
         return [json.loads(row[0]) for row in rows]
+    def summary(self):
+        with sqlite3.connect(self.path,timeout=10) as c:
+            row=c.execute('select min(open_at),max(close_at),count(*) from candles where symbol=?',('BTC/USD',)).fetchone()
+        return {'min_open_at':row[0] if row else None,'max_close_at':row[1] if row else None,'count':int(row[2]) if row else 0}
 

@@ -2517,3 +2517,14 @@ C自然跟单排查：游标78到91读取10笔C，真实Demo五单，仍空头0.
   - `Start-V3Service` 改用 `Win32_Process.Create`（`WmiPrvSE.exe` 独立进程树）启动 `8012` 后端与 `5175` 前端，与 Gemini、Codex 或任何临时终端彻底解耦；自动读取 `HKCU:\Environment` 持久代理与 `data/d/auto-paper.json`，内置 45s/35s 健康轮询、有限重试、不健康 V3 残留进程精准清理与生命周期日志 `logs/launcher-lifecycle.log`。
   - `launch_v3.ps1` 实现完整 5 态幂等自愈矩阵（双正常直进、仅后端停自动恢复后端、仅前端停自动恢复前端、双停顺序拉起、异常 V3 进程安全清理恢复），按实际命令行去重控制台进程且以交互会话 `Start-Process` 正常展示桌面窗口。
 - **实机验证**：T01（完整停启）、T04（仅后端停自愈）、T05（仅前端停自愈）、T06（连续 3 次点击无重复进程）、T02/T03（进程树完全挂载于 `WmiPrvSE.exe <- svchost.exe <- services.exe`，零 Gemini 父进程依赖）、T07/T08（全部 8 个 SQLite 账本 `PRAGMA quick_check = ok`，PA-08 持仓及 16+ 策略状态完整保留）、T09/T10（Demo `PID 5532` 与正式实盘 `PID 18808` 全程持续运行未受影响）。
+
+
+## 2026-11-27｜V3.1 策略池功能缺陷修复与标准化策略接入（BUG-001 ~ BUG-005）
+- **备份位置**：`.backups/pre-pool-fix-20261127`（全量 SQLite 账本只读备份，全部 15 库 `PRAGMA quick_check = ok`）。
+- **核心修复**：
+  1. **BUG-001（策略 ID 与中文名称分离）**：`backend/strategy_pool.py` 的 `StrategyPool.list()` 自动从活动/最新版本文档解析真实中文 `name`、`description` 与版本统计；`scripts/strategy_pool_ui.py` 策略池列表将「策略 ID」「策略名称」「版本」三列清晰分离，缺失名称回退为 `名称待完善（<id>）` 且绝不篡改原始 ID。
+  2. **BUG-002（右键绑定式策略更新与持仓保护）**：移除策略池底部易误操作的「更新策略（上传新版本）」按钮，新增策略行右键菜单（自动选中目标行）及专属更新弹窗；后端新增 `POST /api/v1/strategy-pool/upload/validate` 与 `expected_strategy_id` 强校验，拒绝错误 ID 或非法文件，展示新旧版本字段差异与持仓保护提示，更新后完整保留原账户、历史成交、已有持仓及原开仓版本止盈止损。
+  3. **BUG-003（Chan 及任意新策略标准化接入）**：核实 `pa-chan-center-divergence`（中枢震荡与背驰回抽（量化近似））已注册并完成 71 个自然 15 分钟周期调度，无法查看详情/账户的根因是 `scripts/local_dashboard.py` 中 25 处硬编码了 `PA_STRATEGY_IDS`。现统一抽象为 `is_pool_strategy_id()` 动态注册路由，Chan 及任意未来上传的合规新策略自动支持策略详情、账户与成交面板、盈亏日历、启停控制以及 Demo/正式实盘可选策略列表与统一跟单引擎（隔离验证通过，绝不自动授权正式实盘）。
+  4. **BUG-004（历史回测日历选择、3个月真实回测与非阻塞报告）**：`backend/app.py` 升级最大回测跨度至 **3 个自然月**（严格日历校验，超限拒绝不截断）、支持预热 K 线与 Binance 公共 15m 历史归档补齐，并新增异步任务接口（`/backtest/range`、`/backtest/jobs`、`/cancel`）；`scripts/strategy_pool_ui.py` 新增原生 Tkinter 日历日期选择器（标注北京时间 UTC+8）、实时进度条与取消按钮，以及含 21 项绩效指标、原生 Canvas 权益/回撤双曲线与独立回测成交表的标准化报告窗口。
+  5. **BUG-005（成交明细可视化表格改造）**：取消原始 JSON 弹窗，构建可复用的 `TradeFillsTableFrame`（13 列真实字段、准确推导开多/平多/开空/平空、排序/方向/原因/日期筛选、100 条分页、盈亏配色、UTF-8-SIG CSV 导出，原始 JSON 退居「高级诊断 JSON」按钮），纸盘实时成交与历史回测成交严格隔离展示。
+- **验证与验收**：`tests/test_strategy_pool_bugs_v31.py` 及全部既有 V3.1 回归套件 **30/30 PASS**；`8012` 受控重载（`PID 18948`，`10.75s`），Demo（`18868/18888`）与正式实盘（`15756/4808`）全程零扰动；PA-02 与 Chan 实测完成 1天/7天/30天/3个月（8,641 根 K 线，0 缺口）真实历史回测、确定性复测与异步取消；13 张真实 Windows 桌面验收截图全部核验通过。

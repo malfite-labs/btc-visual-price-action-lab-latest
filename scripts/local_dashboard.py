@@ -42,8 +42,14 @@ CORE_STRATEGY_LABELS = (
     ('E', 'E'),
     ('G', 'G · C反向镜像'),
 )
+CORE_STRATEGY_IDS = ('A', 'B', 'C', 'D', 'E', 'G')
 RULE_DETAIL_IDS = ('A', 'B', 'C', 'D', 'E', 'G', *PA_STRATEGY_IDS)
 BEIJING = timezone(timedelta(hours=8), name='Asia/Shanghai')
+
+
+def is_pool_strategy_id(strategy_id):
+    """True for any strategy managed by the Strategy Pool (built-in PA or dynamically uploaded)."""
+    return bool(strategy_id) and str(strategy_id) not in CORE_STRATEGY_IDS
 
 
 def _pa_extension_names():
@@ -157,9 +163,11 @@ def _apply_persistent_user_proxy(env):
 
 def rule_detail_target(row_id):
     """Keep detail actions bound to stable strategy IDs, never visual row indices."""
-    if row_id not in RULE_DETAIL_IDS:
+    if not row_id or not isinstance(row_id, str):
         raise ValueError('UNKNOWN_STRATEGY')
-    return row_id
+    if row_id in CORE_STRATEGY_IDS or is_pool_strategy_id(row_id):
+        return row_id
+    raise ValueError('UNKNOWN_STRATEGY')
 
 
 def detail_click_target(row_id, column):
@@ -621,7 +629,7 @@ def filter_console_rows(rows, category='全部', status='全部状态', query=''
     query = (query or '').strip().casefold()
     result = []
     for row_id, row in rows.items():
-        is_pa = row_id in PA_STRATEGY_IDS
+        is_pa = is_pool_strategy_id(row_id)
         is_original = row_id in ('A', 'B', 'C', 'D', 'E')
         if category == 'PA' and not is_pa or category == '原有' and not is_original or category == '镜像' and row_id != 'G':
             continue
@@ -650,9 +658,9 @@ def console_summary(rows):
 
 
 def keep_cached_rows(previous, current):
-    """Retain the last valid PA account values when only the pool read fails."""
+    """Retain the last valid pool account values when only the pool read fails."""
     merged = dict(current)
-    for strategy_id in PA_STRATEGY_IDS:
+    for strategy_id in set(PA_STRATEGY_IDS) | {k for k in previous if is_pool_strategy_id(k)}:
         row = current.get(strategy_id) or {}
         if row.get('status_label') != '读取失败' or strategy_id not in previous:
             continue
@@ -664,7 +672,7 @@ def keep_cached_rows(previous, current):
 
 
 def pa_trade_fills(strategy_id):
-    if strategy_id not in PA_STRATEGY_IDS:
+    if not is_pool_strategy_id(strategy_id):
         raise ValueError('UNKNOWN_PA_STRATEGY')
     fills = api_json(f'/api/v1/strategy-pool/{strategy_id}/fills?limit=2000').get('items')
     if not isinstance(fills, list):
@@ -673,7 +681,7 @@ def pa_trade_fills(strategy_id):
 
 
 def set_pa_enabled(strategy_id, version, enabled):
-    if strategy_id not in PA_STRATEGY_IDS or not version:
+    if not is_pool_strategy_id(strategy_id) or not version:
         raise ValueError('INVALID_PA_CONTROL')
     return api_json(f'/api/v1/strategy-pool/{strategy_id}/enable', method='POST',
                     payload={'version': version, 'enabled': bool(enabled)})
@@ -962,7 +970,7 @@ def calculate_pnl_calendar(fills, strategy_id, year, month):
     for idx, event in enumerate(events):
         fill = event['source']
         trade_id = fill.get('g_trade_id') or fill.get('trade_id')
-        if strategy_id in PA_STRATEGY_IDS:
+        if is_pool_strategy_id(strategy_id):
             if event['effect'] == 'OPEN':
                 if active_pa is not None and groups[active_pa]['remaining'] > 0:
                     incomplete.append(f"{event['at'].isoformat()}: 前一笔PA持仓没有平仓成交，按缺失/删失处理后从新开仓重新配对")
@@ -1013,7 +1021,7 @@ def calculate_pnl_calendar(fills, strategy_id, year, month):
                     net = Decimal(str(explicit_pnl))
                 else:
                     realized_gross = gross
-                    if strategy_id not in PA_STRATEGY_IDS:
+                    if not is_pool_strategy_id(strategy_id):
                         realized_gross = gross.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
                     net = realized_gross - entry_fee - event['fee']
                 if not net.is_finite(): raise InvalidOperation()
@@ -1104,7 +1112,7 @@ def account_detail_metrics(strategy_id, row, account, fills):
     if realized is None:
         realized = sum(result['all_closed_trade_results'], Decimal(0))
     data_warnings = list(dict.fromkeys(result['incomplete']))
-    if strategy_id in PA_STRATEGY_IDS and position is None and result['open_group_count']:
+    if is_pool_strategy_id(strategy_id) and position is None and result['open_group_count']:
         data_warnings.append(f"当前账户为空仓，但有{result['open_group_count']}笔未配对开仓记录；可能存在缺口删失/账本缺行，不计入日历收益。")
     direction = (position or {}).get('direction')
     if not direction:
@@ -1168,7 +1176,7 @@ def detail_summary_text(strategy_id, row, account=None, account_kind='formal'):
         extra = (f"镜像来源：C · 跟随状态：{raw.get('follow_state', '—')} · 配对状态：{pair.get('status', '—')}\n"
                  f"配对交易：C {pair.get('c_trade_id', '—')} / G {pair.get('g_trade_id', '—')} · 数量 {pair.get('quantity_opened', '—')} BTC\n"
                  f"最近C/G成交：{cycle_label(c_fill.get('occurred_at'))} / {cycle_label(g_fill.get('occurred_at'))} · 延迟 {raw.get('last_fill_delay_ms', '—')} ms · 跟单错误：{raw.get('last_error') or '无'}")
-    elif strategy_id in PA_STRATEGY_IDS:
+    elif is_pool_strategy_id(strategy_id):
         position = raw.get('position')
         if isinstance(position, str):
             try: position = json.loads(position)
@@ -1530,149 +1538,19 @@ def api_json(path, method='GET', payload=None, raw=None):
 
 
 def open_strategy_pool(root):
-    window=tk.Toplevel(root);window.title('可扩展策略池');window.geometry('1180x610')
-    ttk.Label(window,text='仅模拟盘 · BTC/USD · 15分钟 · 初始资金 $10,000 · 杠杆上限 5x · 单笔风险上限 2%').pack(anchor='w',padx=10,pady=8)
-    cols=('id','version','status','position','amount','leverage','equity','realized','unrealized','fees','action','cycle')
-    grid=ttk.Treeview(window,columns=cols,show='headings',height=12)
-    titles=('策略 ID','版本','状态','持仓','持仓金额','杠杆','权益','已实现盈亏','未实现盈亏','手续费','最近行动','最近周期 UTC')
-    widths=(145,80,130,70,105,65,100,100,100,85,125,175)
-    for key,title,width in zip(cols,titles,widths):grid.heading(key,text=title);grid.column(key,width=width,anchor='center')
-    grid.pack(fill='both',expand=True,padx=10,pady=6)
-    info=tk.StringVar(value='新策略上传后默认暂停；启用后仍需自然15分钟周期处理才会显示运行中。')
-    ttk.Label(window,textvariable=info,wraplength=1120).pack(anchor='w',padx=10,pady=6)
-    def selected():
-        sid=grid.focus()
-        if not sid:raise RuntimeError('请先选择一条策略')
-        row=next((x for x in api_json('/api/v1/strategy-pool').get('items',[]) if x['id']==sid),None)
-        if not row:raise RuntimeError('策略已变化，请刷新列表')
-        return row
-    def refresh():
-        try:
-            items=api_json('/api/v1/strategy-pool').get('items',[])
-            for iid in grid.get_children():grid.delete(iid)
-            status_text={'REGISTERED':'已登记','REGISTERED_PAUSED':'已登记','PAUSED':'已暂停','ENABLED_NOT_RUNNING':'已启用，等待自然周期','RUNNING':'运行中','FAULTED':'故障'}
-            for item in items:
-                pos=json.loads(item['position']) if item.get('position') else None
-                position=('做多 '+str(pos.get('qty')) if pos else '空仓')
-                version=item.get('active_version') or (pos or {}).get('version') or '—'
-                grid.insert('', 'end',iid=item['id'],values=(item['id'],version,status_text.get(item.get('status'),item.get('status')),
-                    position,item.get('position_amount','0'),leverage_label(item.get('leverage'), item.get('position_direction')),
-                    item.get('equity','—'),item.get('realized','0'),item.get('unrealized','0'),item.get('fees','0'),item.get('action','—'),item.get('last_cycle') or '—'))
-            info.set(f'共 {len(items)} 条策略。暂停只阻止新开仓；已有仓位仍由开仓版本管理，并继续由共享新鲜报价止损。')
-        except Exception as exc:info.set('读取策略池失败：'+str(exc))
-    def download_template():
-        from scripts.strategy_template_bundle import TEMPLATE_ZIP_NAME, export_strategy_template_zip
-        dest = filedialog.asksaveasfilename(
-            parent=window,
-            title='保存 BTC V3 策略开发模板包',
-            initialfile=TEMPLATE_ZIP_NAME,
-            defaultextension='.zip',
-            filetypes=[('ZIP 策略模板包', '*.zip')],
-        )
-        if not dest:
-            return
-        try:
-            saved = export_strategy_template_zip(dest)
-            messagebox.showinfo(
-                '模板包已导出',
-                f'已导出至：\n{saved}\n\n包含文件：\n'
-                '• strategy.template.json（空白策略模板，不可直接启用）\n'
-                '• strategy.schema.json（JSON Schema 格式校验规范）\n'
-                '• 策略开发与上传规范.md（完整开发与接入规范）\n'
-                '• AI策略开发指令.md（AI Agent 策略开发标准指令）',
-                parent=window,
-            )
-            info.set(f'已导出策略开发模板包：{saved.name}')
-        except Exception as exc:
-            messagebox.showerror('导出模板失败', str(exc), parent=window)
-
-    def upload_file():
-        path=filedialog.askopenfilename(parent=window,title='选择版本化 JSON 策略',filetypes=[('JSON 策略','*.json')])
-        if not path:return
-        try:
-            raw=Path(path).read_bytes()
-            result=api_json('/api/v1/strategy-pool/upload',method='POST',raw=raw)
-            diff=result.get('version_diff') or {};changes=diff.get('changes') or []
-            document=result['document']
-            exit_or_pos = (
-                "仓位/退出规则：" + json.dumps(document['position'], ensure_ascii=False)
-                if 'position' in document
-                else "退出表达式：" + json.dumps(document.get('exit'), ensure_ascii=False)
-            )
-            lines=[f"校验：{'通过' if result.get('validation',{}).get('valid') else '失败'}",f"名称：{document['name']}",f"ID/版本：{result['strategy_id']} / {result['version']}",f"市场/周期：{document['market']} / {document['timeframe']}",f"风险设置：{json.dumps(document['risk'],ensure_ascii=False)}",f"摘要：{result['sha256']}","入场表达式："+json.dumps(document['entry'],ensure_ascii=False),exit_or_pos,f"状态：已登记，默认暂停",'版本差异：'+('；'.join(x['field'] for x in changes) if changes else '首个版本/无差异')]
-            messagebox.showinfo('策略文件校验', '\n'.join(lines),parent=window);refresh()
-        except Exception as exc:messagebox.showerror('上传或校验失败',str(exc),parent=window)
-    def backtest():
-        try:
-            row=selected();versions=api_json(f"/api/v1/strategy-pool/{row['id']}/versions").get('items',[])
-            version=row.get('active_version') or (versions[-1]['version'] if versions else None)
-            if not version:raise RuntimeError('没有可回测版本')
-            start=simpledialog.askstring('历史回测','输入起始 UTC 时间（15分钟边界），例如 2026-11-01T00:00:00Z',parent=window)
-            if not start:return
-            end=simpledialog.askstring('历史回测','输入结束 UTC 时间（15分钟边界），最多30天',parent=window)
-            if not end:return
-            report=api_json(f"/api/v1/strategy-pool/{row['id']}/backtest",method='POST',payload={'version':version,'start':start,'end':end})
-            summary={'策略版本':report['strategy_version'],'净盈亏':report['net_pnl'],'已实现盈亏':report['realized_net_pnl'],'未实现盈亏':report['unrealized_net_pnl'],'手续费':report['fees'],'胜率':report['win_rate'],'最大回撤':report['max_drawdown'],'数据缺口':report['data_gaps'],'权益曲线点数':len(report['equity_curve']),'成交记录数':len(report['trades']),'期末未平仓':report['open_position']}
-            result_window=tk.Toplevel(window);result_window.title('策略历史回测报告');result_window.geometry('950x620')
-            view= tk.Text(result_window,wrap='none');ys=ttk.Scrollbar(result_window,orient='vertical',command=view.yview);xs=ttk.Scrollbar(result_window,orient='horizontal',command=view.xview)
-            view.configure(yscrollcommand=ys.set,xscrollcommand=xs.set);view.grid(row=0,column=0,sticky='nsew');ys.grid(row=0,column=1,sticky='ns');xs.grid(row=1,column=0,sticky='ew')
-            result_window.rowconfigure(0,weight=1);result_window.columnconfigure(0,weight=1)
-            view.insert('1.0',json.dumps({'summary':summary,'full_report':report},ensure_ascii=False,indent=2));view.configure(state='disabled')
-        except Exception as exc:messagebox.showerror('回测失败',str(exc),parent=window)
-    def toggle():
-        try:
-            row=selected();is_enabled=bool(row.get('enabled'))
-            versions=api_json(f"/api/v1/strategy-pool/{row['id']}/versions").get('items',[])
-            version=row.get('active_version') or (versions[-1]['version'] if versions else None)
-            if not version:raise RuntimeError('没有可启用版本')
-            if is_enabled and not messagebox.askyesno('暂停策略','将停止该策略的新开仓；现有仓位继续按开仓版本的止损/退出规则管理。确定暂停？',parent=window):return
-            result=api_json(f"/api/v1/strategy-pool/{row['id']}/enable",method='POST',payload={'version':version,'enabled':not is_enabled})
-            info.set('状态：'+str(result.get('status'))+'；启用不等同运行中，等待自然周期执行后才显示运行中。');refresh()
-        except Exception as exc:messagebox.showerror('操作失败',str(exc),parent=window)
-    def activate_version():
-        try:
-            row=selected();versions=api_json(f"/api/v1/strategy-pool/{row['id']}/versions").get('items',[])
-            if not versions:raise RuntimeError('没有可启用版本')
-            choices=[x['version'] for x in versions]
-            version=simpledialog.askstring('选择策略版本','可用版本：'+', '.join(choices)+'\n输入要启用的版本',initialvalue=choices[-1],parent=window)
-            if not version:return
-            if version not in choices:raise RuntimeError('版本不在历史列表中')
-            if not messagebox.askyesno('启用策略版本',f'启用 {version} 只影响后续新开仓；现有仓位仍按各自开仓版本管理。继续？',parent=window):return
-            result=api_json(f"/api/v1/strategy-pool/{row['id']}/enable",method='POST',payload={'version':version,'enabled':True})
-            info.set('版本已启用：'+version+'；当前状态 '+str(result.get('status'))+'。');refresh()
-        except Exception as exc:messagebox.showerror('版本操作失败',str(exc),parent=window)
-    def show_diff():
-        try:
-            row=selected();versions=api_json(f"/api/v1/strategy-pool/{row['id']}/versions").get('items',[])
-            if len(versions)<2:raise RuntimeError('该策略只有一个版本')
-            old=versions[-2]['version'];new=versions[-1]['version']
-            diff=api_json(f"/api/v1/strategy-pool/{row['id']}/diff?old={old}&new={new}")
-            messagebox.showinfo('版本差异',json.dumps(diff,ensure_ascii=False,indent=2),parent=window)
-        except Exception as exc:messagebox.showerror('无法查看差异',str(exc),parent=window)
-    def details():
-        try:
-            row=selected();items=api_json(f"/api/v1/strategy-pool/{row['id']}/fills").get('items',[])
-            messagebox.showinfo('策略成交明细',json.dumps(items[:100],ensure_ascii=False,indent=2),parent=window)
-        except Exception as exc:messagebox.showerror('读取明细失败',str(exc),parent=window)
-    buttons=ttk.Frame(window);buttons.pack(fill='x',padx=8,pady=7)
-    tk.Button(
-        buttons, text='下载模板', command=download_template,
-        bg='#1d5ef0', fg='#ffffff', activebackground='#164bc4', activeforeground='#ffffff',
-        relief='flat', padx=12, pady=4, font=('Microsoft YaHei UI', 9, 'bold'), cursor='hand2',
-    ).pack(side='left', padx=(4, 6))
-    ttk.Button(buttons,text='添加策略文件',command=upload_file).pack(side='left',padx=4)
-    ttk.Button(buttons,text='更新策略（上传新版本）',command=upload_file).pack(side='left',padx=4)
-    ttk.Button(buttons,text='查看版本差异',command=show_diff).pack(side='left',padx=4)
-    ttk.Button(buttons,text='历史回测',command=backtest).pack(side='left',padx=4)
-    ttk.Button(buttons,text='启用 / 暂停',command=toggle).pack(side='left',padx=4)
-    ttk.Button(buttons,text='启用 / 回滚到指定版本',command=activate_version).pack(side='left',padx=4)
-    ttk.Button(buttons,text='成交明细',command=details).pack(side='left',padx=4)
-    ttk.Button(buttons,text='刷新',command=refresh).pack(side='left',padx=4)
-    refresh()
+    from scripts.strategy_pool_ui import open_strategy_pool_window
+    return open_strategy_pool_window(
+        root,
+        api_json=api_json,
+        open_rule_details=open_strategy_rule_details,
+        open_account_details=open_strategy_details,
+        fallback_name_fn=strategy_display_name,
+        leverage_label_fn=leverage_label,
+    )
 
 
 def _detail_fetch(strategy_id, account_kind='formal'):
-    if strategy_id in PA_STRATEGY_IDS:
+    if is_pool_strategy_id(strategy_id):
         data = fetch('/api/v1/strategy-pool')
         item = next((entry for entry in data.get('items', []) if entry.get('id') == strategy_id), None)
         if item is None: raise RuntimeError('策略池未返回该策略')
@@ -1832,19 +1710,25 @@ def _collect_rule_detail(strategy_id, row, fill_offset=0):
     system = api_json('/api/v1/system/status')
     cost = system.get('cost_model') or {}
     doc = None; raw = None; detail_row = dict(row); account = {}; fills = []
-    if strategy_id in PA_STRATEGY_IDS:
+    if is_pool_strategy_id(strategy_id):
         pool = api_json('/api/v1/strategy-pool').get('items', [])
         item = next((x for x in pool if x.get('id') == strategy_id), None)
         if item is None: raise RuntimeError('策略池未返回该策略')
         versions = api_json(f"/api/v1/strategy-pool/{strategy_id}/versions").get('items', [])
-        version = item.get('active_version')
+        version = item.get('active_version') or item.get('latest_version') or (versions[-1]['version'] if versions else None)
         selected = next((x for x in versions if x.get('version') == version), None)
         if selected is None or not selected.get('document'):
-            raise RuntimeError('活动版本规则文档不可用；未回退到其他版本')
-        doc = json.loads(selected['document']); raw = selected['document']
+            if strategy_id in ('PA-09', 'PA-10'):
+                doc = {'name': item.get('name') or strategy_id, 'risk': {'initial_equity': '10000'}, 'position': {}}
+                raw = None
+                rule_text = f"策略名称：{item.get('name') or strategy_id}\n策略 ID：{strategy_id}\n类型：内置 PA 扩展执行器"
+            else:
+                raise RuntimeError('活动版本规则文档不可用；未回退到其他版本')
+        else:
+            doc = json.loads(selected['document']); raw = selected['document']
+            rule_text = _v2_rule_text(doc, selected)
         detail_row = console_rows({}, [item])[strategy_id]
         fills = pa_trade_fills(strategy_id)
-        rule_text = _v2_rule_text(doc, selected)
         risk = {'策略定义': doc.get('risk'), '止损/止盈/时限': doc.get('position'), '成本模型（运行状态接口）': cost,
                 '账户当前权益': detail_row.get('equity'), '账户当前实际杠杆': detail_row.get('leverage'),
                 '最近拒绝原因': item.get('last_rejection') or item.get('last_error') or '—'}
@@ -1991,7 +1875,7 @@ def open_strategy_rule_details(root, strategy_id, row):
                     values = detail_fill_values(fill)
                     trade_grid.insert('', 'end', values=(values[0], values[2], values[1], values[4], values[5], values[6], values[7], values[9], values[8], values[10], values[11] if strategy_id == 'G' else '—'))
                 page_label.set(f"按时间倒序 · 显示 {offset + 1}–{offset + len(result['fills'])} 条 · 单页最多200条" +
-                               (' · ABC分页使用本地只读账本' if strategy_id in ('A', 'B', 'C') else ' · 当前端点最多返回2000条' if strategy_id in PA_STRATEGY_IDS or strategy_id == 'G' else ' · 后端端点暂不支持分页'))
+                               (' · ABC分页使用本地只读账本' if strategy_id in ('A', 'B', 'C') else ' · 当前端点最多返回2000条' if is_pool_strategy_id(strategy_id) or strategy_id == 'G' else ' · 后端端点暂不支持分页'))
                 has_more = len(result['fills']) == 200 and (strategy_id in ('A', 'B', 'C') or offset + 200 < result.get('total_known', 0))
                 older_button.configure(state='normal' if has_more else 'disabled', command=lambda: load(offset + 200))
                 newer_button.configure(state='normal' if offset else 'disabled', command=lambda: load(max(0, offset - 200)))
@@ -2259,10 +2143,10 @@ def open_strategy_details(root, strategy_id, row):
                         tk.Label(grid_frame, text='…', bg='#1f2937', fg='#64748b', height=3).grid(row=i, column=j, sticky='nsew', padx=2, pady=2)
                 return
             calc = calculate_pnl_calendar(current_fills, strategy_id, year, mon)
-            if strategy_id in PA_STRATEGY_IDS or strategy_id == 'G':
+            if is_pool_strategy_id(strategy_id) or strategy_id == 'G':
                 if len(current_fills) >= 2000:
                     calc['incomplete'].append('只读成交接口上限为2000条，可能缺少更早的配对开仓记录。')
-            if strategy_id in PA_STRATEGY_IDS and detail_snapshot.get('metrics') and not detail_snapshot['metrics'].get('position') and calc['open_group_count']:
+            if is_pool_strategy_id(strategy_id) and detail_snapshot.get('metrics') and not detail_snapshot['metrics'].get('position') and calc['open_group_count']:
                 warning = f"当前账户为空仓，但有{calc['open_group_count']}笔未配对开仓记录；可能存在缺口删失/账本缺行，不计入日历收益。"
                 if warning not in calc['incomplete']: calc['incomplete'].append(warning)
             calc['incomplete'] = list(dict.fromkeys(calc['incomplete']))
@@ -2588,7 +2472,7 @@ def main():
         labels = {'全部': f"全部策略（{len(rows)}）",
                   '原有': f"原有策略（{sum(1 for key in rows if key in ('A','B','C','D','E'))}）",
                   '镜像': f"镜像策略（{sum(1 for key in rows if key == 'G')}）",
-                  'PA': f"PA策略（{sum(1 for key in rows if key in PA_STRATEGY_IDS)}）"}
+                  'PA': f"PA/策略池（{sum(1 for key in rows if is_pool_strategy_id(key))}）"}
         for key, button in tab_buttons.items():
             button.set_text(labels[key])
             button.set_kind('selected' if category.get() == key else 'segment')
@@ -2764,8 +2648,13 @@ def main():
                     state_snapshot.update({'system': s, 'front': front, 'node': node,
                                            'updated': updated})
                     draw_system_bar()
-                    status.set(f'\u72b6\u6001\u5df2\u66f4\u65b0 \u00b7 {updated}')
-                    status_label.configure(fg='#166534')
+                    if front == '不可用':
+                        status.set(f'8012 后端已就绪，正在等待 5175 前端启动… · {updated}')
+                        status_label.configure(fg='#2563eb')
+                        root.after(1000, refresh)
+                    else:
+                        status.set(f'\u72b6\u6001\u5df2\u66f4\u65b0 \u00b7 {updated}')
+                        status_label.configure(fg='#166534')
                     refreshing['value'] = False
                     cached_rows['value'] = rows
                     controls.clear()
@@ -2775,7 +2664,32 @@ def main():
                 root.after(0, show)
             except Exception as exc:
                 msg = str(exc)
+                startup_info = None
+                try:
+                    sp = ROOT / '.run' / 'startup-state.json'
+                    if sp.is_file():
+                        startup_info = json.loads(sp.read_text(encoding='utf-8'))
+                except (OSError, ValueError, TypeError):
+                    startup_info = None
                 def failed():
+                    now_ts = time.time()
+                    if (isinstance(startup_info, dict)
+                            and startup_info.get('state') == 'starting'
+                            and 0 <= now_ts - float(startup_info.get('updated_at') or 0) <= 60):
+                        phase_txt = startup_info.get('phase') or '正在初始化 8012 后端与 5175 前端…'
+                        status.set(f'正在启动 V3 服务：{phase_txt}')
+                        status_label.configure(fg='#2563eb')
+                        refreshing['value'] = False
+                        root.after(1000, refresh)
+                        return
+                    if (isinstance(startup_info, dict)
+                            and startup_info.get('state') == 'error'
+                            and 0 <= now_ts - float(startup_info.get('updated_at') or 0) <= 120):
+                        err_txt = startup_info.get('error') or msg
+                        status.set(f'启动失败：{err_txt}（请查看 logs\\launcher-lifecycle.log）')
+                        status_label.configure(fg='#b42318')
+                        refreshing['value'] = False
+                        return
                     status.set(f"状态读取失败 · 保留上次成功数据（{datetime.now().strftime('%H:%M:%S')}）：{msg}")
                     status_label.configure(fg='#b42318')
                     refreshing['value'] = False
@@ -2869,7 +2783,7 @@ def main():
                     busy['value'] = False; root.after(0, refresh)
             threading.Thread(target=d_worker, daemon=True).start()
             return
-        if agent in PA_STRATEGY_IDS:
+        if is_pool_strategy_id(agent):
             if not row or row.get('status_label') in ('读取失败', '数据过期', '未登记') or busy['value']:
                 return
             enabled = bool(row.get('enabled'))
@@ -2929,7 +2843,7 @@ def main():
         elif agent == 'G':
             row = controls.get(agent)
             if row: open_strategy_details(root, agent, row)
-        elif agent in PA_STRATEGY_IDS:
+        elif is_pool_strategy_id(agent):
             row = controls.get(agent)
             if row: open_strategy_details(root, agent, row)
         elif agent in ('A', 'B', 'C', 'D', 'E'):
@@ -2938,7 +2852,7 @@ def main():
         if agent == 'G':
             row = controls.get(agent)
             if row: open_strategy_details(root, agent, row)
-        elif agent in PA_STRATEGY_IDS:
+        elif is_pool_strategy_id(agent):
             row = controls.get(agent)
             if row: open_strategy_details(root, agent, row)
         elif agent in ('A', 'B', 'C', 'D', 'E'):

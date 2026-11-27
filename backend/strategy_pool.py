@@ -418,15 +418,85 @@ class StrategyPool:
         net=gross-Decimal(pos.get('entry_fee','0'))-fee
         return {'price':px,'gross':gross,'fee':fee,'net':net,'reason':reason,'slippage':abs(reference*qty-px*qty),'direction':direction}
 
-    def upload(self, content):
+    def upload(self, content, *, expected_strategy_id=None, validate_only=False, activate=False):
         doc,digest=validate_strategy(content);now=datetime.now(timezone.utc).isoformat()
+        sid = doc['strategy_id']
+        if expected_strategy_id is not None and sid != expected_strategy_id:
+            raise StrategyValidationError(
+                f'策略 ID 不匹配：当前选中策略为 {expected_strategy_id}，上传文件中为 {sid}，已拒绝覆盖。'
+            )
         with self.lock, _database(self.path) as c:
+            c.row_factory = sqlite3.Row
+            if c.execute('select 1 from versions where strategy_id=? and version=?',(sid,doc['version'])).fetchone():
+                raise StrategyValidationError(f"版本已存在（{doc['version']}）；版本不可覆盖，请递增版本号后重试。")
+            if c.execute('select 1 from versions where strategy_id=? and sha256=?',(sid,digest)).fetchone():
+                raise StrategyValidationError('上传文件与历史某版本内容完全一致，未检测到规则变更。')
+            existing = c.execute(
+                'select s.active_version,s.enabled,a.position from strategies s '
+                'left join accounts a on a.strategy_id=s.id where s.id=?',
+                (sid,),
+            ).fetchone()
+            history_rows = c.execute(
+                'select version,document,uploaded_at from versions where strategy_id=? order by uploaded_at',
+                (sid,),
+            ).fetchall()
+            prev_ver = (existing['active_version'] if existing and existing['active_version'] else (history_rows[-1]['version'] if history_rows else None))
+            prev_doc = None
+            if prev_ver:
+                prev_row = next((r for r in history_rows if r['version'] == prev_ver), None)
+                if prev_row:
+                    prev_doc = json.loads(prev_row['document'])
+            changes = []
+            if prev_doc is not None:
+                for k in sorted(set(prev_doc) | set(doc)):
+                    if prev_doc.get(k) != doc.get(k):
+                        changes.append({'field': k, 'old': prev_doc.get(k), 'new': doc.get(k)})
+            pos = None
+            if existing and existing['position']:
+                try:
+                    pos = json.loads(existing['position'])
+                except (ValueError, TypeError):
+                    pos = None
+            has_open_pos = bool(pos and not pos.get('pending_entry'))
+            preview = {
+                'strategy_id': sid,
+                'name': doc.get('name') or sid,
+                'version': doc['version'],
+                'previous_version': prev_ver,
+                'is_update': bool(existing),
+                'sha256': digest,
+                'enabled': bool(existing['enabled']) if existing else False,
+                'has_open_position': has_open_pos,
+                'position_version': pos.get('version') if pos else None,
+                'position_protection_note': (
+                    f"当前策略存在持仓（开仓版本 {pos.get('version')}），更新后将保留原持仓及原有止盈止损规则，新版本仅对平仓后的新开仓生效。"
+                    if has_open_pos else '当前空仓，原账户权益、历史成交与跟单映射将完整保留。'
+                ),
+                'version_diff': {'from': prev_ver, 'to': doc['version'], 'changes': changes},
+                'document': doc,
+            }
+            if validate_only:
+                return preview
             c.execute('BEGIN IMMEDIATE')
-            if c.execute('select 1 from versions where strategy_id=? and version=?',(doc['strategy_id'],doc['version'])).fetchone(): raise StrategyValidationError('版本已存在；版本不可覆盖')
-            c.execute('insert or ignore into strategies(id) values(?)',(doc['strategy_id'],))
-            c.execute('insert into versions values(?,?,?,?,?,NULL)',(doc['strategy_id'],doc['version'],digest,json.dumps(doc,sort_keys=True),now))
-            c.execute("insert or ignore into accounts(strategy_id,cash,realized) values(?,'10000.00','0')",(doc['strategy_id'],))
-        return {'strategy_id':doc['strategy_id'],'version':doc['version'],'sha256':digest,'enabled':False,'document':doc}
+            c.execute('insert or ignore into strategies(id) values(?)',(sid,))
+            c.execute('insert into versions values(?,?,?,?,?,NULL)',(sid,doc['version'],digest,json.dumps(doc,sort_keys=True),now))
+            c.execute("insert or ignore into accounts(strategy_id,cash,realized) values(?,'10000.00','0')",(sid,))
+            if activate:
+                c.execute('update strategies set active_version=?,archived_at=NULL where id=?',(doc['version'],sid))
+                c.execute('update versions set enabled_at=? where strategy_id=? and version=?',(now,sid,doc['version']))
+                preview['activated_version'] = doc['version']
+            c.execute(
+                'insert into lifecycle_events values(?,?,?,?,?,?)',
+                (
+                    hashlib.sha256(f"{sid}|{'UPDATE' if existing else 'UPLOAD'}|{doc['version']}|{now}".encode()).hexdigest(),
+                    sid,
+                    'UPDATE_VERSION' if existing else 'UPLOAD',
+                    doc['version'],
+                    json.dumps({'previous_version': prev_ver, 'sha256': digest, 'activated': bool(activate), 'has_open_position': has_open_pos}, sort_keys=True),
+                    now,
+                ),
+            )
+        return preview
 
     def list(self):
         with _database(self.path) as c:
@@ -438,6 +508,30 @@ class StrategyPool:
                 try: pos=json.loads(item['position']) if item['position'] else None
                 except (ValueError,TypeError):pos=None;state_error=True
                 item['position_version']=pos.get('version') if pos else None
+                # Load active (or latest) version metadata for real Chinese name & description
+                ver_rows = c.execute(
+                    'select version,document,uploaded_at from versions where strategy_id=? order by uploaded_at',
+                    (item['id'],),
+                ).fetchall()
+                item['versions_count'] = len(ver_rows)
+                item['latest_version'] = ver_rows[-1]['version'] if ver_rows else None
+                doc_row = None
+                if item.get('active_version'):
+                    doc_row = next((r for r in ver_rows if r['version'] == item['active_version']), None)
+                if doc_row is None and ver_rows:
+                    doc_row = ver_rows[-1]
+                doc = {}
+                if doc_row and doc_row['document']:
+                    try:
+                        doc = json.loads(doc_row['document'])
+                    except (ValueError, TypeError):
+                        doc = {}
+                raw_name = doc.get('name') or doc.get('display_name') or doc.get('title')
+                item['name'] = str(raw_name).strip() if raw_name and str(raw_name).strip() else None
+                item['description'] = str(doc.get('description') or '').strip()
+                item['format'] = doc.get('format') or 'v1'
+                item['timeframe'] = doc.get('timeframe') or '15m'
+                item['initial_equity'] = str((doc.get('risk') or {}).get('initial_equity') or '10000')
                 active=bool(item['enabled'] and item['active_version'])
                 running=False
                 if active and item['last_cycle']:
@@ -461,8 +555,17 @@ class StrategyPool:
                         unrealized=(mark-Decimal(pos['entry']))*qty*side-abs(mark*qty)*Decimal(pos.get('fee_rate','0.0005'))-abs(mark*qty)*Decimal(pos.get('slippage_rate','0.0002'))
                 else: item['position_direction']='UNKNOWN' if state_error else 'FLAT';item['position_amount']='UNKNOWN' if state_error else '0'
                 if not pos: unrealized=Decimal(0)
-                fills=c.execute('select fee,version,side from fills where strategy_id=?',(item['id'],)).fetchall()
+                fills=c.execute('select fee,slippage,version,side from fills where strategy_id=?',(item['id'],)).fetchall()
                 fees=sum((Decimal(f['fee']) for f in fills),Decimal(0));item['fees']=str(fees)
+                slippage_total=sum((Decimal(f['slippage']) for f in fills),Decimal(0));item['slippage_total']=str(slippage_total)
+                item['fill_count']=len(fills)
+                item['available_cash']=str(cash)
+                diag = c.execute(
+                    'select cycle,action,created_at from decision_diagnostics where strategy_id=? order by cycle desc limit 1',
+                    (item['id'],),
+                ).fetchone()
+                item['last_signal'] = diag['action'] if diag else None
+                item['last_signal_at'] = diag['cycle'] if diag else None
                 item['equity']=None if state_error else str(cash+unrealized);item['unrealized']=None if state_error else str(unrealized)
                 item['leverage']='UNKNOWN' if state_error else '5' if pos else None;item['action']='STATE_ERROR' if state_error else item.get('last_action') or 'NO_CYCLE'
                 item['enabled']=bool(item['enabled']);items.append(item)
@@ -868,79 +971,233 @@ class StrategyPool:
                     results.append({'id':sid,'status':'FAULTED'})
         return results
 
-    def backtest(self,sid,version,bars,*,start=None,end=None,fee_rate=Decimal('0.0005'),slippage=Decimal('0.0002'),quantity_step=Decimal('0.00000001'),min_quantity=Decimal('0.00000001'),min_notional=Decimal('1.00')):
+    @staticmethod
+    def _bt_action_label(side, direction, is_entry):
+        d = (direction or ('LONG' if side == 'BUY' else 'SHORT')).upper()
+        if is_entry:
+            return '开多' if d == 'LONG' else '开空'
+        return '平多' if d == 'LONG' else '平空'
+
+    @staticmethod
+    def _dedupe_and_sort_bars(bars):
+        seen = set()
+        deduped = []
+        removed = 0
+        for bar in bars:
+            ts = str(bar.get('close_at') or bar.get('timestamp') or bar.get('open_at') or '')
+            if ts in seen:
+                removed += 1
+                continue
+            seen.add(ts)
+            deduped.append(bar)
+        deduped.sort(key=lambda b: datetime.fromisoformat(str(b.get('close_at') or b.get('timestamp') or b.get('open_at')).replace('Z', '+00:00')))
+        return deduped, removed
+
+    def backtest(self,sid,version,bars,*,start=None,end=None,warmup_bars=None,progress_cb=None,cancel_event=None,fee_rate=Decimal('0.0005'),slippage=Decimal('0.0002'),quantity_step=Decimal('0.00000001'),min_quantity=Decimal('0.00000001'),min_notional=Decimal('1.00')):
         """Run the same signal, size, fee, slippage and exit helpers without touching paper accounts."""
+        import time as _time
+        t0 = _time.perf_counter()
+        if progress_cb:
+            progress_cb('正在初始化策略', 0, len(bars or []), '')
         with _database(self.path) as c: doc=self._doc(c,sid,version)
         if doc.get('format') == FORMAT_V2:
-            return self._backtest_v2(sid,version,doc,bars,start,end,fee_rate,slippage,quantity_step,min_quantity,min_notional)
-        checked=self._validate_bars(bars)
+            return self._backtest_v2(
+                sid,version,doc,bars,start,end,fee_rate,slippage,quantity_step,min_quantity,min_notional,
+                warmup_bars=warmup_bars,progress_cb=progress_cb,cancel_event=cancel_event,t0=t0,
+            )
+        raw_bars = list(warmup_bars or []) + list(bars or [])
+        deduped, dup_removed = self._dedupe_and_sort_bars(raw_bars)
+        checked=self._validate_bars(deduped, allow_gaps=True)
+        start_dt = datetime.fromisoformat(str(start).replace('Z','+00:00')) if start else None
+        end_dt = datetime.fromisoformat(str(end).replace('Z','+00:00')) if end else None
         selected=[]
+        warmup_only=[]
         for bar in checked:
             ts=datetime.fromisoformat(str(bar.get('close_at') or bar.get('timestamp') or bar.get('open_at')).replace('Z','+00:00'))
-            if start and ts<datetime.fromisoformat(str(start).replace('Z','+00:00')):continue
-            if end and ts>datetime.fromisoformat(str(end).replace('Z','+00:00')):continue
+            if start_dt and ts < start_dt:
+                warmup_only.append(bar)
+                continue
+            if end_dt and ts > end_dt:
+                continue
             selected.append(bar)
-        if len(selected)<self._required_bars(doc):raise StrategyValidationError('所选历史区间数据不足')
-        initial=Decimal('10000');cash=initial;realized=Decimal(0);fees=Decimal(0);pos=None;fills=[];curve=[];peak=initial;maxdd=Decimal(0)
-        for i in range(self._required_bars(doc),len(selected)+1):
-            window=selected[:i];bar=window[-1];cycle=str(bar.get('close_at') or bar.get('timestamp') or bar.get('open_at'))
-            if pos:
-                closed=self._close_position(pos,doc,window,Decimal(fee_rate),Decimal(slippage))
-                if closed:
-                    fees+=closed['fee'];cash+=closed['gross']-closed['fee'];realized+=closed['net'];fills.append({'cycle':cycle,'side':'SELL','version':pos['version'],'qty':pos['qty'],'price':str(closed['price']),'fee':str(closed['fee']),'slippage':str(closed['slippage']),'net_pnl':str(closed['net']),'reason':closed['reason'],'idempotency_key':f'{sid}:bt:{cycle}:close'})
-                    pos=None
-            elif evaluate(doc['entry'],window,doc['parameters'],previous_bars=window[:-1]):
-                try:
-                    pos,fee,slip_cost=self._new_position(sid,doc,window,cycle,Decimal(fee_rate),Decimal(slippage),Decimal(quantity_step),Decimal(min_quantity),Decimal(min_notional),cash)
-                    cash-=fee;fees+=fee;fills.append({'cycle':cycle,'side':'BUY','version':version,'qty':pos['qty'],'price':pos['entry'],'fee':str(fee),'slippage':str(slip_cost),'net_pnl':'0','reason':'ENTRY','idempotency_key':f'{sid}:bt:{cycle}:open'})
-                except StrategyValidationError: pass
+        warm = self._required_bars(doc)
+        if len(warmup_only) + len(selected) < warm or not selected:
+            raise StrategyValidationError('所选历史区间数据不足')
+        strategy_name = str(doc.get('name') or sid)
+        initial=Decimal('10000');cash=initial;realized=Decimal(0);fees=Decimal(0);slippage_total=Decimal(0)
+        pos=None;fills=[];curve=[];peak=initial;maxdd=Decimal(0);maxdd_amt=Decimal(0)
+        combined = warmup_only + selected
+        start_idx = len(warmup_only)
+        total_sel = len(selected)
+        for offset in range(total_sel):
+            if cancel_event is not None and cancel_event.is_set():
+                raise StrategyValidationError('BACKTEST_CANCELED')
+            idx = start_idx + offset
+            window = combined[:idx + 1]
+            bar = window[-1]
+            cycle = str(bar.get('close_at') or bar.get('timestamp') or bar.get('open_at'))
+            if progress_cb and (offset % 100 == 0 or offset == total_sel - 1):
+                progress_cb('正在回测计算', offset + 1, total_sel, cycle)
+            if len(window) >= warm:
+                if pos:
+                    closed=self._close_position(pos,doc,window,Decimal(fee_rate),Decimal(slippage))
+                    if closed:
+                        fees+=closed['fee'];slippage_total+=closed['slippage']
+                        cash+=closed['gross']-closed['fee'];realized+=closed['net']
+                        notional=abs(closed['price']*Decimal(pos['qty']))
+                        oid=f'{sid}:bt:{cycle}:close'
+                        fills.append({
+                            'cycle':cycle,'strategy_id':sid,'strategy_name':strategy_name,'version':pos['version'],
+                            'action':'平多','side':'SELL','direction':'LONG','qty':pos['qty'],'price':str(closed['price']),
+                            'notional':str(notional),'fee':str(closed['fee']),'slippage':str(closed['slippage']),
+                            'net_pnl':str(closed['net']),'reason':closed['reason'],'order_id':oid,'idempotency_key':oid,
+                        })
+                        pos=None
+                elif evaluate(doc['entry'],window,doc['parameters'],previous_bars=window[:-1]):
+                    try:
+                        pos,fee,slip_cost=self._new_position(sid,doc,window,cycle,Decimal(fee_rate),Decimal(slippage),Decimal(quantity_step),Decimal(min_quantity),Decimal(min_notional),cash)
+                        cash-=fee;fees+=fee;slippage_total+=slip_cost
+                        notional=abs(Decimal(pos['entry'])*Decimal(pos['qty']))
+                        oid=f'{sid}:bt:{cycle}:open'
+                        fills.append({
+                            'cycle':cycle,'strategy_id':sid,'strategy_name':strategy_name,'version':version,
+                            'action':'开多','side':'BUY','direction':'LONG','qty':pos['qty'],'price':pos['entry'],
+                            'notional':str(notional),'fee':str(fee),'slippage':str(slip_cost),
+                            'net_pnl':'0','reason':'ENTRY','order_id':oid,'idempotency_key':oid,
+                        })
+                    except StrategyValidationError: pass
             mark=Decimal(str(bar['close']))
             if pos:
                 open_qty=Decimal(pos['qty']);open_notional=abs(mark*open_qty)
                 unrealized=(mark-Decimal(pos['entry']))*open_qty-open_notional*Decimal(fee_rate)-open_notional*Decimal(slippage)
             else:unrealized=Decimal(0)
-            equity=cash+unrealized;peak=max(peak,equity);draw=(peak-equity)/peak if peak else 0;maxdd=max(maxdd,draw)
-            curve.append({'cycle':cycle,'equity':str(equity)})
+            equity=cash+unrealized;peak=max(peak,equity)
+            dd_amt=peak-equity
+            draw=(dd_amt/peak) if peak else Decimal(0)
+            if draw > maxdd: maxdd = draw
+            if dd_amt > maxdd_amt: maxdd_amt = dd_amt
+            curve.append({'cycle':cycle,'equity':str(equity),'drawdown':str(dd_amt),'drawdown_pct':str(draw)})
+        if progress_cb:
+            progress_cb('正在生成绩效报告', total_sel, total_sel, '')
         gaps=[]
         for a,b in zip(selected,selected[1:]):
-            ta=datetime.fromisoformat(str(a.get('close_at') or a.get('timestamp') or a.get('open_at')).replace('Z','+00:00'));tb=datetime.fromisoformat(str(b.get('close_at') or b.get('timestamp') or b.get('open_at')).replace('Z','+00:00'))
-            if (tb-ta).total_seconds()!=900:gaps.append({'from':ta.isoformat(),'to':tb.isoformat()})
-        closed_trades=[f for f in fills if f['side']=='SELL'];wins=sum(Decimal(t['net_pnl'])>0 for t in closed_trades)
-        final_equity=Decimal(curve[-1]['equity']);final_unrealized=Decimal(curve[-1]['equity'])-cash if pos else Decimal(0)
-        report={'strategy_id':sid,'strategy_version':version,'start':start or (selected[0].get('close_at') or selected[0].get('timestamp')),'end':end or (selected[-1].get('close_at') or selected[-1].get('timestamp')),'trades':fills,'net_pnl':str(final_equity-initial),'realized_net_pnl':str(realized),'unrealized_net_pnl':str(final_unrealized),'fees':str(fees),'win_rate':wins/len(closed_trades) if closed_trades else 0,'max_drawdown':str(maxdd),'equity_curve':curve,'data_gaps':gaps,'open_position':pos,'initial_equity':str(initial)}
-        report_id=hashlib.sha256(json.dumps(report,sort_keys=True).encode()).hexdigest()
+            ta=datetime.fromisoformat(str(a.get('close_at') or a.get('timestamp') or a.get('open_at')).replace('Z','+00:00'))
+            tb=datetime.fromisoformat(str(b.get('close_at') or b.get('timestamp') or b.get('open_at')).replace('Z','+00:00'))
+            if (tb-ta).total_seconds()!=900:
+                gaps.append({'from':ta.isoformat(),'to':tb.isoformat(),'missing_bars':max(0,int((tb-ta).total_seconds()/900)-1)})
+        closed_trades=[f for f in fills if f['side']=='SELL']
+        wins=[Decimal(t['net_pnl']) for t in closed_trades if Decimal(t['net_pnl'])>0]
+        losses=[Decimal(t['net_pnl']) for t in closed_trades if Decimal(t['net_pnl'])<0]
+        gross_profit=sum(wins,Decimal(0));gross_loss=abs(sum(losses,Decimal(0)))
+        profit_factor=(float(gross_profit/gross_loss) if gross_loss>0 else (None if not wins else float('inf')))
+        final_equity=Decimal(curve[-1]['equity']) if curve else initial
+        final_unrealized=(final_equity-cash) if pos else Decimal(0)
+        net_pnl=final_equity-initial
+        elapsed_ms=int((_time.perf_counter()-t0)*1000)
+        report={
+            'strategy_id':sid,'strategy_name':strategy_name,'strategy_version':version,
+            'symbol':'BTC/USD','timeframe':doc.get('timeframe','15m'),'data_source':'BINANCE_USDM_PERP',
+            'start':start or (selected[0].get('close_at') or selected[0].get('timestamp')),
+            'end':end or (selected[-1].get('close_at') or selected[-1].get('timestamp')),
+            'actual_start':selected[0].get('open_at') or selected[0].get('timestamp'),
+            'actual_end':selected[-1].get('close_at') or selected[-1].get('timestamp'),
+            'bar_count':len(selected),'warmup_bar_count':len(warmup_only),
+            'duplicate_bars_removed':dup_removed,
+            'initial_equity':str(initial),'final_equity':str(final_equity),
+            'net_pnl':str(net_pnl),'net_return_pct':float((net_pnl/initial)*Decimal(100)) if initial else 0.0,
+            'realized_net_pnl':str(realized),'unrealized_net_pnl':str(final_unrealized),
+            'fill_count':len(fills),'closed_trade_count':len(closed_trades),
+            'win_count':len(wins),'loss_count':len(losses),
+            'win_rate':len(wins)/len(closed_trades) if closed_trades else 0.0,
+            'profit_factor':None if profit_factor == float('inf') else profit_factor,
+            'profit_factor_label':('∞（无亏损交易）' if profit_factor == float('inf') else (f'{profit_factor:.2f}' if profit_factor is not None else '—（无平仓交易）')),
+            'max_drawdown':str(maxdd),'max_drawdown_pct':float(maxdd*Decimal(100)),'max_drawdown_amount':str(maxdd_amt),
+            'fees':str(fees),'slippage_total':str(slippage_total),
+            'cost_model':{'fee_rate':str(fee_rate),'slippage_rate':str(slippage),'unmodeled_costs':'未计入永续合约资金费率及盘口冲击成本'},
+            'same_bar_rule':'同根K线止损优先保守规则',
+            'trades':fills,'equity_curve':curve,'data_gaps':gaps,'open_position':pos,
+            'elapsed_ms':elapsed_ms,
+        }
+        report_id=hashlib.sha256(json.dumps({k:v for k,v in report.items() if k!='elapsed_ms'},sort_keys=True).encode()).hexdigest()
         with _database(self.backtest_path) as c:c.execute('insert or replace into reports values(?,?,?,?,?)',(report_id,sid,version,json.dumps(report,sort_keys=True),datetime.now(timezone.utc).isoformat()))
         return report
 
-    def _backtest_v2(self,sid,version,doc,bars,start,end,fee_rate,slippage,quantity_step,min_quantity,min_notional):
-        checked=self._validate_bars(bars,allow_gaps=True);selected=[]
+    def _backtest_v2(self,sid,version,doc,bars,start,end,fee_rate,slippage,quantity_step,min_quantity,min_notional,*,warmup_bars=None,progress_cb=None,cancel_event=None,t0=None):
+        import time as _time
+        t0 = t0 if t0 is not None else _time.perf_counter()
+        raw_bars = list(warmup_bars or []) + list(bars or [])
+        deduped, dup_removed = self._dedupe_and_sort_bars(raw_bars)
+        checked=self._validate_bars(deduped,allow_gaps=True)
+        start_dt = datetime.fromisoformat(str(start).replace('Z','+00:00')) if start else None
+        end_dt = datetime.fromisoformat(str(end).replace('Z','+00:00')) if end else None
+        selected=[]
+        warmup_only=[]
         for bar in checked:
             ts=datetime.fromisoformat(str(bar.get('close_at') or bar.get('timestamp') or bar.get('open_at')).replace('Z','+00:00'))
-            if start and ts<datetime.fromisoformat(str(start).replace('Z','+00:00')):continue
-            if end and ts>datetime.fromisoformat(str(end).replace('Z','+00:00')):continue
+            if start_dt and ts < start_dt:
+                warmup_only.append(bar)
+                continue
+            if end_dt and ts > end_dt:
+                continue
             selected.append(bar)
         warm=self._required_bars(doc)
-        if len(selected)<warm:raise StrategyValidationError('所选历史区间数据不足')
-        initial=Decimal('10000');cash=initial;fees=Decimal(0);realized=Decimal(0);fills=[];curve=[];pos=None;pending=None;peak=initial;maxdd=Decimal(0);segments=[];censored_positions=0;skipped_entries=0;ambiguous=0
+        if len(warmup_only) + len(selected) < warm or not selected:
+            raise StrategyValidationError('所选历史区间数据不足')
+        strategy_name = str(doc.get('name') or sid)
+        initial=Decimal('10000');cash=initial;fees=Decimal(0);slippage_total=Decimal(0);realized=Decimal(0)
+        fills=[];curve=[];pos=None;pending=None;peak=initial;maxdd=Decimal(0);maxdd_amt=Decimal(0)
+        censored_positions=0;skipped_entries=0;ambiguous=0
         segment=[];segment_id=0;gaps=[]
+        # Pre-seed contiguous trailing warmup bars immediately preceding selected[0]
+        if warmup_only:
+            first_sel_ts = datetime.fromisoformat(str(selected[0].get('close_at') or selected[0].get('timestamp') or selected[0].get('open_at')).replace('Z','+00:00'))
+            contiguous = []
+            expected_prev = first_sel_ts - __import__('datetime').timedelta(minutes=15)
+            for wbar in reversed(warmup_only):
+                wts = datetime.fromisoformat(str(wbar.get('close_at') or wbar.get('timestamp') or wbar.get('open_at')).replace('Z','+00:00'))
+                if wts == expected_prev:
+                    contiguous.append(wbar)
+                    expected_prev -= __import__('datetime').timedelta(minutes=15)
+                else:
+                    break
+            contiguous.reverse()
+            segment = contiguous
         def finish_position(pos,bar,window,held):
-            nonlocal cash,fees,realized,ambiguous
+            nonlocal cash,fees,slippage_total,realized,ambiguous
             stop=Decimal(pos['stop']);target=Decimal(pos['target']);hi=Decimal(str(bar['high']));lo=Decimal(str(bar['low']))
             if (lo<=stop and hi>=target) if pos['direction']=='LONG' else (hi>=stop and lo<=target):ambiguous+=1
             pos['bars_held']=held
             close=self._close_position(pos,doc,window,Decimal(fee_rate),Decimal(slippage))
             if not close:return False
-            fees+=close['fee'];cash+=close['gross']-close['fee'];realized+=close['net']
-            fills.append({'cycle':str(bar.get('close_at') or bar.get('timestamp')),'side':'SELL' if pos['direction']=='LONG' else 'BUY','direction':pos['direction'],'version':version,'qty':pos['qty'],'price':str(close['price']),'fee':str(close['fee']),'slippage':str(close['slippage']),'net_pnl':str(close['net']),'reason':close['reason'],'segment':segment_id})
+            fees+=close['fee'];slippage_total+=close['slippage'];cash+=close['gross']-close['fee'];realized+=close['net']
+            cyc=str(bar.get('close_at') or bar.get('timestamp'))
+            close_side='SELL' if pos['direction']=='LONG' else 'BUY'
+            notional=abs(close['price']*Decimal(pos['qty']))
+            oid=f'{sid}:bt:{cyc}:close:{len(fills)+1}'
+            fills.append({
+                'cycle':cyc,'strategy_id':sid,'strategy_name':strategy_name,'version':version,
+                'action':self._bt_action_label(close_side,pos['direction'],False),
+                'side':close_side,'direction':pos['direction'],'qty':pos['qty'],'price':str(close['price']),
+                'notional':str(notional),'fee':str(close['fee']),'slippage':str(close['slippage']),
+                'net_pnl':str(close['net']),'reason':close['reason'],'segment':segment_id,'order_id':oid,
+            })
             return True
-        for bar in selected:
+        total_sel = len(selected)
+        for idx, bar in enumerate(selected):
+            if cancel_event is not None and cancel_event.is_set():
+                raise StrategyValidationError('BACKTEST_CANCELED')
             ts=datetime.fromisoformat(str(bar.get('close_at') or bar.get('timestamp') or bar.get('open_at')).replace('Z','+00:00'))
-            if segment and (ts-datetime.fromisoformat(str(segment[-1].get('close_at') or segment[-1].get('timestamp') or segment[-1].get('open_at')).replace('Z','+00:00'))).total_seconds()!=900:
+            cyc_str = str(bar.get('close_at') or bar.get('timestamp'))
+            if progress_cb and (idx % 100 == 0 or idx == total_sel - 1):
+                progress_cb('正在回测计算', idx + 1, total_sel, cyc_str)
+            if segment:
                 previous_ts=datetime.fromisoformat(str(segment[-1].get('close_at') or segment[-1].get('timestamp') or segment[-1].get('open_at')).replace('Z','+00:00'))
-                gaps.append({'from':previous_ts.isoformat(),'to':ts.isoformat(),'missing_bars':int((ts-previous_ts).total_seconds()/900)-1})
-                if pending:skipped_entries+=1;pending=None
-                if pos:censored_positions+=1;pos=None
-                segment=[];segment_id+=1
+                if (ts-previous_ts).total_seconds()!=900:
+                    if idx > 0:
+                        gaps.append({'from':previous_ts.isoformat(),'to':ts.isoformat(),'missing_bars':max(0,int((ts-previous_ts).total_seconds()/900)-1)})
+                    if pending:skipped_entries+=1;pending=None
+                    if pos:censored_positions+=1;pos=None
+                    segment=[];segment_id+=1
             segment.append(bar)
             if len(segment)>warm:
                 window=segment
@@ -948,8 +1205,17 @@ class StrategyPool:
                     direction,stop,signal_ts=pending;pending=None
                     try:
                         pos,entry_fee,entry_slip=self._new_position(sid,doc,window[:-1],signal_ts,Decimal(fee_rate),Decimal(slippage),Decimal(quantity_step),Decimal(min_quantity),Decimal(min_notional),cash,entry_reference=str(bar['open']),direction=direction,stop_price=stop)
-                        cash-=entry_fee;fees+=entry_fee
-                        fills.append({'cycle':str(bar.get('close_at') or bar.get('timestamp')),'side':'BUY' if direction=='LONG' else 'SELL','direction':direction,'version':version,'qty':pos['qty'],'price':pos['entry'],'fee':str(entry_fee),'slippage':str(entry_slip),'net_pnl':'0','reason':'ENTRY_NEXT_OPEN','segment':segment_id})
+                        cash-=entry_fee;fees+=entry_fee;slippage_total+=entry_slip
+                        open_side='BUY' if direction=='LONG' else 'SELL'
+                        notional=abs(Decimal(pos['entry'])*Decimal(pos['qty']))
+                        oid=f'{sid}:bt:{cyc_str}:open:{len(fills)+1}'
+                        fills.append({
+                            'cycle':cyc_str,'strategy_id':sid,'strategy_name':strategy_name,'version':version,
+                            'action':self._bt_action_label(open_side,direction,True),
+                            'side':open_side,'direction':direction,'qty':pos['qty'],'price':pos['entry'],
+                            'notional':str(notional),'fee':str(entry_fee),'slippage':str(entry_slip),
+                            'net_pnl':'0','reason':'ENTRY_NEXT_OPEN','segment':segment_id,'order_id':oid,
+                        })
                     except StrategyValidationError:skipped_entries+=1
                 if pos and finish_position(pos,bar,window,1 if pos.get('bars_held',0)==0 else int(pos['bars_held'])+1):pos=None
                 elif not pos:
@@ -957,16 +1223,58 @@ class StrategyPool:
                     if direction:
                         stop,rejection=build_v2_stop(doc,direction,window)
                         if rejection:skipped_entries+=1
-                        else:pending=(direction,str(stop),str(bar.get('close_at') or bar.get('timestamp')))
+                        else:pending=(direction,str(stop),cyc_str)
             mark=Decimal(str(bar['close']));unrealized=Decimal(0)
             if pos:
-                side=Decimal(1) if pos['direction']=='LONG' else Decimal(-1);qty=Decimal(pos['qty']);unrealized=(mark-Decimal(pos['entry']))*qty*side-abs(mark*qty)*Decimal(fee_rate)-abs(mark*qty)*Decimal(slippage)
+                side=Decimal(1) if pos['direction']=='LONG' else Decimal(-1);qty=Decimal(pos['qty'])
+                unrealized=(mark-Decimal(pos['entry']))*qty*side-abs(mark*qty)*Decimal(fee_rate)-abs(mark*qty)*Decimal(slippage)
                 pos['bars_held']=int(pos.get('bars_held',0))+1
-            equity=cash+unrealized;peak=max(peak,equity);maxdd=max(maxdd,(peak-equity)/peak if peak else Decimal(0));curve.append({'cycle':str(bar.get('close_at') or bar.get('timestamp')),'equity':str(equity),'segment':segment_id})
+                pos['mark']=str(mark)
+            equity=cash+unrealized;peak=max(peak,equity)
+            dd_amt=peak-equity
+            draw=(dd_amt/peak) if peak else Decimal(0)
+            if draw > maxdd: maxdd = draw
+            if dd_amt > maxdd_amt: maxdd_amt = dd_amt
+            curve.append({'cycle':cyc_str,'equity':str(equity),'drawdown':str(dd_amt),'drawdown_pct':str(draw),'segment':segment_id})
+        if progress_cb:
+            progress_cb('正在生成绩效报告', total_sel, total_sel, '')
         if pending:skipped_entries+=1
         if pos:censored_positions+=1
-        exits=[f for f in fills if f['reason'] not in ('ENTRY_NEXT_OPEN',)];wins=sum(Decimal(t['net_pnl'])>0 for t in exits)
-        report={'strategy_id':sid,'strategy_version':version,'start':start or (selected[0].get('close_at') or selected[0].get('timestamp')),'end':end or (selected[-1].get('close_at') or selected[-1].get('timestamp')),'trades':fills,'net_pnl':str(Decimal(curve[-1]['equity'])-initial),'realized_net_pnl':str(realized),'unrealized_net_pnl':str(Decimal(curve[-1]['equity'])-cash if pos else 0),'fees':str(fees),'win_rate':wins/len(exits) if exits else 0,'max_drawdown':str(maxdd),'equity_curve':curve,'data_gaps':gaps,'segment_count':segment_id+1,'censored_positions_at_gaps_or_end':censored_positions,'skipped_entries':skipped_entries,'same_bar_stop_target_ambiguities':ambiguous,'open_position':pos,'initial_equity':str(initial)}
-        report_id=hashlib.sha256(json.dumps(report,sort_keys=True).encode()).hexdigest()
+        exits=[f for f in fills if f['reason'] not in ('ENTRY_NEXT_OPEN',)]
+        wins=[Decimal(t['net_pnl']) for t in exits if Decimal(t['net_pnl'])>0]
+        losses=[Decimal(t['net_pnl']) for t in exits if Decimal(t['net_pnl'])<0]
+        gross_profit=sum(wins,Decimal(0));gross_loss=abs(sum(losses,Decimal(0)))
+        profit_factor=(float(gross_profit/gross_loss) if gross_loss>0 else (None if not wins else float('inf')))
+        final_equity=Decimal(curve[-1]['equity']) if curve else initial
+        final_unrealized=(final_equity-cash) if pos else Decimal(0)
+        net_pnl=final_equity-initial
+        elapsed_ms=int((_time.perf_counter()-t0)*1000)
+        report={
+            'strategy_id':sid,'strategy_name':strategy_name,'strategy_version':version,
+            'symbol':'BTC/USD','timeframe':doc.get('timeframe','15m'),'data_source':'BINANCE_USDM_PERP',
+            'start':start or (selected[0].get('close_at') or selected[0].get('timestamp')),
+            'end':end or (selected[-1].get('close_at') or selected[-1].get('timestamp')),
+            'actual_start':selected[0].get('open_at') or selected[0].get('timestamp'),
+            'actual_end':selected[-1].get('close_at') or selected[-1].get('timestamp'),
+            'bar_count':len(selected),'warmup_bar_count':len(warmup_only),
+            'duplicate_bars_removed':dup_removed,
+            'initial_equity':str(initial),'final_equity':str(final_equity),
+            'net_pnl':str(net_pnl),'net_return_pct':float((net_pnl/initial)*Decimal(100)) if initial else 0.0,
+            'realized_net_pnl':str(realized),'unrealized_net_pnl':str(final_unrealized),
+            'fill_count':len(fills),'closed_trade_count':len(exits),
+            'win_count':len(wins),'loss_count':len(losses),
+            'win_rate':len(wins)/len(exits) if exits else 0.0,
+            'profit_factor':None if profit_factor == float('inf') else profit_factor,
+            'profit_factor_label':('∞（无亏损交易）' if profit_factor == float('inf') else (f'{profit_factor:.2f}' if profit_factor is not None else '—（无平仓交易）')),
+            'max_drawdown':str(maxdd),'max_drawdown_pct':float(maxdd*Decimal(100)),'max_drawdown_amount':str(maxdd_amt),
+            'fees':str(fees),'slippage_total':str(slippage_total),
+            'cost_model':{'fee_rate':str(fee_rate),'slippage_rate':str(slippage),'unmodeled_costs':'未计入永续合约资金费率及盘口冲击成本'},
+            'same_bar_rule':'同根K线同时触及止损与止盈时，按保守规则优先触发止损',
+            'trades':fills,'equity_curve':curve,'data_gaps':gaps,'segment_count':segment_id+1,
+            'censored_positions_at_gaps_or_end':censored_positions,'skipped_entries':skipped_entries,
+            'same_bar_stop_target_ambiguities':ambiguous,'open_position':pos,
+            'elapsed_ms':elapsed_ms,
+        }
+        report_id=hashlib.sha256(json.dumps({k:v for k,v in report.items() if k!='elapsed_ms'},sort_keys=True).encode()).hexdigest()
         with _database(self.backtest_path) as c:c.execute('insert or replace into reports values(?,?,?,?,?)',(report_id,sid,version,json.dumps(report,sort_keys=True),datetime.now(timezone.utc).isoformat()))
         return report
