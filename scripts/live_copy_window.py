@@ -340,6 +340,10 @@ def main(owner=None, *, paper_rows=None, initial_env=DEMO_ENV, env_roots=None):
         return strategy_display_name(sid)
 
     def strategy_source_path(sid):
+        for subdir in ('pa-v1-extensions', 'r-series', 'extensions'):
+            ext_path = project / 'data' / subdir / f'{sid}.sqlite3'
+            if ext_path.is_file():
+                return ext_path
         if sid in ('PA-09', 'PA-10'):
             return project / 'data' / 'pa-v1-extensions' / f'{sid}.sqlite3'
         if sid == 'G':

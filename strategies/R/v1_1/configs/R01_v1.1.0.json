@@ -1,0 +1,49 @@
+{
+  "algorithm_baseline": {
+    "commit_sha": "2716ca374068607c3ac3b9bf5eeef2ac5e72f235",
+    "license": "MIT",
+    "repo": "https://github.com/moolish-com/td-sequential-python",
+    "version": "1.0.1"
+  },
+  "background_timeframe": null,
+  "candidate_ref": "P10_atr_2.0_R2.0_H64",
+  "description": "15m TD9 基础反转对照组（V1.1 冻结参数）：buy/sell_setup==9 次根开盘入场，2.0 ATR 止损缓冲，2.0R 止盈，最长持仓 64 根 15m K 线。",
+  "exec_timeframe": "15m",
+  "frozen_paper_observation": true,
+  "group": "R系列",
+  "live_trading_disabled": true,
+  "market": "BTC/USD",
+  "name": "R01 · TD9 基础反转策略 (V1.1)",
+  "observation_tier": "EXPERIMENTAL_OBSERVE",
+  "parameters": {
+    "atr_period": 14,
+    "candidate_ref": "P10_atr_2.0_R2.0_H64",
+    "confirm_window": 0,
+    "max_hold_bars": 64,
+    "signal_tf": "15m",
+    "stop_atr_mult": 2.0,
+    "target_r": 2.0,
+    "tdst_filter": "none",
+    "vol_mult": 0.0
+  },
+  "position": {
+    "direction": "both",
+    "entry_timing": "next_open",
+    "max_hold_bars": 64,
+    "same_bar_priority": "stop",
+    "stop_atr_mult": 2.0,
+    "target_r": 2.0
+  },
+  "provider_symbol": "BTCUSDT",
+  "risk": {
+    "capital_model": "PAPER_10000_RISK_2PCT_5X",
+    "currency": "USD_RESEARCH",
+    "initial_equity": "10000",
+    "max_leverage": 5,
+    "risk_fraction": "0.02"
+  },
+  "signal_timeframe": "15m",
+  "source": "BINANCE_USDM_PERP",
+  "strategy_id": "R01",
+  "version": "1.1.0"
+}

@@ -88,6 +88,23 @@ class EventReader:
     def __init__(self, root, clock=time.time, data_root=None):
         from pathlib import Path
         self.root=Path(root).resolve();self.data=Path(data_root).resolve() if data_root else self.root/'data';self.clock=clock;self._cached=None;self._at=0;self.errors=[];import threading;self._lock=threading.Lock()
+    def invalidate(self):
+        with self._lock:
+            self._cached=None;self._at=0
+    def _excluded_ids(self):
+        import sqlite3
+        p=(self.data/'strategy-lifecycle.sqlite3').resolve()
+        if not p.is_file():
+            return set()
+        db=None
+        try:
+            db=sqlite3.connect(p.as_uri()+'?mode=ro',uri=True,timeout=2)
+            rows=db.execute("SELECT strategy_id FROM strategy_lifecycle WHERE state IN ('ARCHIVED','DELETED')").fetchall()
+            return {str(r[0]) for r in rows}
+        except sqlite3.Error:
+            return set()
+        finally:
+            if db is not None:db.close()
     def _rows(self,relative,table,limit=2000):
         import sqlite3
         if table not in {'fills','g_fills','audit_events'}:raise ValueError('INVALID_TABLE')
@@ -127,12 +144,14 @@ class EventReader:
         for row in d.get('fills',[]):
             item=normalize_event('D',row);item['source']='d/trading.sqlite3';events.append(item)
         pool=store.pool();self.errors.extend(store.errors)
-        for short,sid in PA:
-            data=pool.get(sid,{});raw=data.get('fills') or []
+        pa_short_by_id={sid:short for short,sid in PA}
+        handled_pool=set()
+        for sid,data in sorted(pool.items()):
+            short=pa_short_by_id.get(sid,sid)
+            handled_pool.add(sid)
             if short in ('PA-09','PA-10'):
-                for f in raw:
-                    events.append({'event_id':str(f.get('kind') or '')+':'+str(f.get('at') or ''),'strategy_id':short,'strategy_version':data.get('active_version'),'trade_id':None,'occurred_at':f.get('at'),'position_effect':f.get('kind'),'position_direction':None,'quantity':f.get('qty'),'price':f.get('price'),'reason_text':f.get('reason'),'realized_pnl':None,'source':'pa-v1-extensions/'+sid+'.sqlite3','verification_status':'UNVERIFIED'})
                 continue
+            raw=data.get('fills') or []
             pairs,issues=pair_pool_fills(raw,sid)
             by_open={p['trade_id'].removeprefix('pool-lifecycle:'):p for p in pairs};by_close={p['closed_at']:p for p in pairs}
             for f in raw:
@@ -141,10 +160,41 @@ class EventReader:
                 adapted={'fill_id':key,'trade_id':(pair or {}).get('trade_id'),'occurred_at':f.get('created_at'),'position_effect':'OPEN' if is_open else 'CLOSE','position_direction':direction,'quantity':f.get('qty'),'price':f.get('price'),'reason':f.get('reason'),'strategy_version':f.get('version')}
                 item=normalize_event(short,adapted)
                 if is_open and not pair and f.get('side') in ('BUY','SELL') and isinstance(key,str) and key.startswith(sid+':open:'):
-                    # The committed entry itself is evidence even before the lifecycle closes.
                     check=normalize_event(short,{**adapted,'trade_id':key})
                     item['verification_status']=check['verification_status']
                 item['source']='strategy-pool.sqlite3';item['trade_id_source']='verified-single-position-lifecycle' if pair else 'unavailable'
                 if pair and not is_open:item['realized_pnl']=pair.get('net_pnl')
                 events.append(item)
+        import json as _json
+        for subdir in ('pa-v1-extensions','r-series','extensions'):
+            ext_dir=self.data/subdir
+            if not ext_dir.is_dir():
+                continue
+            for db_path in sorted(ext_dir.glob('*.sqlite3')):
+                esid=db_path.stem
+                rel=f'{subdir}/{db_path.name}'
+                for row in self._rows(rel,'fills'):
+                    raw_val=row.get('value')
+                    if not raw_val:
+                        continue
+                    try:
+                        rec=_json.loads(raw_val)
+                    except (TypeError,ValueError):
+                        continue
+                    kind=rec.get('kind')
+                    adapted={
+                        'fill_id':rec.get('idempotency_key') or row.get('id') or f"{esid}:{kind}:{rec.get('at')}",
+                        'trade_id':rec.get('trade_id'),
+                        'occurred_at':rec.get('at') or rec.get('cycle'),
+                        'position_effect':kind,
+                        'position_direction':rec.get('direction'),
+                        'quantity':rec.get('qty'),
+                        'price':rec.get('price'),
+                        'reason':rec.get('reason'),
+                        'pnl':rec.get('net') if kind=='CLOSE' else None,
+                        'strategy_version':rec.get('version'),
+                    }
+                    item=normalize_event(esid,adapted)
+                    item['source']=rel
+                    events.append(item)
         self._cached=mark_position_lifecycle(events);self._at=self.clock();return self._cached

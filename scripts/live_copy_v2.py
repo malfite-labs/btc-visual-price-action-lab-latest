@@ -25,12 +25,17 @@ def paper_fills(path, after=None, *, strategy='C'):
     """Without a cursor, return the current watermark for a new subscription."""
     with closing(sqlite3.connect(Path(path).resolve().as_uri() + '?mode=ro', uri=True)) as db:
         db.execute('PRAGMA query_only=ON')
-        if strategy not in ('A', 'B', 'C', 'D', 'E', 'G', 'PA-09', 'PA-10'):
+        if strategy not in ('A', 'B', 'C', 'D', 'E', 'G'):
             db.execute('BEGIN')
+            has_snapshot = (
+                db.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='snapshot' LIMIT 1"
+                ).fetchone()
+                is not None
+            )
+            if has_snapshot:
+                return pa_ext_fills(db, strategy, after)
             return pa_pool_fills(db, strategy, after)
-        if strategy in ('PA-09', 'PA-10'):
-            db.execute('BEGIN')
-            return pa_ext_fills(db, strategy, after)
         if strategy == 'G':
             if after is None:
                 return db.execute('SELECT coalesce(max(rowid),0) FROM g_fills').fetchone()[0]
@@ -66,10 +71,21 @@ def paper_fills(path, after=None, *, strategy='C'):
 
 
 def pa_ext_fills(db, strategy, after):
-    """Unified fill adapter for PA-09 and PA-10 isolated extension ledgers."""
+    """Unified fill adapter for Mode B isolated extension ledgers (PA-09/10, R-series, S/AY, future extensions)."""
     snap_row = db.execute('SELECT value FROM snapshot LIMIT 1').fetchone()
     if snap_row is None:
         raise ValueError(f'{strategy}_SNAPSHOT_MISSING')
+    try:
+        snap = json.loads(snap_row[0])
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f'{strategy}_SNAPSHOT_CORRUPT') from exc
+    if not isinstance(snap, dict):
+        raise ValueError(f'{strategy}_SNAPSHOT_INVALID')
+    snap_sid = snap.get('strategy_id') or snap.get('strategy')
+    if snap_sid and str(snap_sid) != str(strategy):
+        raise ValueError(f'{strategy}_IDENTITY_MISMATCH:{snap_sid}')
+    if str(snap.get('source') or '').upper().startswith('BACKTEST') or snap.get('is_backtest') is True:
+        raise ValueError(f'{strategy}_BACKTEST_LEDGER_REJECTED')
     if after is None:
         return db.execute('SELECT coalesce(max(rowid),0) FROM fills').fetchone()[0]
     rows = db.execute('SELECT rowid,id,value FROM fills WHERE rowid>? ORDER BY rowid LIMIT 500', (after,)).fetchall()
@@ -84,11 +100,13 @@ def pa_ext_fills(db, strategy, after):
         price = Decimal(str(rec.get('price', '0')))
         stamp = rec.get('at')
         at = datetime.fromisoformat(stamp) if stamp else None
-        if (rec.get('strategy') != strategy or not action or direction not in ('LONG', 'SHORT')
+        rec_strategy = rec.get('strategy') or rec.get('strategy_id')
+        rec_version = str(rec.get('version') or f'{strategy}-V1')
+        if (rec_strategy != strategy or not action or direction not in ('LONG', 'SHORT')
                 or not trade_id or at is None or at.utcoffset() is None
                 or any(not n.is_finite() or n <= 0 for n in (qty, price))):
             raise ValueError(f'UNVERIFIED_{strategy}_FILL at row {rowid}')
-        events.append(Fill(rowid, f'{strategy}:{key_id}', str(trade_id), f'{strategy}-V1', action, direction, qty, price, at))
+        events.append(Fill(rowid, f'{strategy}:{key_id}', str(trade_id), rec_version, action, direction, qty, price, at))
     return events
 
 

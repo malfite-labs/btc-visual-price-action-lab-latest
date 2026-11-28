@@ -33,7 +33,7 @@ def initialize_store(path):
             db.execute("INSERT INTO d_account VALUES(1, 'USD_RESEARCH', '10000.00')")
 
 
-def observe_cycle(path, archive, close_at, now):
+def observe_cycle(path, archive, close_at, now, *, common_guard=False):
     """Atomically process only this current natural cycle; never backfill orders."""
     from backend.d_signal import evaluate
     if close_at.tzinfo is None or now.tzinfo is None:
@@ -71,11 +71,19 @@ def observe_cycle(path, archive, close_at, now):
             # cycle and enters the specified four-bar cooldown; no order is sent.
             if state.get('phase') == 'PENDING':
                 state = {'phase': 'COOLDOWN', 'remaining': 5, 'last_close': state.get('last_close')}
+            if common_guard and last and datetime.fromisoformat(last) < close_at - timedelta(minutes=15):
+                if state.get('phase') == 'WATCH':
+                    state = {'phase': 'COOLDOWN', 'remaining': 5}
+                else:
+                    state.pop('last_close', None)
             if not bars or datetime.fromisoformat(bars[-1]['close_at'].replace('Z', '+00:00')).astimezone(timezone.utc) != close_at:
                 output = {'status': 'DATA_NOT_READY', 'reason': 'LATEST_CANDLE_MISSING', 'state': state, 'signal': None}
             else:
                 output = evaluate(bars, state)
             if output['status'] == 'DATA_NOT_READY':
+                if common_guard:
+                    db.rollback()
+                    return output
                 # Invalid data invalidates any old setup; no delayed replay.
                 state = {'phase': 'IDLE'}
             else:
@@ -83,6 +91,9 @@ def observe_cycle(path, archive, close_at, now):
             payload = json.dumps(output, ensure_ascii=False, allow_nan=False)
             db.execute('INSERT INTO d_cycles VALUES(?,?,?,?)', (key, output['status'], output['reason'], payload))
             db.execute('UPDATE d_state SET payload=? WHERE id=1', (json.dumps(state, ensure_ascii=False, allow_nan=False),))
+            if common_guard and output.get('signal'):
+                db.execute('INSERT INTO d_signal_decision_times VALUES (?,?)',
+                           (output['signal']['signal_close'], now.isoformat()))
             db.commit()
             return output
         except Exception:

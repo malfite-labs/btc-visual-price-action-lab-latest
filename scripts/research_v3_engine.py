@@ -830,6 +830,8 @@ class ResearchV3Engine:
         # Read local SQLite databases in strict mode=ro (fast, zero write locks)
         pool_db = self._read_strategy_pool_db(errors)
         ext_db = self._read_pa_extensions_db(errors)
+        r_series_db = self._read_r_series_db(errors)
+        generic_ext_db = self._read_generic_extensions_db(errors)
         d_db = self._read_d_db(errors)
         paper_audits = self._read_paper_audits(errors)
 
@@ -1029,6 +1031,112 @@ class ResearchV3Engine:
                 running_since=first_ts, snapshot_time=snapshot_time, versions_history=[],
             ))
 
+        # 6b. R-Series Independent Strategy Group (R01-R06; strictly group='R系列', never PA)
+        for sid, rdata in sorted(r_series_db.items()):
+            raw_fills = rdata.get('fills') or []
+            norm_fills = []
+            for f in raw_fills:
+                nf = dict(f)
+                nf.setdefault('position_effect', f.get('kind'))
+                nf.setdefault('occurred_at', f.get('at') or f.get('cycle'))
+                nf.setdefault('quantity', f.get('qty'))
+                nf.setdefault('position_direction', f.get('direction'))
+                if f.get('kind') == 'CLOSE' and f.get('net') is not None:
+                    nf.setdefault('pnl', f.get('net'))
+                norm_fills.append(nf)
+            closed, issues, open_cnt = pair_ledger_fills_v3(norm_fills, sid, f'r-series:{sid}')
+            init_cap = Decimal('10000')
+            cur_eq = dec(rdata.get('equity'))
+            cur_real = dec(rdata.get('realized')) or Decimal(0)
+            cur_unreal = dec(rdata.get('unrealized')) or Decimal(0)
+            cur_fees = sum((dec(f.get('fee')) or Decimal(0) for f in raw_fills), Decimal(0))
+            name = str(rdata.get('name') or sid)
+            first_ts = min((f.get('at') or f.get('cycle') for f in raw_fills if f.get('at') or f.get('cycle')), default=None)
+            eq_series, dd_sum = build_equity_series(
+                closed, initial_capital=init_cap, current_equity=cur_eq,
+                current_realized=cur_real, current_unrealized=cur_unreal,
+                running_since=first_ts, snapshot_time=snapshot_time,
+            )
+            records.append(self._pack_record(
+                sid=sid, name=name, group='R系列',
+                version=str(rdata.get('active_version') or '1.0.0'), stype='R_SERIES_TD',
+                state=str(rdata.get('status') or 'DISABLED'),
+                capital_model='PAPER_10000_RISK_2PCT_5X', init_cap=init_cap,
+                cur_eq=cur_eq, avail=dec(rdata.get('cash')), cur_real=cur_real, cur_unreal=cur_unreal,
+                fees=cur_fees, position=rdata.get('position'),
+                fills=raw_fills, closed=closed, issues=issues, open_cnt=open_cnt,
+                eq_series=eq_series, dd_sum=dd_sum,
+                source=f'SQLite mode=ro: r-series/{sid}.sqlite3',
+                running_since=first_ts, snapshot_time=snapshot_time, versions_history=[],
+                description=str(rdata.get('description') or ''),
+            ))
+
+        # 6c. Generic Mode B Extension Ledgers (data/extensions/*.sqlite3 — zero hardcoding)
+        for sid, gdata in sorted(generic_ext_db.items()):
+            raw_fills = gdata.get('fills') or []
+            norm_fills = []
+            for f in raw_fills:
+                nf = dict(f)
+                if nf.get('kind') in ('OPEN', 'CLOSE'):
+                    nf.setdefault('effect', nf['kind'])
+                    nf.setdefault('quantity', f.get('qty'))
+                    nf.setdefault('occurred_at', f.get('at'))
+                    nf.setdefault('pnl', f.get('net'))
+                norm_fills.append(nf)
+            closed, issues, open_cnt = pair_ledger_fills_v3(norm_fills, sid, f'ext:{sid}')
+            init_cap = Decimal('10000')
+            cur_eq = dec(gdata.get('equity'))
+            cur_real = dec(gdata.get('realized')) or Decimal(0)
+            cur_unreal = dec(gdata.get('unrealized')) or Decimal(0)
+            cur_fees = sum((dec(f.get('fee')) or Decimal(0) for f in raw_fills), Decimal(0))
+            first_ts = min((f.get('at') or f.get('cycle') for f in raw_fills if f.get('at') or f.get('cycle')), default=None) or gdata.get('activated_at') or gdata.get('registered_at')
+            eq_series, dd_sum = build_equity_series(
+                closed, initial_capital=init_cap, current_equity=cur_eq,
+                current_realized=cur_real, current_unrealized=cur_unreal,
+                running_since=first_ts, snapshot_time=snapshot_time,
+            )
+            rec = self._pack_record(
+                sid=sid, name=str(gdata.get('name') or sid), group=str(gdata.get('group') or '扩展策略'),
+                version=str(gdata.get('active_version') or '1.0.0'), stype='MODE_B_EXTENSION',
+                state=str(gdata.get('status') or 'DISABLED'),
+                capital_model='PAPER_10000_RISK_2PCT_5X', init_cap=init_cap,
+                cur_eq=cur_eq, avail=dec(gdata.get('cash')), cur_real=cur_real, cur_unreal=cur_unreal,
+                fees=cur_fees, position=gdata.get('position'),
+                fills=raw_fills, closed=closed, issues=issues, open_cnt=open_cnt,
+                eq_series=eq_series, dd_sum=dd_sum,
+                source=f'SQLite mode=ro: extensions/{sid}.sqlite3',
+                running_since=first_ts, snapshot_time=snapshot_time, versions_history=[],
+                description=str(gdata.get('description') or ''),
+            )
+            if gdata.get('timeframe'):
+                rec['base']['timeframe'] = str(gdata['timeframe'])
+            if gdata.get('observation_tier'):
+                rec['base']['observation_tier'] = str(gdata['observation_tier'])
+            records.append(rec)
+
+        # 6d. Synchronize lifecycle tombstones (read-only): exclude DELETED, tag ARCHIVED
+        lc_db = self.data_dir / 'strategy-lifecycle.sqlite3'
+        if lc_db.is_file():
+            try:
+                lconn = _connect_ro(lc_db)
+                lc_rows = lconn.execute("SELECT strategy_id, state, archive_path FROM strategy_lifecycle").fetchall()
+                lconn.close()
+                lc_map = {str(r['strategy_id']): (str(r['state']), r['archive_path']) for r in lc_rows}
+                synced = []
+                for rec in records:
+                    sid = str((rec.get('base') or {}).get('strategy_id') or '')
+                    if sid in lc_map:
+                        st_val, arch_p = lc_map[sid]
+                        if st_val == 'DELETED':
+                            continue
+                        rec['base']['lifecycle_state'] = st_val
+                        if arch_p:
+                            rec['base']['archive_path'] = arch_p
+                    synced.append(rec)
+                records = synced
+            except Exception as exc:
+                errors.append(f'strategy-lifecycle.sqlite3: {type(exc).__name__}')
+
         # 7. Saved Backtest Reports (strictly isolated from live paper!)
         backtests = self.load_backtest_reports()
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
@@ -1215,6 +1323,116 @@ class ResearchV3Engine:
                     conn.close()
         return out
 
+    def _read_r_series_db(self, errors: list[str]) -> dict[str, dict]:
+        out: dict[str, dict] = {}
+        r_dir = self.data_dir / 'r-series'
+        if not r_dir.is_dir():
+            return out
+        cfg_dir = self.root / 'strategies' / 'R' / 'configs'
+        for path in sorted(r_dir.glob('*.sqlite3')):
+            sid = path.stem
+            conn = None
+            try:
+                conn = _connect_ro(path)
+                if conn is None:
+                    continue
+                row = conn.execute('SELECT value FROM snapshot LIMIT 1').fetchone()
+                if not row:
+                    continue
+                s = json.loads(row['value'])
+                fills = [json.loads(r['value']) for r in conn.execute('SELECT value FROM fills ORDER BY rowid')]
+                pos = s.get('position')
+                cash = dec(s.get('cash'))
+                realized = dec(s.get('realized')) or Decimal(0)
+                unreal = Decimal(0)
+                if pos:
+                    mark = dec(pos.get('mark')) or dec(pos.get('entry')) or Decimal(0)
+                    entry = dec(pos.get('entry')) or Decimal(0)
+                    qty = dec(pos.get('qty')) or Decimal(0)
+                    sign = Decimal(1) if str(pos.get('direction', 'LONG')).upper() == 'LONG' else Decimal(-1)
+                    unreal = (mark - entry) * qty * sign
+                cfg = {}
+                v11_cfg_path = self.root / 'strategies' / 'R' / 'v1_1' / 'configs' / f'{sid}_v1.1.0.json'
+                cfg_path = v11_cfg_path if (str(s.get('version')) == '1.1.0' and v11_cfg_path.is_file()) else (cfg_dir / f'{sid}.json')
+                if cfg_path.is_file():
+                    try:
+                        cfg = json.loads(cfg_path.read_text(encoding='utf-8'))
+                    except Exception:
+                        cfg = {}
+                out[sid] = {
+                    'id': sid,
+                    'name': s.get('name') or cfg.get('name') or sid,
+                    'description': cfg.get('description') or '',
+                    'active_version': s.get('version') or '1.0.0',
+                    'enabled': bool(s.get('enabled')),
+                    'status': s.get('last_status') or ('RUNNING' if s.get('enabled') else 'DISABLED'),
+                    'cash': str(cash) if cash is not None else '10000',
+                    'equity': str(cash + unreal) if cash is not None else None,
+                    'realized': str(realized),
+                    'unrealized': str(unreal),
+                    'position': pos,
+                    'fills': fills,
+                }
+            except Exception as exc:
+                errors.append(f'r-series/{path.name}: {type(exc).__name__}')
+            finally:
+                if conn is not None:
+                    conn.close()
+        return out
+
+    def _read_generic_extensions_db(self, errors: list[str]) -> dict[str, dict]:
+        out: dict[str, dict] = {}
+        ext_dir = self.data_dir / 'extensions'
+        if not ext_dir.is_dir():
+            return out
+        for path in sorted(ext_dir.glob('*.sqlite3')):
+            sid = path.stem
+            conn = None
+            try:
+                conn = _connect_ro(path)
+                if conn is None:
+                    continue
+                row = conn.execute('SELECT value FROM snapshot LIMIT 1').fetchone()
+                if not row:
+                    continue
+                s = json.loads(row['value'])
+                fills = [json.loads(r['value']) for r in conn.execute('SELECT value FROM fills ORDER BY rowid')]
+                pos = s.get('position')
+                cash = dec(s.get('cash'))
+                realized = dec(s.get('realized')) or Decimal(0)
+                unreal = Decimal(0)
+                if pos:
+                    mark = dec(pos.get('mark')) or dec(pos.get('entry')) or Decimal(0)
+                    entry = dec(pos.get('entry')) or Decimal(0)
+                    qty = dec(pos.get('qty')) or Decimal(0)
+                    sign = Decimal(1) if str(pos.get('direction', 'LONG')).upper() == 'LONG' else Decimal(-1)
+                    unreal = (mark - entry) * qty * sign
+                out[sid] = {
+                    'id': sid,
+                    'name': s.get('name') or sid,
+                    'group': s.get('group') or '扩展策略',
+                    'timeframe': s.get('timeframe') or '15m',
+                    'observation_tier': s.get('observation_tier') or '',
+                    'description': s.get('description') or '',
+                    'active_version': s.get('version') or '1.0.0',
+                    'enabled': bool(s.get('enabled')),
+                    'status': s.get('last_status') or ('RUNNING' if s.get('enabled') else 'DISABLED'),
+                    'cash': str(cash) if cash is not None else '10000',
+                    'equity': str(cash + unreal) if cash is not None else None,
+                    'realized': str(realized),
+                    'unrealized': str(unreal),
+                    'position': pos,
+                    'fills': fills,
+                    'registered_at': s.get('registered_at'),
+                    'activated_at': s.get('activated_at'),
+                }
+            except Exception as exc:
+                errors.append(f'extensions/{path.name}: {type(exc).__name__}')
+            finally:
+                if conn is not None:
+                    conn.close()
+        return out
+
     def _read_d_db(self, errors: list[str]) -> dict | None:
         t_path = self.data_dir / 'd' / 'trading.sqlite3'
         if not t_path.is_file():
@@ -1332,6 +1550,165 @@ class ResearchV3Engine:
         finally:
             if conn is not None:
                 conn.close()
+        # Also load read-only R-series V1.0 baseline & V1.1 30-month cross-period backtest summaries (strictly isolated)
+        try:
+            r_base = self.root / 'research' / 'r_series'
+            p_v10 = r_base / 'outputs' / 'backtest_summary.json'
+            if p_v10.is_file():
+                j10 = json.loads(p_v10.read_text(encoding='utf-8'))
+                meta90 = j10.get('dataset_90d_known') or {}
+                for sid, rec in (j10.get('backtest_90d_maxhold32') or {}).items():
+                    if not isinstance(rec, dict):
+                        continue
+                    out.append({
+                        'report_id': f'r_v10_90d:{sid}',
+                        'strategy_id': sid,
+                        'strategy_name': f'{sid} V1.0 基线(90d)',
+                        'version': str(rec.get('version') or '1.0.0'),
+                        'created_at': meta90.get('end_utc') or '',
+                        'start': meta90.get('start_utc') or '',
+                        'end': meta90.get('end_utc') or '',
+                        'bar_count': int(meta90.get('count') or 0),
+                        'initial_equity': str(rec.get('initial_equity', '10000')),
+                        'final_equity': str(rec.get('final_equity', '')),
+                        'net_pnl': str(rec.get('net_pnl', '')),
+                        'net_return_pct': rec.get('net_return_pct'),
+                        'closed_trade_count': int(rec.get('total_trades') or 0),
+                        'win_rate': float(rec.get('win_rate_pct') or 0.0),
+                        'profit_factor_label': str(rec.get('profit_factor') if rec.get('profit_factor') is not None else '—'),
+                        'max_drawdown_pct': rec.get('max_drawdown_pct'),
+                        'fees': str(rec.get('total_fees', '0')),
+                        'data_gaps': int(meta90.get('gaps') or 0),
+                        'source': 'BACKTEST_SAVED (R-Series V1.0 90d基线)',
+                    })
+            p_v11 = r_base / 'v1_1' / 'outputs' / 'p12_walkforward_unseen.json'
+            if p_v11.is_file():
+                j11 = json.loads(p_v11.read_text(encoding='utf-8'))
+                m18 = j11.get('dataset_18m_meta') or {}
+                m12 = j11.get('unseen_2024_2025_meta') or {}
+                for cand_id, cobj in (j11.get('candidates') or {}).items():
+                    if not isinstance(cobj, dict):
+                        continue
+                    sid = str(cobj.get('sid') or '')
+                    for key_m, label_m, meta_m in (
+                        ('full_18m', 'V1.1 18个月验证', m18),
+                        ('unseen_12m', 'V1.1 12个月未知样本(30m跨期)', m12),
+                    ):
+                        blk = cobj.get(key_m)
+                        if not isinstance(blk, dict):
+                            continue
+                        out.append({
+                            'report_id': f'r_v11_{key_m}:{cand_id}',
+                            'strategy_id': sid,
+                            'strategy_name': f'{sid} · {cand_id} ({label_m})',
+                            'version': '1.1.0',
+                            'created_at': meta_m.get('end_utc') or '',
+                            'start': meta_m.get('start_utc') or '',
+                            'end': meta_m.get('end_utc') or '',
+                            'bar_count': int(meta_m.get('count') or 0),
+                            'initial_equity': '10000',
+                            'final_equity': str(blk.get('final_equity', '')),
+                            'net_pnl': str(blk.get('net_pnl', '')),
+                            'net_return_pct': blk.get('net_return_pct'),
+                            'closed_trade_count': int(blk.get('total_trades') or 0),
+                            'win_rate': float(blk.get('win_rate_pct') or 0.0),
+                            'profit_factor_label': str(blk.get('profit_factor') if blk.get('profit_factor') is not None else '—'),
+                            'max_drawdown_pct': blk.get('max_drawdown_pct'),
+                            'fees': str(blk.get('total_fees', '0')),
+                            'data_gaps': int(meta_m.get('gaps') or 0),
+                            'source': f'BACKTEST_SAVED ({label_m})',
+                        })
+        except Exception:
+            pass
+        # Also load read-only Aoying S / AY historical research archives (strictly isolated BACKTEST_SAVED)
+        try:
+            ws_root = self.root.parent.parent
+            s_exp_map = {
+                'S01_Q_BTC_15m_lab': ('thc-s01-15m', '熬鹰研究·区间高空低多 15M'),
+                'S01_Q_BTC_1H': ('thc-s01-1h', '熬鹰研究·区间高空低多 1H'),
+                'S01_Q_BTC_4H': ('thc-s01-4h', '熬鹰研究·区间高空低多 4H'),
+                'S01_Q_BTC_1D': ('thc-s01-1d', '熬鹰研究·区间高空低多 1D'),
+                'S02_Q_BTC_15m_lab': ('thc-s02-15m', '熬鹰研究·右侧突破追击 15M'),
+                'S02_Q_BTC_1H': ('thc-s02-1h', '熬鹰研究·右侧突破追击 1H'),
+                'S02_Q_BTC_4H': ('thc-s02-4h', '熬鹰研究·右侧突破追击 4H'),
+                'S02_Q_BTC_1D': ('thc-s02-1d', '熬鹰研究·右侧突破追击 1D'),
+                'COMBO_S01S02_Q_BTC_15m_lab': ('thc-s01-s02-combo-15m', '熬鹰研究·区间／突破互斥组合 15M'),
+                'COMBO_S01S02_Q_BTC_1H': ('thc-s01-s02-combo-1h', '熬鹰研究·区间／突破互斥组合 1H'),
+                'COMBO_S01S02_Q_BTC_4H': ('thc-s01-s02-combo-4h', '熬鹰研究·区间／突破互斥组合 4H'),
+                'COMBO_S01S02_Q_BTC_1D': ('thc-s01-s02-combo-1d', '熬鹰研究·区间／突破互斥组合 1D'),
+            }
+            s_res_dir = ws_root / 'thankucrypto-backtest' / 'results'
+            for exp_id, (sid, cname) in s_exp_map.items():
+                mp = s_res_dir / exp_id / 'metrics.json'
+                if not mp.is_file():
+                    continue
+                mj = json.loads(mp.read_text(encoding='utf-8'))
+                splits = mj.get('splits') or {}
+                for sp_key, sp_label in (('Full', 'Full'), ('OOS', 'OOS'), ('Holdout', 'Holdout')):
+                    comb = (splits.get(sp_key) or {}).get('combined')
+                    if not isinstance(comb, dict):
+                        continue
+                    feq = comb.get('Final Equity USDT', 0.0)
+                    out.append({
+                        'report_id': f'thc_s:{exp_id}:{sp_key}',
+                        'strategy_id': sid,
+                        'strategy_name': f'{cname} ({sp_label} · 100 USDT研究口径)',
+                        'version': '1.0.0',
+                        'created_at': '',
+                        'start': '2022-01-01' if sp_key == 'Full' else ('2024-07-01' if sp_key == 'OOS' else '2026-01-01'),
+                        'end': '2026-11-27' if sp_key in ('Full', 'Holdout') else '2025-12-31',
+                        'bar_count': 0,
+                        'initial_equity': '100',
+                        'final_equity': str(feq),
+                        'net_pnl': str(round(float(feq) - 100.0, 4)),
+                        'net_return_pct': comb.get('Net Return Pct'),
+                        'closed_trade_count': int(comb.get('Total Trades') or 0),
+                        'win_rate': float(comb.get('Win Rate') or 0.0),
+                        'profit_factor_label': str(comb.get('Profit Factor') if comb.get('Profit Factor') is not None else '—'),
+                        'max_drawdown_pct': comb.get('Max Drawdown Pct'),
+                        'fees': str(comb.get('Total Fees USDT', '0')),
+                        'data_gaps': 0,
+                        'source': f'BACKTEST_SAVED (熬鹰量化研究假设 · {sp_label} · 100 USDT · 含资金费)',
+                    })
+            ay_exp_path = ws_root / 'ay-research' / 'results' / 'experiments.json'
+            if ay_exp_path.is_file():
+                ayj = json.loads(ay_exp_path.read_text(encoding='utf-8'))
+                ay_map = {
+                    'AY02': ('thc-ay02-15m', '熬鹰研究·日线过滤与收敛突破 15M'),
+                    'AY03': ('thc-ay03-15m', '熬鹰研究·恐慌反转代理 15M'),
+                    'AY04': ('thc-ay04-15m', '熬鹰研究·震荡区间反转 15M'),
+                }
+                for ay_id, (sid, cname) in ay_map.items():
+                    st_obj = (ayj.get('strategies') or {}).get(ay_id) or {}
+                    for seg_key, seg_label in (('chronological_oos', '时间样本外'), ('external_earlier_holdout', '早期留出')):
+                        blk = (st_obj.get(seg_key) or {}).get('BASELINE')
+                        if not isinstance(blk, dict):
+                            continue
+                        win = blk.get('window') or ['', '']
+                        feq = blk.get('final_equity_usdt', 100.0)
+                        out.append({
+                            'report_id': f'thc_ay:{ay_id}:{seg_key}',
+                            'strategy_id': sid,
+                            'strategy_name': f'{cname} ({seg_label} · 100 USDT研究口径)',
+                            'version': '1.0.0',
+                            'created_at': '',
+                            'start': win[0] if len(win) > 0 else '',
+                            'end': win[1] if len(win) > 1 else '',
+                            'bar_count': 0,
+                            'initial_equity': '100',
+                            'final_equity': str(feq),
+                            'net_pnl': str(round(float(blk.get('net_usdt') or 0.0), 4)),
+                            'net_return_pct': blk.get('return_pct'),
+                            'closed_trade_count': int(blk.get('trades') or 0),
+                            'win_rate': float(blk.get('win_pct') or 0.0),
+                            'profit_factor_label': str(round(float(blk['profit_factor']), 4) if blk.get('profit_factor') is not None else '—'),
+                            'max_drawdown_pct': blk.get('bar_close_max_drawdown_pct'),
+                            'fees': str(blk.get('fees_usdt', '0')),
+                            'data_gaps': 0,
+                            'source': f'BACKTEST_SAVED (熬鹰量化研究假设 · {seg_label} · 100 USDT · 无资金费主口径)',
+                        })
+        except Exception:
+            pass
         return out
 
 

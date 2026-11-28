@@ -1,0 +1,50 @@
+{
+  "algorithm_baseline": {
+    "commit_sha": "2716ca374068607c3ac3b9bf5eeef2ac5e72f235",
+    "license": "MIT",
+    "repo": "https://github.com/moolish-com/td-sequential-python",
+    "version": "1.0.1"
+  },
+  "background_timeframe": null,
+  "candidate_ref": "P10_atr_2.0_R3.0_H64",
+  "description": "15m 正式完成 TD Countdown 13（严格 ==13）候选 + 4 根 15m 反转确认 + 2.0 ATR 止损缓冲 / 3.0R 止盈 / 64 根持仓上限。",
+  "exec_timeframe": "15m",
+  "frozen_paper_observation": true,
+  "group": "R系列",
+  "live_trading_disabled": true,
+  "market": "BTC/USD",
+  "name": "R03 · TD13 衰竭反转策略 (V1.1)",
+  "observation_tier": "EXPERIMENTAL_OBSERVE",
+  "parameters": {
+    "atr_period": 14,
+    "candidate_ref": "P10_atr_2.0_R3.0_H64",
+    "confirm_window": 4,
+    "max_hold_bars": 64,
+    "require_exact_td13": true,
+    "signal_tf": "15m",
+    "stop_atr_mult": 2.0,
+    "target_r": 3.0,
+    "tdst_filter": "none",
+    "vol_mult": 0.0
+  },
+  "position": {
+    "direction": "both",
+    "entry_timing": "next_open",
+    "max_hold_bars": 64,
+    "same_bar_priority": "stop",
+    "stop_atr_mult": 2.0,
+    "target_r": 3.0
+  },
+  "provider_symbol": "BTCUSDT",
+  "risk": {
+    "capital_model": "PAPER_10000_RISK_2PCT_5X",
+    "currency": "USD_RESEARCH",
+    "initial_equity": "10000",
+    "max_leverage": 5,
+    "risk_fraction": "0.02"
+  },
+  "signal_timeframe": "15m",
+  "source": "BINANCE_USDM_PERP",
+  "strategy_id": "R03",
+  "version": "1.1.0"
+}

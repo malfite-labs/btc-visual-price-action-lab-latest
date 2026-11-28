@@ -19,10 +19,10 @@ def test_recent_action_codes_are_shown_in_chinese():
     assert stop_distance == '\u7b49\u5f85\u6b62\u635f\u8ddd\u79bb\u6761\u4ef6'
     assert 'WAIT_STOP_DIST' not in stop_distance
     assert unknown == '\u9700\u68c0\u67e5'
-    assert local_dashboard.action_label('IDLE') == '\u7b49\u5f85'
-    assert local_dashboard.action_label('NO_SETUP') == '\u7b49\u5f85'
-    assert local_dashboard.action_label('NO_PENDING_SIGNAL') == '\u7b49\u5f85'
-    assert local_dashboard.action_label('OTHER_STATE') == '\u7b49\u5f85'
+    assert local_dashboard.action_label('IDLE') == '等待信号'
+    assert local_dashboard.action_label('NO_SETUP') == '等待信号'
+    assert local_dashboard.action_label('NO_PENDING_SIGNAL') == '等待信号'
+    assert local_dashboard.action_label('OTHER_STATE') == '等待信号'
 
 
 

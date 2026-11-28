@@ -62,6 +62,7 @@ export default function KlineWindow({ live = false }: { live?: boolean }) {
   const [ohlc,setOhlc]=useState('')
   const [active,setActive]=useState<Indicator[]>(()=>saved('active',activeDefaults))
   const [params,setParams]=useState(()=>saved('params',defaults))
+  const [dynamicStrategies,setDynamicStrategies]=useState<string[]>(strategies)
   const [selection,setSelection]=useState(strategies)
   const [effect,setEffect]=useState('all')
   const [markersOn,setMarkersOn]=useState(true)
@@ -91,7 +92,7 @@ export default function KlineWindow({ live = false }: { live?: boolean }) {
   const requestedStrategy=useRef<string|null|undefined>(undefined)
   const envRequestSeq=useRef<number>(-1)
 
-  const available=live?(demo?.strategies??[]):strategies
+  const available=live?(demo?.strategies??[]):dynamicStrategies
   const sourceEvents=useMemo(()=>live?(demo?.items.map(demoEvent)??[]):events,[live,demo,events])
   const filtered=useMemo(()=>sourceEvents.filter(e=>e.verification_status==='VERIFIED'&&selection.includes(e.strategy_id)&&(effect==='all'||(effect==='open')===(e.position_effect==='OPEN'))).sort((a,b)=>Date.parse(b.occurred_at)-Date.parse(a.occurred_at)),[sourceEvents,selection,effect])
 
@@ -212,6 +213,14 @@ export default function KlineWindow({ live = false }: { live?: boolean }) {
         const data=await read('events',controller.signal)
         if(!controller.signal.aborted) {
           setEvents(data.items)
+          if(Array.isArray(data.strategies)&&data.strategies.length>0) {
+            setDynamicStrategies(prev=>{
+              const next=data.strategies as string[]
+              if(prev.length===next.length&&prev.every((v,i)=>v===next[i]))return prev
+              setSelection(cur=>[...new Set([...cur,...next.filter(s=>!prev.includes(s))])])
+              return next
+            })
+          }
           setEventState(data.errors?.length?'部分成交来源不可用':'')
         }
       } catch {if(!controller.signal.aborted)setEventState('成交读取暂不可用，保留上次数据')}

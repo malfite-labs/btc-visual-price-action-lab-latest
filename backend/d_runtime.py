@@ -21,11 +21,12 @@ from backend.d_paper import initialize_store, observe_cycle
 
 
 class DRuntime:
-    def __init__(self, observation_path, ledger_path, archive):
+    def __init__(self, observation_path, ledger_path, archive, *, common_guard=False):
         self.observation_path = Path(observation_path).resolve()
         ledger_path = Path(ledger_path).resolve()
         self.lock = threading.RLock()
         self.entry_gate = None
+        self.common_guard = common_guard
         self._leases = []
         self._closed = True
         lock_paths = sorted({str(self.observation_path) + '.runtime.lock', str(ledger_path) + '.runtime.lock'})
@@ -62,10 +63,28 @@ class DRuntime:
                 db.execute('ALTER TABLE d_data_loss_latch ADD COLUMN trade_id TEXT')
             db.execute('CREATE TABLE IF NOT EXISTS d_gap_recovery_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, reason TEXT NOT NULL, trade_id TEXT NOT NULL, close_fill_id TEXT NOT NULL, recovered_at TEXT NOT NULL, quote_start TEXT NOT NULL, quote_end TEXT NOT NULL, quote_count INTEGER NOT NULL, history_verified INTEGER NOT NULL CHECK(history_verified=0))')
             db.execute('CREATE TABLE IF NOT EXISTS d_gap_recovery_watermark (id INTEGER PRIMARY KEY CHECK(id=1), event_at TEXT NOT NULL)')
-            if position_at_start:
+            if position_at_start and not self.common_guard:
                 db.execute("INSERT OR IGNORE INTO d_data_loss_latch (id,reason,trade_id) VALUES (1, 'RESTART_POSITION_PRICE_GAP', ?)", (position_at_start['trade_id'],))
                 db.execute('UPDATE d_data_loss_latch SET trade_id=COALESCE(trade_id,?) WHERE id=1', (position_at_start['trade_id'],))
                 db.execute("UPDATE d_runtime_status SET protection='UNCERTAIN',reason=(SELECT reason FROM d_data_loss_latch WHERE id=1) WHERE id=1")
+            if self.common_guard:
+                latch = db.execute('SELECT reason,trade_id FROM d_data_loss_latch WHERE id=1').fetchone()
+                if latch:
+                    if (latch[1] or position_at_start or self.ledger.fills() or self.intents.pending()
+                            or pending_verified_quote(self.ledger, datetime.now(timezone.utc),
+                                                      allow_expired=True)['status'] != 'EMPTY'):
+                        raise RuntimeError('D_LEGACY_EXPOSURE_RECONCILIATION_REQUIRED')
+                    for path in (self.observation_path, self.ledger.path, self.circuit.path):
+                        with sqlite3.connect(Path(path).resolve().as_uri()+'?mode=ro', uri=True) as check:
+                            if check.execute('PRAGMA quick_check').fetchall() != [('ok',)]:
+                                raise RuntimeError('D_LEDGER_INTEGRITY_CHECK_FAILED')
+                    db.execute('CREATE TABLE IF NOT EXISTS d_common_guard_migration '
+                               '(id INTEGER PRIMARY KEY CHECK(id=1), reason TEXT, migrated_at TEXT)')
+                    db.execute('INSERT INTO d_common_guard_migration VALUES (1,?,?)',
+                               (latch[0], datetime.now(timezone.utc).isoformat()))
+                    db.execute('DELETE FROM d_data_loss_latch WHERE id=1')
+                db.execute("UPDATE d_runtime_status SET protection='UNCERTAIN',"
+                           "reason='STARTUP_AWAITING_FEED_VALIDATION' WHERE id=1")
             db.execute('CREATE TABLE IF NOT EXISTS d_signal_decision_times (signal_id TEXT PRIMARY KEY, decided_at TEXT NOT NULL)')
             db.execute('CREATE TABLE IF NOT EXISTS d_first_entry_quotes (signal_id TEXT PRIMARY KEY, event_id TEXT NOT NULL, payload TEXT NOT NULL)')
             db.execute('CREATE TABLE IF NOT EXISTS d_stream_evidence (id INTEGER PRIMARY KEY CHECK(id=1), last_at TEXT, last_id TEXT)')
@@ -194,6 +213,8 @@ class DRuntime:
                 # An open position must process this quote through on_quote so
                 # any triggered stop is handled before protection is cleared.
                 return False
+            if self.common_guard and pending_verified_quote(self.ledger, now, allow_expired=True)['status'] != 'EMPTY':
+                return False
             for item in self.intents.pending():
                 result = self.intents.reconcile(item['signal_id'], now)
                 if result.get('status') == 'PENDING':
@@ -259,8 +280,9 @@ class DRuntime:
             if not market_ready:
                 self.mark_stream_unavailable('MARKET_NOT_READY')
                 return {'status': 'BLOCKED', 'reason': 'MARKET_NOT_READY'}
-            result = observe_cycle(self.observation_path, self.archive, close_at, now)
-            if result.get('status') == 'PENDING' and result.get('signal'):
+            result = observe_cycle(self.observation_path, self.archive, close_at, now,
+                                   common_guard=self.common_guard)
+            if not self.common_guard and result.get('status') == 'PENDING' and result.get('signal'):
                 with sqlite3.connect(self.observation_path, timeout=10) as db:
                     db.execute('INSERT OR IGNORE INTO d_signal_decision_times VALUES (?,?)',
                                (result['signal']['signal_close'], now.astimezone(timezone.utc).isoformat()))

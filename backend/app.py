@@ -41,7 +41,17 @@ from backend.settings import (
     PAPER_CURRENCY,
 )
 from backend.strategy import StrategyRegistry, present_e_runtime
+from backend.market_hub import (
+    AccountLockRegistry,
+    BoundedCycleExecutor,
+    ReadOnlySnapshotCache,
+    SharedMarketHub,
+)
 from backend.pa_extension import PAExtension, NAMES as PA_EXTENSION_NAMES
+from backend.quote_pipeline import BoundedQuoteDispatcher, ProtectionWatchlist, WatchEntry
+from backend.r_series_extension import RSeriesExtension, R_SERIES_NAMES
+from backend.thc_ay_extension import ThcAyExtension
+from backend.lifecycle_manager import StrategyLifecycleManager
 from backend.vision import (
     AgentOrchestrator,
     VisionProviderConfig,
@@ -339,20 +349,51 @@ async def market_loop():
             pass
 
 
+_rest_poll_skipped_ws_healthy: int = 0
+_rest_poll_executed: int = 0
+
+
+def _ws_quote_is_healthy() -> bool:
+    """True when WebSocket is CONNECTED and its latest exchange quote is fresh (<=1500ms)."""
+    if market.status.get("websocket") != "CONNECTED":
+        return False
+    ws_q = market.status.get("last_quote")
+    rec_iso = market.status.get("websocket_last_quote_received_at")
+    if not isinstance(ws_q, dict) or ws_q.get("timestamp_valid") is not True or not rec_iso:
+        return False
+    enriched = {**ws_q, "received_at": rec_iso}
+    live = _quote_with_live_age(enriched)
+    if not live or live.get("timestamp_valid") is not True:
+        return False
+    age = int(live.get("age_ms", 10**9))
+    return 0 <= age <= min(1500, COST_MODEL.max_quote_age_ms)
+
+
 async def quote_loop():
+    global _rest_poll_skipped_ws_healthy, _rest_poll_executed
     while not stop_event.is_set():
         if market.credentials:
+            if _ws_quote_is_healthy():
+                _rest_poll_skipped_ws_healthy += 1
+                market_status["rest_quote"] = "STANDBY_WS_HEALTHY"
+                try:
+                    await asyncio.wait_for(stop_event.wait(), timeout=2.0)
+                except TimeoutError:
+                    pass
+                continue
             try:
+                _rest_poll_executed += 1
                 quote = await market.latest_quote()
-                market_status["quote"] = quote
                 market_status["rest_quote"] = "PASS"
-                await process_stop_quote(quote)
-                await broadcast({"type": "quote", "quote": quote})
+                new_q, accepted, _ = quote_dispatcher.submit(market_status.get("quote"), quote)
+                market_status["quote"] = new_q
+                if accepted:
+                    await broadcast({"type": "quote", "quote": quote})
             except Exception as exc:
                 market_status["rest_quote"] = "FAIL"
                 market_status["quote_error"] = type(exc).__name__
         try:
-            await asyncio.wait_for(stop_event.wait(), timeout=2)
+            await asyncio.wait_for(stop_event.wait(), timeout=0.8)
         except TimeoutError:
             pass
 
@@ -364,10 +405,177 @@ def _fail_d_dispatch(bridge, reason):
         logging.getLogger(__name__).exception('D failure latch failed')
 
 
+def _refresh_protection_watchlist() -> None:
+    """Refresh lightweight in-memory ActivePositionIndex from all active open positions & pending orders."""
+    entries: list[WatchEntry] = []
+    pending_ids: set[str] = set()
+    has_pending = False
+    try:
+        for lg in list(r_series_ext.ledgers.values()) + list(thc_ay_ext.ledgers.values()):
+            is_pend = bool(getattr(lg, "_has_pending_entry", False) or getattr(lg, "_has_pending_exit", False))
+            is_fault = bool(getattr(lg, "_cached_fault", False))
+            if is_pend or is_fault:
+                has_pending = True
+                pending_ids.add(lg.sid)
+            cp = getattr(lg, "_cached_pos", None)
+            if isinstance(cp, dict) and cp.get("direction"):
+                entries.append(WatchEntry(
+                    strategy_id=lg.sid,
+                    direction=str(cp["direction"]),
+                    stop=Decimal(str(cp["stop"])) if cp.get("stop") else None,
+                    target=Decimal(str(cp["target"])) if cp.get("target") else None,
+                    pending=is_pend,
+                    fault=is_fault,
+                ))
+    except Exception:
+        pass
+    try:
+        for sid, lg in list(pa_extension.ledgers.items()):
+            st = lg.snapshot()
+            is_pend = bool(st.get("pending"))
+            if is_pend:
+                has_pending = True
+                pending_ids.add(sid)
+            pos = st.get("position")
+            if isinstance(pos, dict) and pos.get("direction"):
+                entries.append(WatchEntry(
+                    strategy_id=sid,
+                    direction=str(pos["direction"]),
+                    stop=Decimal(str(pos["stop"])) if pos.get("stop") else None,
+                    target=Decimal(str(pos["target"])) if pos.get("target") else None,
+                    pending=is_pend,
+                ))
+    except Exception:
+        pass
+    try:
+        for it in strategy_pool.list():
+            sid = str(it.get("id") or "")
+            pos = it.get("position")
+            if isinstance(pos, str):
+                pos = json.loads(pos)
+            if isinstance(pos, dict):
+                is_pend = bool(pos.get("pending_entry") or pos.get("pending_exit"))
+                if is_pend:
+                    has_pending = True
+                    pending_ids.add(sid)
+                if pos.get("direction") and pos.get("stop"):
+                    entries.append(WatchEntry(
+                        strategy_id=sid,
+                        direction=str(pos["direction"]),
+                        stop=Decimal(str(pos["stop"])) if pos.get("stop") else None,
+                        target=Decimal(str(pos["target"])) if pos.get("target") else None,
+                        pending=is_pend,
+                    ))
+    except Exception:
+        pass
+    try:
+        for ag in ("A", "B", "C"):
+            acct = ledger.account(ag)
+            if acct.get("state") in ("EXIT_PENDING", "PENDING_CLOSE", "STOP_PENDING"):
+                has_pending = True
+                pending_ids.add(ag)
+            if acct.get("position_json"):
+                p = json.loads(acct["position_json"])
+                if p.get("direction") and p.get("stop"):
+                    entries.append(WatchEntry(
+                        strategy_id=ag,
+                        direction=str(p["direction"]),
+                        stop=Decimal(str(p["stop"])),
+                        target=Decimal(str(p["target"])) if p.get("target") else None,
+                    ))
+    except Exception:
+        pass
+    try:
+        g_st = g_mirror.status({})
+        g_pos = g_st.get("position")
+        if isinstance(g_pos, dict) and g_pos.get("direction"):
+            entries.append(WatchEntry(
+                strategy_id="G",
+                direction=str(g_pos["direction"]),
+                stop=Decimal(str(g_pos["stop_price"])) if g_pos.get("stop_price") else None,
+                target=None,
+            ))
+    except Exception:
+        pass
+    try:
+        from backend.e_paper_store import read_e_store
+        for e_path in (DATA_ROOT / "e" / "formal.sqlite3", DATA_ROOT / "e" / "shadow.sqlite3"):
+            if e_path.is_file():
+                e_st = read_e_store(e_path)
+                for acct in (e_st.get("accounts") or {}).values():
+                    if isinstance(acct, dict) and acct.get("state") not in (None, "FLAT"):
+                        pending_ids.add("E")
+                        has_pending = True
+                        break
+    except Exception:
+        pass
+    quote_dispatcher.watchlist.update(entries, has_pending=has_pending, pending_ids=pending_ids)
+
+
+market_hub = SharedMarketHub()
+account_locks = AccountLockRegistry()
+cycle_executor = BoundedCycleExecutor(account_locks, max_workers=6)
+query_cache = ReadOnlySnapshotCache(ttl_seconds=15.0)
+_last_ws_broadcast_mono: float = 0.0
+_last_watchlist_refresh_mono: float = 0.0
+
+
+async def _dispatch_quote_to_consumers(quote: dict) -> None:
+    """Background worker target: delivers valid quote ONLY to strategies needing protection/execution/mark."""
+    global _last_watchlist_refresh_mono
+    market_hub.set_quote(quote)
+    if d_bridge is not None:
+        try:
+            bid, ask = Decimal(str(quote['bid'])), Decimal(str(quote['ask']))
+            raw_valid = (quote.get('symbol') == 'BTC/USD'
+                         and quote.get('source') == 'BINANCE_USDM_PERP'
+                         and quote.get('currency') == 'USD_RESEARCH'
+                         and quote.get('timestamp_valid') is True
+                         and bid.is_finite() and ask.is_finite() and 0 < bid <= ask)
+            if getattr(d_bridge, 'common_guard', False):
+                await d_bridge.process_common('quote', quote if raw_valid else None)
+            elif not raw_valid:
+                _fail_d_dispatch(d_bridge, 'D_RAW_QUOTE_INVALID')
+            elif not d_bridge.submit_quote(quote):
+                _fail_d_dispatch(d_bridge, 'D_QUOTE_SUBMIT_FAILED')
+        except Exception:
+            logging.getLogger(__name__).exception('D quote dispatch failed')
+            if not getattr(d_bridge, 'common_guard', False):
+                _fail_d_dispatch(d_bridge, 'D_QUOTE_SUBMIT_FAILED')
+
+    urgent_ids, mark_due_ids = quote_dispatcher.watchlist.matching_strategies(quote)
+    target_ids = urgent_ids | mark_due_ids
+    now_m = _time.monotonic()
+    # Check startup monitor once if not yet checked
+    need_startup_check = (
+        formal_mode == 'RULE_DRIVEN'
+        and isinstance(paper_runner, RuleCycleRunner)
+        and not market_status.get('startup_position_monitor_checked')
+    )
+    if target_ids or need_startup_check:
+        await process_stop_quote(quote, target_ids=None if need_startup_check else target_ids)
+    else:
+        quote_dispatcher.watchlist.zero_io_skips += 1
+
+    if urgent_ids or (now_m - _last_watchlist_refresh_mono) >= 15.0:
+        _last_watchlist_refresh_mono = now_m
+        await asyncio.to_thread(_refresh_protection_watchlist)
+        if urgent_ids:
+            query_cache.invalidate()
+
+
+quote_dispatcher = BoundedQuoteDispatcher(
+    _dispatch_quote_to_consumers,
+    watchlist=ProtectionWatchlist(),
+    protection_maxsize=64,
+    max_age_ms=COST_MODEL.max_quote_age_ms,
+)
+
+
 async def stream_events(event: dict):
+    global _last_ws_broadcast_mono
     market_status["websocket"] = market.status.get("websocket", "CONNECTED")
     if event.get("T") == "q":
-        d_dispatched = False
         try:
             event_at = datetime.fromisoformat(event["t"])
             received = datetime.now(UTC)
@@ -388,94 +596,127 @@ async def stream_events(event: dict):
                 "source": "BINANCE_USDM_PERP",
                 "currency": "USD_RESEARCH",
             }
-            market_status["quote"] = quote
             market_status["websocket_quote"] = (
                 "PASS" if timing["timestamp_valid"] else "TIMESTAMP_INVALID"
             )
-            if d_bridge is not None:
-                try:
-                    bid, ask = Decimal(str(event['bp'])), Decimal(str(event['ap']))
-                    raw_valid = (event.get('S') == 'BTC/USD'
-                                 and event.get('source') == 'BINANCE_USDM_PERP'
-                                 and event.get('currency') == 'USD_RESEARCH'
-                                 and event.get('timestamp_valid') is True
-                                 and timing['timestamp_valid'] is True
-                                 and bid.is_finite() and ask.is_finite() and 0 < bid <= ask)
-                    if getattr(d_bridge, 'common_guard', False):
-                        await d_bridge.process_common('quote', quote if raw_valid else None)
-                    elif not raw_valid:
-                        _fail_d_dispatch(d_bridge, 'D_RAW_QUOTE_INVALID')
-                    elif not d_bridge.submit_quote(quote):
-                        _fail_d_dispatch(d_bridge, 'D_QUOTE_SUBMIT_FAILED')
-                except (KeyError, TypeError, ValueError, ArithmeticError, InvalidOperation):
-                    if getattr(d_bridge, 'common_guard', False):
-                        await d_bridge.process_common('quote', None)
-                    else:
-                        _fail_d_dispatch(d_bridge, 'D_RAW_QUOTE_INVALID')
-                except Exception:
-                    logging.getLogger(__name__).exception('D quote dispatch failed')
-                    _fail_d_dispatch(d_bridge, 'D_QUOTE_SUBMIT_FAILED')
-                d_dispatched = True
-            await process_stop_quote(quote)
+            new_q, accepted, _ = quote_dispatcher.submit(market_status.get("quote"), quote)
+            market_status["quote"] = new_q
         except Exception as exc:
-            if d_bridge is not None and not d_dispatched:
-                if getattr(d_bridge, 'common_guard', False):
-                    await d_bridge.process_common('quote', None)
-                else:
-                    _fail_d_dispatch(d_bridge, 'D_QUOTE_PARSE_FAILED')
             market_status["websocket_quote"] = "PARSE_ERROR"
             market_status["quote_error"] = type(exc).__name__
+        now_m = _time.monotonic()
+        if now_m - _last_ws_broadcast_mono >= 0.25:
+            _last_ws_broadcast_mono = now_m
+            await broadcast({"type": "market_event", "event": event})
+        return
     elif event.get("T") == "error":
         market_status["websocket"] = "ERROR"
     await broadcast({"type": "market_event", "event": event})
 
 
-async def process_stop_quote(quote: dict) -> None:
-    """Run persistent stop monitoring and pending-stop recovery on quote events, without AI."""
+async def process_stop_quote(quote: dict, *, target_ids: set[str] | None = None) -> None:
+    """Run persistent stop monitoring and pending-stop recovery on quote events, without AI.
+
+    When `target_ids` is provided by `ActivePositionIndex`, only strategies that actually have
+    an open position, pending entry/exit, fault, or due mark-price update touch SQLite.
+    """
     if quote.get("source") != market.source:
         return
-    try:
-        await asyncio.to_thread(g_mirror.monitor_quote, quote)
-        ledger.schedule_mirror_outbox()
-    except Exception:
-        # G is isolated: its emergency exit must never disrupt C's existing protection loop.
-        logging.getLogger(__name__).exception("G mirror risk monitor failed")
-    try:
-        await asyncio.to_thread(strategy_pool.monitor_quote, quote,
-                                 max_age_ms=COST_MODEL.max_quote_age_ms,
-                                 fee_rate=Decimal(str(COST_MODEL.fee_rate)),
-                                 slippage=Decimal(str(COST_MODEL.adverse_slippage_bps))/Decimal(10000))
-    except Exception:
-        # Pool failures must not block the existing ABC/E protective quote path.
-        logging.getLogger(__name__).exception('Isolated strategy-pool stop monitor failed')
-    for sid in pa_extension.ledgers:
+    if target_ids is None or "G" in target_ids:
+        try:
+            await asyncio.to_thread(g_mirror.monitor_quote, quote)
+            ledger.schedule_mirror_outbox()
+        except Exception:
+            # G is isolated: its emergency exit must never disrupt C's existing protection loop.
+            logging.getLogger(__name__).exception("G mirror risk monitor failed")
+
+    # Strategy pool (PA-01..08 + Chan)
+    pool_needed = target_ids is None or any(
+        sid not in ("A", "B", "C", "D", "E", "G")
+        and sid not in pa_extension.ledgers
+        and sid not in r_series_ext.ledgers
+        and sid not in thc_ay_ext.ledgers
+        for sid in target_ids
+    )
+    if pool_needed:
+        try:
+            await asyncio.to_thread(strategy_pool.monitor_quote, quote,
+                                     max_age_ms=COST_MODEL.max_quote_age_ms,
+                                     fee_rate=Decimal(str(COST_MODEL.fee_rate)),
+                                     slippage=Decimal(str(COST_MODEL.adverse_slippage_bps))/Decimal(10000))
+        except Exception:
+            # Pool failures must not block the existing ABC/E protective quote path.
+            logging.getLogger(__name__).exception('Isolated strategy-pool stop monitor failed')
+
+    for sid in list(pa_extension.ledgers):
+        if target_ids is not None and sid not in target_ids:
+            continue
         try:
             await asyncio.to_thread(pa_extension.ledger_quote, sid, _quote_with_live_age(quote), _pa_quote_entries_allowed)
         except Exception:
             logging.getLogger(__name__).exception('%s isolated quote monitor failed', sid)
-    event_material = "|".join(
-        str(quote.get(key, "")) for key in ("event_at", "bid", "ask", "source")
-    )
-    event_id = "quote:" + hashlib.sha256(event_material.encode()).hexdigest()
-    event_ids = {agent: event_id for agent in "ABC"}
-    outcomes = paper_scheduler.monitor_stops(event_ids=event_ids, quote=quote, cost=COST_MODEL)
-    recovery = paper_scheduler.recover_stops(quote=quote, cost=COST_MODEL)
-    try:
-        from backend.e_protection import protect_e_accounts
-        e_protection = protect_e_accounts({"formal": DATA_ROOT / "e" / "formal.sqlite3",
-                                           "shadow": DATA_ROOT / "e" / "shadow.sqlite3"}, quote, COST_MODEL)
-        for kind, outcome in e_protection.items():
-            if outcome.get("reason") == "PROTECTION_ERROR":
-                logging.getLogger(__name__).error("E protection failed: %s %s", kind, outcome.get("error_class"))
-    except Exception:
-        # E protection errors must not disrupt the existing quote event loop.
-        logging.getLogger(__name__).exception("E protection dispatch failed")
-    if formal_mode == 'RULE_DRIVEN' and isinstance(paper_runner, RuleCycleRunner):
-        paper_runner.monitor_targets(quote)
-        from backend.recovery_guard import recovery_blocked
-        if (quote.get('timestamp_valid') is True and 0 <= int(quote.get('age_ms', 10**9)) <= COST_MODEL.max_quote_age_ms
-                and not recovery_blocked(ledger, paper_runner)):
-            market_status['startup_position_monitor_checked'] = True
+
+    r_targets = [sid for sid in list(r_series_ext.ledgers) if target_ids is None or sid in target_ids]
+    thc_targets = [sid for sid in list(thc_ay_ext.ledgers) if target_ids is None or sid in target_ids]
+    if r_targets or thc_targets:
+        r_guard = _common_market_guard()
+        r_quote = _quote_with_live_age(quote)
+        def _batch_ext_quotes():
+            for sid in r_targets:
+                if sid not in r_series_ext.ledgers:
+                    continue
+                try:
+                    with account_locks.lock_for(sid):
+                        r_series_ext.ledger_quote(sid, r_quote, r_guard)
+                except Exception:
+                    logging.getLogger(__name__).exception('%s isolated quote monitor failed', sid)
+            for sid in thc_targets:
+                if sid not in thc_ay_ext.ledgers:
+                    continue
+                try:
+                    with account_locks.lock_for(sid):
+                        thc_ay_ext.ledger_quote(sid, r_quote, r_guard)
+                except Exception:
+                    logging.getLogger(__name__).exception('%s isolated quote monitor failed', sid)
+        await asyncio.to_thread(_batch_ext_quotes)
+
+    outcomes: dict = {}
+    recovery: dict = {}
+    abc_needed = target_ids is None or bool({"A", "B", "C"} & target_ids)
+    if abc_needed:
+        event_material = "|".join(
+            str(quote.get(key, "")) for key in ("event_at", "bid", "ask", "source")
+        )
+        event_id = "quote:" + hashlib.sha256(event_material.encode()).hexdigest()
+        event_ids = {agent: event_id for agent in "ABC"}
+        def _run_abc_stops():
+            out = paper_scheduler.monitor_stops(event_ids=event_ids, quote=quote, cost=COST_MODEL)
+            rec = paper_scheduler.recover_stops(quote=quote, cost=COST_MODEL)
+            if formal_mode == 'RULE_DRIVEN' and isinstance(paper_runner, RuleCycleRunner):
+                paper_runner.monitor_targets(quote)
+                from backend.recovery_guard import recovery_blocked
+                if (quote.get('timestamp_valid') is True and 0 <= int(quote.get('age_ms', 10**9)) <= COST_MODEL.max_quote_age_ms
+                        and not recovery_blocked(ledger, paper_runner)):
+                    market_status['startup_position_monitor_checked'] = True
+            return out, rec
+        outcomes, recovery = await asyncio.to_thread(_run_abc_stops)
+
+    if target_ids is None or "E" in target_ids:
+        try:
+            from backend.e_protection import protect_e_accounts
+            e_protection = await asyncio.to_thread(
+                protect_e_accounts,
+                {"formal": DATA_ROOT / "e" / "formal.sqlite3", "shadow": DATA_ROOT / "e" / "shadow.sqlite3"},
+                quote,
+                COST_MODEL,
+            )
+            for kind, outcome in e_protection.items():
+                if outcome.get("reason") == "PROTECTION_ERROR":
+                    logging.getLogger(__name__).error("E protection failed: %s %s", kind, outcome.get("error_class"))
+        except Exception:
+            # E protection errors must not disrupt the existing quote event loop.
+            logging.getLogger(__name__).exception("E protection dispatch failed")
+
     for agent in set(outcomes) | set(recovery):
         row = outcomes.get(agent) or recovery.get(agent)
         if row and row.get("accepted"):
@@ -576,10 +817,10 @@ d_bridge = None
 
 
 def _common_market_guard():
-    """Single source of truth for market readiness across all 16+ strategies."""
-    from backend.common_guard import evaluate_common_market_guard
+    """Single source of truth for market readiness across all 38+ strategies."""
+    from backend.common_guard import CommonMarketGuard, evaluate_common_market_guard
     quote = _quote_with_live_age(market_status.get('quote'))
-    return evaluate_common_market_guard(
+    guard = evaluate_common_market_guard(
         feed_health=market_status.get('feed_health'),
         quote=quote,
         ws_recovery_state=market.status.get('websocket_recovery_state'),
@@ -588,6 +829,16 @@ def _common_market_guard():
         max_quote_age_ms=COST_MODEL.max_quote_age_ms,
         startup_monitor_checked=bool(market_status.get('startup_position_monitor_checked', True)),
     )
+    if quote_dispatcher.overload_blocked:
+        return CommonMarketGuard(
+            feed_live=guard.feed_live,
+            quote_fresh=False,
+            ws_healthy=guard.ws_healthy,
+            candles_complete=guard.candles_complete,
+            startup_monitor_checked=guard.startup_monitor_checked,
+            reason='PROTECTION_QUEUE_OVERLOAD',
+        )
+    return guard
 
 
 def _d_feed_healthy():
@@ -1089,6 +1340,46 @@ async def _dispatch_strategy_pool_cycle(closed, close, quote):
         except Exception:
             logging.getLogger(__name__).exception('%s isolated cycle failed', sid)
 
+    if r_series_ext.ledgers or thc_ay_ext.ledgers:
+        if market_hub.latest_15m_close_ms is None:
+            try:
+                r_all_bars = await asyncio.to_thread(candle_archive.read, datetime(2020, 1, 1, tzinfo=UTC), close)
+                if not r_all_bars:
+                    r_all_bars = [dict(x) for x in closed]
+            except Exception:
+                r_all_bars = [dict(x) for x in closed]
+            await asyncio.to_thread(market_hub.update_15m_bars, r_all_bars)
+        else:
+            await asyncio.to_thread(market_hub.append_15m_bars, closed)
+
+        c_ms = int(close.astimezone(UTC).timestamp() * 1000)
+        hub_bars_15m = market_hub.get_bars("15m", up_to_close_ms=c_ms)
+        r_guard = _common_market_guard()
+        cycle_tasks = []
+        if r_series_ext.ledgers:
+            r_shared_ctx = await asyncio.to_thread(
+                market_hub.get_or_build_context,
+                "r_v11_ctx",
+                lambda: r_series_ext.build_context(hub_bars_15m, close=close),
+                watermark_ms=c_ms,
+            )
+            for sid in list(r_series_ext.ledgers):
+                cycle_tasks.append(
+                    (sid, lambda s=sid, ctx=r_shared_ctx: r_series_ext.ledger_cycle(s, hub_bars_15m, close, r_guard, shared_ctx=ctx))
+                )
+        if thc_ay_ext.ledgers:
+            thc_ctx = await asyncio.to_thread(thc_ay_ext.build_context, hub_bars_15m, close=close)
+            for sid, lg in list(thc_ay_ext.ledgers.items()):
+                cycle_tasks.append((sid, lambda l=lg, ctx=thc_ctx: l.on_closed_cycle(ctx, guard=r_guard, close=close)))
+        if cycle_tasks:
+            fanout_res = await asyncio.to_thread(cycle_executor.run_batch, cycle_tasks)
+            logging.getLogger(__name__).info(
+                'Concurrent extension cycle close=%s strategies=%d fanout_ms=%.1f',
+                close.isoformat(), len(fanout_res), cycle_executor.last_fanout_ms,
+            )
+    await asyncio.to_thread(_refresh_protection_watchlist)
+    query_cache.invalidate()
+
 
 def _pa_quote_entries_allowed():
     return _common_market_guard().entry_ready
@@ -1124,13 +1415,47 @@ async def lifespan(app: FastAPI):
         Path(__file__).resolve(), Path.cwd(), sys.executable, DATA_ROOT, DB_PATH,
         strategy_pool.path, app.version,
     )
-    global pa_extension
+    global pa_extension, r_series_ext, thc_ay_ext
+    _excluded_ids = lifecycle_manager.registry.excluded_ids()
+    if _excluded_ids:
+        logging.getLogger('uvicorn.error').info('Lifecycle tombstones excluded on startup: %s', sorted(_excluded_ids))
     pa_extension = PAExtension(
         DATA_ROOT / 'pa-v1-extensions',
         register=os.getenv('BTC_PA_EXTENSION_REGISTER', 'true').lower() == 'true',
         enabled={item.strip().upper() for item in os.getenv('BTC_PA_EXTENSION_ENABLED', 'PA-09,PA-10').split(',') if item.strip()},
+        excluded_ids=_excluded_ids,
         cost=COST_MODEL,
     )
+    _default_r_reg = 'false' if os.getenv('BTC_LAB_TEST_MODE', '').lower() == 'true' else 'true'
+    r_series_ext = RSeriesExtension(
+        DATA_ROOT / 'r-series',
+        register=os.getenv('BTC_R_SERIES_REGISTER', _default_r_reg).lower() == 'true',
+        enabled={item.strip().upper() for item in os.getenv('BTC_R_SERIES_ENABLED', 'R01,R02,R03,R04,R05,R06').split(',') if item.strip()},
+        excluded_ids=_excluded_ids,
+        cost=COST_MODEL,
+    )
+    thc_ay_ext = ThcAyExtension(
+        DATA_ROOT / 'extensions',
+        register=os.getenv('BTC_THC_AY_REGISTER', _default_r_reg).lower() == 'true',
+        enabled={item.strip().lower() for item in os.getenv('BTC_THC_AY_ENABLED', '').split(',') if item.strip()},
+        excluded_ids=_excluded_ids,
+        cost=COST_MODEL,
+    )
+    if r_series_ext.ledgers or thc_ay_ext.ledgers:
+        try:
+            _warm_bars = await asyncio.to_thread(candle_archive.read, datetime(2020, 1, 1, tzinfo=UTC), datetime.now(UTC))
+            if _warm_bars:
+                await asyncio.to_thread(market_hub.update_15m_bars, _warm_bars)
+            if _warm_bars and r_series_ext.ledgers:
+                _pw = await asyncio.to_thread(r_series_ext.prewarm_all, _warm_bars)
+                if _pw:
+                    logging.getLogger('uvicorn.error').info('R-series prewarmed: %s', _pw)
+            if thc_ay_ext.ledgers:
+                _pw2 = await asyncio.to_thread(thc_ay_ext.prewarm_all, _warm_bars or [])
+                if _pw2:
+                    logging.getLogger('uvicorn.error').info('THC/AY extensions prewarmed: %d instances', len(_pw2))
+        except Exception:
+            logging.getLogger(__name__).exception('Extension startup prewarm failed')
     stop_event.clear()
     try:
         try:
@@ -1161,8 +1486,10 @@ async def lifespan(app: FastAPI):
                 logging.getLogger(__name__).exception('D bridge startup failed')
         d_start_task = asyncio.create_task(start_d_components())
         if market.credentials:
+            await asyncio.to_thread(_refresh_protection_watchlist)
             tasks.extend(
                 [
+                    quote_dispatcher.start(stop_event),
                     asyncio.create_task(market_loop()),
                     asyncio.create_task(quote_loop()),
                     asyncio.create_task(market.websocket(stream_events, stop_event)),
@@ -1209,6 +1536,169 @@ pa_extension = PAExtension(
     enabled=(),
     cost=COST_MODEL,
 )
+r_series_ext = RSeriesExtension(
+    DATA_ROOT / 'r-series',
+    register=False,
+    enabled=(),
+    cost=COST_MODEL,
+)
+thc_ay_ext = ThcAyExtension(
+    DATA_ROOT / 'extensions',
+    register=False,
+    enabled=(),
+    cost=COST_MODEL,
+)
+
+
+def _on_lifecycle_change(strategy_id: str, new_state: str) -> None:
+    try:
+        obs = globals().get('observation_events')
+        if obs is not None and hasattr(obs, 'invalidate'):
+            obs.invalidate()
+    except Exception:
+        pass
+
+
+def _lifecycle_adapters() -> dict:
+    return {
+        'ledger': ledger,
+        'g_mirror': g_mirror,
+        'strategy_pool': strategy_pool,
+        'pa_extension': pa_extension,
+        'r_series_ext': r_series_ext,
+        'thc_ay_ext': thc_ay_ext,
+        'd_bridge': d_bridge,
+        'strategy_control': _strategy_control,
+        'set_d_enabled': (lambda en: d_bridge.set_enabled(en)) if d_bridge is not None else None,
+    }
+
+
+lifecycle_manager = StrategyLifecycleManager(
+    DATA_ROOT,
+    account_locks=account_locks,
+    active_index=quote_dispatcher.watchlist,
+    query_cache=query_cache,
+    get_adapters=_lifecycle_adapters,
+    on_lifecycle_change=_on_lifecycle_change,
+)
+
+
+@app.get('/api/v1/lifecycle/summary')
+async def lifecycle_summary():
+    return await asyncio.to_thread(lifecycle_manager.summary)
+
+
+@app.get('/api/v1/lifecycle/{strategy_id}/gates')
+async def lifecycle_gates(strategy_id: str, confirm_strategy_id: str | None = None):
+    try:
+        return await asyncio.to_thread(
+            lifecycle_manager.check_delete_gates,
+            strategy_id,
+            confirm_strategy_id=confirm_strategy_id,
+            require_confirmation=confirm_strategy_id is not None,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.post('/api/v1/lifecycle/{strategy_id}/pause')
+async def lifecycle_pause(strategy_id: str, request: Request):
+    if request.client is None or request.client.host not in ('127.0.0.1', '::1'):
+        raise HTTPException(403, 'LOCAL_ONLY')
+    try:
+        res = await asyncio.to_thread(lifecycle_manager.soft_pause, strategy_id)
+        await broadcast({'type': 'strategy_lifecycle_changed', 'strategy_id': res['strategy_id'], 'state': 'PAUSED'})
+        return res
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.post('/api/v1/lifecycle/{strategy_id}/resume')
+async def lifecycle_resume(strategy_id: str, request: Request):
+    if request.client is None or request.client.host not in ('127.0.0.1', '::1'):
+        raise HTTPException(403, 'LOCAL_ONLY')
+    try:
+        res = await asyncio.to_thread(lifecycle_manager.resume, strategy_id)
+        await broadcast({'type': 'strategy_lifecycle_changed', 'strategy_id': res['strategy_id'], 'state': 'RUNNING'})
+        return res
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.post('/api/v1/lifecycle/{strategy_id}/archive')
+async def lifecycle_archive(strategy_id: str, request: Request):
+    if request.client is None or request.client.host not in ('127.0.0.1', '::1'):
+        raise HTTPException(403, 'LOCAL_ONLY')
+    try:
+        body = await request.json() if (await request.body()) else {}
+    except Exception:
+        body = {}
+    try:
+        res = await asyncio.to_thread(lifecycle_manager.archive, strategy_id, reason=str((body or {}).get('reason') or 'USER_ARCHIVE'))
+        await broadcast({'type': 'strategy_lifecycle_changed', 'strategy_id': res['strategy_id'], 'state': 'ARCHIVED'})
+        return res
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.post('/api/v1/lifecycle/{strategy_id}/restore')
+async def lifecycle_restore(strategy_id: str, request: Request):
+    if request.client is None or request.client.host not in ('127.0.0.1', '::1'):
+        raise HTTPException(403, 'LOCAL_ONLY')
+    try:
+        res = await asyncio.to_thread(lifecycle_manager.restore, strategy_id)
+        await broadcast({'type': 'strategy_lifecycle_changed', 'strategy_id': res['strategy_id'], 'state': 'PAUSED'})
+        return res
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.delete('/api/v1/lifecycle/{strategy_id}')
+async def lifecycle_delete(strategy_id: str, request: Request, confirm_strategy_id: str | None = None):
+    if request.client is None or request.client.host not in ('127.0.0.1', '::1'):
+        raise HTTPException(403, 'LOCAL_ONLY')
+    confirm = confirm_strategy_id
+    reason = 'USER_DELETE'
+    try:
+        raw = await request.body()
+        if raw:
+            body = json.loads(raw.decode('utf-8'))
+            if isinstance(body, dict):
+                confirm = confirm or body.get('confirm_strategy_id')
+                reason = str(body.get('reason') or reason)
+    except Exception:
+        pass
+    try:
+        res = await asyncio.to_thread(
+            lifecycle_manager.delete,
+            strategy_id,
+            confirm_strategy_id=str(confirm or ''),
+            reason=reason,
+        )
+        await broadcast({'type': 'strategy_lifecycle_changed', 'strategy_id': res['strategy_id'], 'state': 'DELETED'})
+        return res
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.post('/api/v1/lifecycle/{strategy_id}/re-register')
+async def lifecycle_reregister(strategy_id: str, request: Request):
+    if request.client is None or request.client.host not in ('127.0.0.1', '::1'):
+        raise HTTPException(403, 'LOCAL_ONLY')
+    try:
+        res = await asyncio.to_thread(lifecycle_manager.re_register, strategy_id)
+        await broadcast({'type': 'strategy_lifecycle_changed', 'strategy_id': res['strategy_id'], 'state': 'REGISTERED'})
+        return res
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 @app.get('/api/v1/g-mirror/status')
 async def g_mirror_status():
@@ -1242,20 +1732,52 @@ async def g_mirror_fills(limit: int = 500):
     return {'items': rows[-limit:]}
 
 @app.get('/api/v1/strategy-pool')
-async def strategy_pool_list():
-    guard = _common_market_guard()
-    pool_items = strategy_pool.list()
-    for item in pool_items:
-        if item.get('enabled') and not guard.entry_ready and item.get('status') in ('RUNNING', 'ENABLED_NOT_RUNNING'):
-            item['status'] = 'MARKET_RECOVERING'
-        elif item.get('enabled') and guard.entry_ready and item.get('status') == 'ENABLED_NOT_RUNNING':
-            last_st = str(item.get('last_status') or '')
-            if last_st.startswith('BLOCKED:QUOTE_UNAVAILABLE_OR_STALE') or last_st == 'BLOCKED_STALE_QUOTE':
-                item['status'] = 'RUNNING'
-    return {'items': pool_items + pa_extension.list(market_ready=guard.entry_ready)}
+async def strategy_pool_list(include_archived: bool = False):
+    cache_key = 'strategy_pool_list_all' if include_archived else 'strategy_pool_list'
+    def _build():
+        guard = _common_market_guard()
+        excluded = lifecycle_manager.registry.deleted_ids() if include_archived else lifecycle_manager.registry.excluded_ids()
+        archived_set = lifecycle_manager.registry.archived_ids()
+        pool_items = strategy_pool.list()
+        for item in pool_items:
+            if item.get('enabled') and not guard.entry_ready and item.get('status') in ('RUNNING', 'ENABLED_NOT_RUNNING'):
+                item['status'] = 'MARKET_RECOVERING'
+            elif item.get('enabled') and guard.entry_ready and item.get('status') == 'ENABLED_NOT_RUNNING':
+                last_st = str(item.get('last_status') or '')
+                if last_st.startswith('BLOCKED:QUOTE_UNAVAILABLE_OR_STALE') or last_st == 'BLOCKED_STALE_QUOTE':
+                    item['status'] = 'RUNNING'
+        combined = pool_items + pa_extension.list(market_ready=guard.entry_ready) + r_series_ext.list(market_ready=guard.entry_ready) + thc_ay_ext.list(market_ready=guard.entry_ready)
+        filtered = []
+        for it in combined:
+            sid = str(it.get('id') or '')
+            if sid in excluded:
+                continue
+            if not include_archived and it.get('status') == 'ARCHIVED':
+                continue
+            if sid in archived_set:
+                it['lifecycle_state'] = 'ARCHIVED'
+            else:
+                it['lifecycle_state'] = 'RUNNING' if it.get('enabled') else 'PAUSED'
+            filtered.append(it)
+        return {
+            'items': filtered,
+            'snapshot_meta': query_cache.snapshot_meta(cache_key),
+        }
+    return await asyncio.to_thread(query_cache.get_or_build, cache_key, _build)
+
+@app.get('/api/v1/r-series')
+async def r_series_list():
+    def _build():
+        guard = _common_market_guard()
+        return {'items': r_series_ext.list(market_ready=guard.entry_ready), 'guard': guard.to_dict()}
+    return await asyncio.to_thread(query_cache.get_or_build, 'r_series_list', _build)
 
 @app.get('/api/v1/strategy-pool/{strategy_id}/versions')
 async def strategy_pool_versions(strategy_id: str):
+    if strategy_id in r_series_ext.ledgers:
+        return {'items': r_series_ext.versions(strategy_id)}
+    if strategy_id in thc_ay_ext.ledgers:
+        return {'items': thc_ay_ext.versions(strategy_id)}
     return {'items': strategy_pool.versions(strategy_id)}
 
 @app.post('/api/v1/strategy-pool/upload/validate')
@@ -1284,6 +1806,18 @@ async def strategy_pool_upload(request: Request, expected_strategy_id: str | Non
 
 @app.post('/api/v1/strategy-pool/{strategy_id}/enable')
 async def strategy_pool_enable(strategy_id: str, request: Request):
+    if strategy_id in thc_ay_ext.ledgers:
+        body = await request.json()
+        if not isinstance(body, dict) or type(body.get('enabled')) is not bool:
+            raise HTTPException(422, 'EXTENSION_ENABLE_INPUT_INVALID')
+        st = await asyncio.to_thread(thc_ay_ext.set_enabled, strategy_id, body['enabled'])
+        return {'ok': True, 'id': strategy_id, 'enabled': body['enabled'], 'status': st.get('last_status')}
+    if strategy_id.upper() in R_SERIES_NAMES and strategy_id.upper() in r_series_ext.ledgers:
+        body = await request.json()
+        if not isinstance(body, dict) or type(body.get('enabled')) is not bool:
+            raise HTTPException(422, 'R_SERIES_ENABLE_INPUT_INVALID')
+        st = await asyncio.to_thread(r_series_ext.set_enabled, strategy_id.upper(), body['enabled'])
+        return {'ok': True, 'id': strategy_id.upper(), 'enabled': body['enabled'], 'status': st.get('last_status')}
     if strategy_id.upper() in PA_EXTENSION_NAMES:
         import hmac
         token = os.getenv('BTC_LAB_RECOVERY_TOKEN', '').encode()
@@ -1332,6 +1866,12 @@ async def strategy_pool_diff(strategy_id: str, old: str, new: str):
 
 @app.get('/api/v1/strategy-pool/{strategy_id}/fills')
 async def strategy_pool_fills(strategy_id: str, limit: int = 500):
+    if strategy_id in thc_ay_ext.ledgers:
+        if not 1 <= limit <= 2000: raise HTTPException(400, 'LIMIT_INVALID')
+        return {'items': thc_ay_ext.ledgers[strategy_id].fills()[-limit:][::-1]}
+    if strategy_id in r_series_ext.ledgers:
+        if not 1 <= limit <= 2000: raise HTTPException(400, 'LIMIT_INVALID')
+        return {'items': r_series_ext.ledgers[strategy_id].fills()[-limit:][::-1]}
     if strategy_id in pa_extension.ledgers:
         if not 1 <= limit <= 2000: raise HTTPException(400, 'LIMIT_INVALID')
         return {'items': pa_extension.ledgers[strategy_id].fills()[-limit:][::-1]}
@@ -1341,6 +1881,8 @@ async def strategy_pool_fills(strategy_id: str, limit: int = 500):
 @app.get('/api/v1/strategy-pool/{strategy_id}/decisions')
 async def strategy_pool_decisions(strategy_id: str, limit: int = 100):
     if not 1 <= limit <= 1000: raise HTTPException(400,'LIMIT_INVALID')
+    if strategy_id in thc_ay_ext.ledgers:
+        return {'items': thc_ay_ext.diagnostics(strategy_id, limit)}
     return {'items':strategy_pool.diagnostics(strategy_id,limit)}
 
 import calendar as _calendar
@@ -1650,14 +2192,12 @@ async def strategy_control_action(agent: str, action: str, request: Request):
     if action == 'resume':
         if not await asyncio.to_thread(control.resume, agent):
             raise HTTPException(status_code=409, detail='PAUSE_NOT_COMPLETE')
+        query_cache.invalidate()
         return control.status(agent)
-    await asyncio.to_thread(control.request_pause, agent)
-    try:
-        store = await asyncio.to_thread(_strategy_formal_store, agent)
-    except Exception:
-        store = None
-    quote = _quote_with_live_age(market_status.get('quote')) or {}
-    return await asyncio.to_thread(control.pause_formal, agent, store, quote, COST_MODEL, datetime.now(UTC))
+    # Unified Soft Pause (V3.1 authorized policy): block new entries, keep existing open positions & SL/TP intact.
+    res = await asyncio.to_thread(control.soft_pause, agent)
+    query_cache.invalidate()
+    return res
 
 
 def _shadow_evolution_status():
@@ -1744,6 +2284,14 @@ async def system_status():
         "quote_health": quote_health,
         "quote_fresh": not stale,
         "common_market_guard": _common_market_guard().to_dict(),
+        "quote_pipeline": {
+            **quote_dispatcher.stats(),
+            "rest_poll_skipped_ws_healthy": _rest_poll_skipped_ws_healthy,
+            "rest_poll_executed": _rest_poll_executed,
+        },
+        "market_hub": market_hub.stats(),
+        "cycle_executor": cycle_executor.stats(),
+        "query_cache": query_cache.stats(),
         "stop_monitor": "QUOTE_EVENT_INTERNAL_PAPER_STOP_MONITOR",
         "scheduler": (
             "ENABLED_INTERNAL_PAPER" if paper_scheduler.enabled else "DISABLED_NOT_ARMED"
@@ -1793,7 +2341,22 @@ async def observation_candle_route(interval: str = "15m", limit: int = 500, end_
 @app.get("/api/v1/observation/events")
 async def observation_events_route():
     items = await asyncio.to_thread(observation_events.read)
-    return {"source":"FORMAL_PAPER_LEDGERS", "items":items, "errors":list(observation_events.errors)}
+    excluded = await asyncio.to_thread(lifecycle_manager.registry.excluded_ids)
+    pool_ids = [it["id"] for it in strategy_pool.list() if not it.get("archived_at")]
+    ext_ids = list(pa_extension.ledgers.keys()) + list(r_series_ext.ledgers.keys()) + list(thc_ay_ext.ledgers.keys())
+    seen = set()
+    all_strategies = []
+    for sid in ["A", "B", "C", "D", "E", "G"] + pool_ids + ext_ids:
+        if sid not in seen and sid not in excluded:
+            seen.add(sid)
+            all_strategies.append(sid)
+    filtered_items = [it for it in items if str(it.get("strategy_id") or "") not in excluded]
+    return {
+        "source": "FORMAL_PAPER_LEDGERS",
+        "strategies": all_strategies,
+        "items": filtered_items,
+        "errors": list(observation_events.errors),
+    }
 
 @app.get("/api/v1/market/candles")
 async def get_candles(limit: int = 672):

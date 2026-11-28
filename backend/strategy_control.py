@@ -208,6 +208,17 @@ class StrategyControl:
                 self.record_account_result(agent, kind, result)
             return self.status(agent)
 
+    def soft_pause(self, agent):
+        """Unified soft pause: blocks new entries immediately while keeping existing open positions & SL/TP intact."""
+        with self._guard():
+            agent = self._agent(agent)
+            with sqlite3.connect(self.path) as db:
+                db.execute(
+                    "UPDATE strategy_control SET state='PAUSED',formal='SOFT_PAUSED',shadow='UNCHANGED' WHERE agent=?",
+                    (agent,),
+                )
+            return self.status(agent)
+
     def pause_formal(self, agent, store, quote, cost, now):
         """Pause the formal paper account; shadow accounts remain independent."""
         with self._guard():

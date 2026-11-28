@@ -33,15 +33,15 @@ def test_local_pause_and_resume_with_isolated_ledgers(tmp_path, monkeypatch):
     assert client.post('/api/v1/strategy-control/E/pause', headers={'Origin': 'https://untrusted.example'}).status_code == 403
 
 
-def test_missing_formal_never_reports_paused_and_resume_fails(tmp_path, monkeypatch):
+def test_missing_formal_soft_pause_blocks_entries_without_closing(tmp_path, monkeypatch):
     control = StrategyControl(tmp_path / 'control.sqlite')
-    formal = EPaperStore(tmp_path / 'formal.sqlite')
     monkeypatch.setattr(service, '_strategy_control', lambda: control)
     monkeypatch.setattr(service, '_strategy_formal_store', lambda agent: None)
     client = TestClient(service.app, client=('127.0.0.1', 12345))
     result = client.post('/api/v1/strategy-control/E/pause').json()
-    assert result['state'] == 'PAUSING' and result['formal'] == 'ERROR'
-    assert client.post('/api/v1/strategy-control/E/resume').status_code == 409
+    assert result['state'] == 'PAUSED' and result['formal'] == 'SOFT_PAUSED'
+    assert not control.is_entry_allowed('E')
+    assert client.post('/api/v1/strategy-control/E/resume').json()['state'] == 'RUNNING'
 
 
 def test_store_failure_still_blocks_entries(tmp_path, monkeypatch):
@@ -51,7 +51,7 @@ def test_store_failure_still_blocks_entries(tmp_path, monkeypatch):
     monkeypatch.setattr(service, '_strategy_formal_store', fail)
     client = TestClient(service.app, client=('127.0.0.1', 12345))
     result = client.post('/api/v1/strategy-control/E/pause').json()
-    assert result['state'] == 'PAUSING' and result['formal'] == 'ERROR'
+    assert result['state'] == 'PAUSED'
     assert not control.is_entry_allowed('E')
 
 
@@ -61,7 +61,8 @@ def test_visual_mode_cannot_use_rule_only_control(tmp_path, monkeypatch):
     assert client.post('/api/v1/strategy-control/A/pause').status_code == 409
 
 
-def test_endpoint_closes_formal_position_and_guards_reentry(tmp_path, monkeypatch):
+def test_endpoint_soft_pauses_formal_position_and_guards_reentry(tmp_path, monkeypatch):
+    """V3.1 unified soft pause: stops new entries while keeping existing open positions & SL/TP intact."""
     import backend.e_paper_store as module
     monkeypatch.setattr(module, '__file__', str(tmp_path / 'backend/e_paper_store.py'))
     control = StrategyControl(tmp_path / 'data/strategy-control.sqlite3')
@@ -78,10 +79,10 @@ def test_endpoint_closes_formal_position_and_guards_reentry(tmp_path, monkeypatc
     monkeypatch.setattr(service, '_quote_with_live_age', lambda value: quote)
     client = TestClient(service.app, client=('127.0.0.1', 12345))
     assert client.post('/api/v1/strategy-control/E/pause').json()['state'] == 'PAUSED'
-    assert formal.account('E')['state'] == 'FLAT'
+    # Soft pause preserves open position for SL/TP protection instead of force-closing!
+    assert formal.account('E')['state'] == 'OPEN_LONG'
     assert shadow.account('E')['state'] == 'OPEN_LONG'
-    args.update(idempotency_key='two', expected_version=formal.account('E')['version'])
-    assert formal.open_position(**args)['reason'] == 'STRATEGY_PAUSED'
+    assert not control.is_entry_allowed('E')
     assert client.post('/api/v1/strategy-control/E/resume').json()['state'] == 'RUNNING'
-    assert formal.open_position(**args)['accepted']
+    assert control.is_entry_allowed('E')
 

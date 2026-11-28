@@ -1233,10 +1233,14 @@ def open_strategy_pool_window(root, *, api_json, open_rule_details, open_account
                     'REGISTERED': '已注册（未启用）',
                     'REGISTERED_PAUSED': '已暂停',
                     'PAUSED': '已暂停',
+                    'DISABLED': '已停用',
                     'ENABLED_NOT_RUNNING': '等待自然周期',
-                    'RUNNING': '正常运行',
-                    'MARKET_RECOVERING': '行情保护',
-                    'FAULTED': '运行异常',
+                    'RUNNING': '运行中',
+                    'WAITING_SIGNAL': '运行中',
+                    'MARKET_RECOVERING': '行情恢复中',
+                    'RECONCILING': '对账中',
+                    'FAULTED': '对账异常',
+                    'RECONCILE_ERROR': '对账异常',
                     'ARCHIVED': '已归档',
                 }
                 for item in items:
@@ -1352,6 +1356,14 @@ def open_strategy_pool_window(root, *, api_json, open_rule_details, open_account
         def update_selected():
             try:
                 item = selected()
+                if item.get('is_extension') or item.get('is_r_series') or item['id'] in ('PA-09', 'PA-10'):
+                    messagebox.showinfo(
+                        '扩展算法策略版本说明',
+                        f"{_display_name(item)}（{item['id']} v{item.get('active_version') or '—'}）属于独立多周期扩展执行器，"
+                        '不支持通过声明式 JSON 直接覆盖更新；请通过标准配置冻结与研究验证流程升级版本。',
+                        parent=window,
+                    )
+                    return
                 open_update_strategy_dialog(window, item, api_json=api_json, on_updated=refresh)
             except Exception as exc:
                 messagebox.showerror('无法更新策略', str(exc), parent=window)
@@ -1359,6 +1371,14 @@ def open_strategy_pool_window(root, *, api_json, open_rule_details, open_account
         def backtest_selected():
             try:
                 item = selected()
+                if item.get('is_extension') or item.get('is_r_series') or item['id'] in ('PA-09', 'PA-10'):
+                    messagebox.showinfo(
+                        '扩展算法策略回测说明',
+                        f"{_display_name(item)}（{item['id']} v{item.get('active_version') or '—'}）属于独立多周期扩展执行器，"
+                        '历史回测及跨时期验证结果已归档，请前往「策略研究中心 V3 → 版本与回测对照」查看完整对比。',
+                        parent=window,
+                    )
+                    return
                 open_backtest_dialog(window, item, api_json=api_json)
             except Exception as exc:
                 messagebox.showerror('无法打开历史回测', str(exc), parent=window)

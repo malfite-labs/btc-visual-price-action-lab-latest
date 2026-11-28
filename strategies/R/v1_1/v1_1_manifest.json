@@ -1,0 +1,56 @@
+{
+  "R01": {
+    "version": "1.1.0",
+    "candidate_ref": "P10_atr_2.0_R2.0_H64",
+    "observation_tier": "EXPERIMENTAL_OBSERVE",
+    "config_path": "strategies/R/v1_1/configs/R01_v1.1.0.json",
+    "config_sha256": "24d1d4e569d51d641150f6e6ec581138ee51450621846be4b32b8bea7fc1eb38",
+    "doc_path": "strategies/R/v1_1/R01_v1.1.0.md",
+    "doc_sha256": "07b4a0795b0bdaeef83c06a04b5fe1cbdf0b8695bdbc9aabb51cf873a4f1ef4a"
+  },
+  "R02": {
+    "version": "1.1.0",
+    "candidate_ref": "C7_R02_PlanD_vol12_wide",
+    "observation_tier": "EXPERIMENTAL_OBSERVE",
+    "config_path": "strategies/R/v1_1/configs/R02_v1.1.0.json",
+    "config_sha256": "a7b5585a8c8c716a454e6cd8768e7a53e53ed211c66e49beacd593ebc44d2cb6",
+    "doc_path": "strategies/R/v1_1/R02_v1.1.0.md",
+    "doc_sha256": "85b36361aba2bec5fc7db13bb253276455b651db403f522c64d143e5529c61b8"
+  },
+  "R03": {
+    "version": "1.1.0",
+    "candidate_ref": "P10_atr_2.0_R3.0_H64",
+    "observation_tier": "EXPERIMENTAL_OBSERVE",
+    "config_path": "strategies/R/v1_1/configs/R03_v1.1.0.json",
+    "config_sha256": "b90c456d0269e4559547eb9a8e85a415e86c0845299af2919c7920475756244a",
+    "doc_path": "strategies/R/v1_1/R03_v1.1.0.md",
+    "doc_sha256": "5da8836ff4c484ffd3b44a3c808365716e1bbd2308aa28463534ad0f9e01ba53"
+  },
+  "R04": {
+    "version": "1.1.0",
+    "candidate_ref": "C6_R04_PlanCD_combo",
+    "observation_tier": "PRIMARY_FORWARD_CANDIDATE",
+    "config_path": "strategies/R/v1_1/configs/R04_v1.1.0.json",
+    "config_sha256": "27fe01dc0fe385b5236d806aaef6018cdf06d6c6b828e55d4879c06c45b44ef0",
+    "doc_path": "strategies/R/v1_1/R04_v1.1.0.md",
+    "doc_sha256": "257fcb87521f697dc43573b76ec9419f3c86568925af5a70c2b6cd1b70b9506b"
+  },
+  "R05": {
+    "version": "1.1.0",
+    "candidate_ref": "C1_R05_PlanC_align_base",
+    "observation_tier": "EXPERIMENTAL_OBSERVE",
+    "config_path": "strategies/R/v1_1/configs/R05_v1.1.0.json",
+    "config_sha256": "a72b62385a51f1dd881e718e52dcf01ce8efab584019ad21a4b028621a577ef5",
+    "doc_path": "strategies/R/v1_1/R05_v1.1.0.md",
+    "doc_sha256": "f71c5e2b6e34f8492110f988d53c01b393f7b56980b60249bcbf9f82ac21afbf"
+  },
+  "R06": {
+    "version": "1.1.0",
+    "candidate_ref": "C8_R06_PlanE_rel_wide",
+    "observation_tier": "EXPERIMENTAL_OBSERVE",
+    "config_path": "strategies/R/v1_1/configs/R06_v1.1.0.json",
+    "config_sha256": "e19f200a732fcf7fb8304d3c49a36cccf4f281d5e5f1018d8369e5496c14e09e",
+    "doc_path": "strategies/R/v1_1/R06_v1.1.0.md",
+    "doc_sha256": "4dee66280c663383247369855150f8151223c298fbc09b2246139d6331858457"
+  }
+}

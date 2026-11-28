@@ -899,6 +899,9 @@ class StrategyPool:
                         c.execute('''INSERT OR REPLACE INTO decision_diagnostics
                             (strategy_id,cycle,version,action,details,created_at) VALUES(?,?,?,?,?,?)''',
                             (sid,key,version,decision,json.dumps(diagnostic,sort_keys=True,ensure_ascii=False),datetime.now(timezone.utc).isoformat()))
+                        # Bounded retention: keep latest 500 diagnostic rows per strategy to prevent DB bloat
+                        c.execute('''DELETE FROM decision_diagnostics WHERE strategy_id=? AND cycle NOT IN (
+                            SELECT cycle FROM decision_diagnostics WHERE strategy_id=? ORDER BY cycle DESC LIMIT 500)''', (sid, sid))
                     c.execute(f'RELEASE {savepoint}')
                 except Exception as exc:
                     c.execute(f'ROLLBACK TO {savepoint}');c.execute(f'RELEASE {savepoint}')

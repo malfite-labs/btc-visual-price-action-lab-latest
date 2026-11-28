@@ -124,6 +124,22 @@ def build_live_paper_rows(cached_ids=(), data_dir=None):
     except sqlite3.Error:
         pass
     ids.update(path.stem for path in (data / 'pa-v1-extensions').glob('PA-*.sqlite3'))
+    for ext_subdir in ('r-series', 'extensions'):
+        r_dir = data / ext_subdir
+        if r_dir.is_dir():
+            for rpath in sorted(r_dir.glob('*.sqlite3')):
+                rsid = rpath.stem
+                ids.add(rsid)
+                try:
+                    with closing(sqlite3.connect(rpath.resolve().as_uri() + '?mode=ro', uri=True)) as rdb:
+                        row = rdb.execute('SELECT value FROM snapshot LIMIT 1').fetchone()
+                        if row and row[0]:
+                            snap = json.loads(row[0])
+                            rname = snap.get('name')
+                            if rname:
+                                extra_names[rsid] = str(rname)
+                except (sqlite3.Error, ValueError, TypeError):
+                    pass
     for strategy, ledger in (('D', 'd/trading.sqlite3'), ('E', 'e/formal.sqlite3'), ('G', 'g/mirror.sqlite3')):
         if (data / ledger).is_file():
             ids.add(strategy)
@@ -245,7 +261,7 @@ def money_label(value):
     if value is None:
         return '—'
     try:
-        amount = Decimal(str(value))
+        amount = Decimal(str(value).replace(',', '').strip())
         return f'{amount:,.2f}' if amount.is_finite() else '—'
     except (InvalidOperation, TypeError, ValueError):
         return str(value)
@@ -258,9 +274,9 @@ def pa_status_label(item):
         return '行情恢复中'
     if status == 'RECONCILING' or 'RECONCILED_AWAITING' in last_st:
         return '对账中'
-    if status == 'FAULTED' or 'GAP_RECONCILIATION_REQUIRED' in last_st:
+    if status in ('FAULTED', 'RECONCILE_ERROR') or 'GAP_RECONCILIATION_REQUIRED' in last_st:
         return '对账异常'
-    if status == 'RUNNING':
+    if status in ('RUNNING', 'WAITING_SIGNAL'):
         return '运行中'
     if status == 'ENABLED_NOT_RUNNING':
         if 'ENTRY_BLOCKED' in last_st or 'STALE_QUOTE' in last_st or 'GAP_NO_ENTRY' in last_st:
@@ -464,10 +480,16 @@ def strategy_view(row_id, row):
         'FLAT': '空仓', 'OPEN_LONG': '做多', 'OPEN_SHORT': '做空',
         'LONG': '做多', 'SHORT': '做空', 'PENDING_LONG': '待开多', 'PENDING_SHORT': '待开空',
     }.get(state, state or '—')
+    status_lbl = row.get('status_label') or '状态未知'
+    raw_action = row.get('action') or 'WAIT'
+    disp_action = action_label(raw_action, status_label=status_lbl, position_state=position)
     return {
         'strategy_id': display_id, 'name': name,
-        'status': row.get('status_label') or '状态未知',
-        'position': position, 'action': action_label(row.get('action') or 'WAIT'),
+        'status': status_lbl,
+        'position': position,
+        'action': disp_action,
+        'raw_action': str(raw_action),
+        'action_tone': action_tone(disp_action),
     }
 
 
@@ -568,10 +590,10 @@ def operations_status_summary(system, health, pool_items, inventory, secondary_c
 def strategy_status_appearance(status):
     label = status or '状态未知'
     if label == '运行中': return {'icon': '▶', 'tone': 'success'}
-    if label == '等待C开仓': return {'icon': '◷', 'tone': 'warning'}
-    if label in ('已暂停', '未启用'): return {'icon': 'Ⅱ', 'tone': 'neutral'}
-    if label in ('异常', '故障', '读取失败'): return {'icon': '!', 'tone': 'danger'}
-    if label in ('已启用待周期', '等待数据', '保护待确认', '周期滞后'): return {'icon': '◷', 'tone': 'warning'}
+    if label in ('等待C开仓', '等待信号'): return {'icon': '◷', 'tone': 'warning'}
+    if label in ('已暂停', '未启用', '已停用'): return {'icon': 'Ⅱ', 'tone': 'neutral'}
+    if label in ('异常', '故障', '读取失败', '对账异常'): return {'icon': '!', 'tone': 'danger'}
+    if label in ('已启用待周期', '等待数据', '保护待确认', '周期滞后', '行情恢复中', '对账中'): return {'icon': '◷', 'tone': 'warning'}
     if label == '数据过期': return {'icon': '!', 'tone': 'neutral'}
     return {'icon': '·', 'tone': 'neutral'}
 
@@ -625,14 +647,64 @@ def configure_detail_popup(window, owner):
     window.bind('<Destroy>', release, add='+')
 
 
+_PREFERRED_CATEGORY_ORDER = ('原有策略', '镜像策略', 'PA系列', 'Chan', 'R系列', 'S系列', 'AY系列')
+
+
+def strategy_category(row_id, row=None):
+    """Resolve unified display category from strategy metadata (zero hardcoding for new strategies)."""
+    sid = str(row_id or '')
+    if sid in ('A', 'B', 'C', 'D', 'E'):
+        return '原有策略'
+    if sid == 'G':
+        return '镜像策略'
+    raw = (row or {}).get('raw') if isinstance(row, dict) else None
+    meta_group = (
+        (raw.get('group') or raw.get('strategy_group')) if isinstance(raw, dict) else None
+    ) or ((row or {}).get('group') or (row or {}).get('strategy_group') if isinstance(row, dict) else None)
+    if meta_group:
+        g = str(meta_group).strip()
+        if g in ('PA', 'PA策略', 'PA/策略池', '策略池'):
+            return 'Chan' if sid == 'pa-chan-center-divergence' else 'PA系列'
+        return g
+    if sid == 'pa-chan-center-divergence':
+        return 'Chan'
+    if sid.upper().startswith('R') and sid[1:].isdigit():
+        return 'R系列'
+    if sid.lower().startswith('thc-ay'):
+        return 'AY系列'
+    if sid.lower().startswith('thc-s'):
+        return 'S系列'
+    return 'PA系列'
+
+
+def dynamic_console_categories(rows):
+    """Return ordered list of (category_key, label_with_count) dynamically from live rows."""
+    counts = {}
+    for row_id, row in rows.items():
+        cat = strategy_category(row_id, row)
+        counts[cat] = counts.get(cat, 0) + 1
+    ordered = [c for c in _PREFERRED_CATEGORY_ORDER if c in counts]
+    for c in sorted(counts.keys()):
+        if c not in ordered:
+            ordered.append(c)
+    out = [('全部', f'全部策略({len(rows)})')]
+    for c in ordered:
+        out.append((c, f'{c}({counts[c]})'))
+    return out
+
+
 def filter_console_rows(rows, category='全部', status='全部状态', query=''):
     query = (query or '').strip().casefold()
+    alias = {'原有': '原有策略', '镜像': '镜像策略'}
+    target_cat = alias.get(category, category)
     result = []
     for row_id, row in rows.items():
-        is_pa = is_pool_strategy_id(row_id)
-        is_original = row_id in ('A', 'B', 'C', 'D', 'E')
-        if category == 'PA' and not is_pa or category == '原有' and not is_original or category == '镜像' and row_id != 'G':
-            continue
+        if target_cat == 'PA':
+            if not is_pool_strategy_id(row_id):
+                continue
+        elif target_cat != '全部':
+            if strategy_category(row_id, row) != target_cat:
+                continue
         view = strategy_view(row_id, row)
         if status != '全部状态' and view['status'] != status:
             continue
@@ -695,52 +767,108 @@ def position_label(state):
     return {'FLAT': '空仓', 'OPEN_LONG': '做多', 'OPEN_SHORT': '做空'}.get(state, state if state is not None else '—')
 
 
-def action_label(action):
-    if action is None or action == '':
-        return '等待'
+UNIFIED_ACTION_TONES = {
+    '等待信号': 'neutral',
+    '等待原生周期': 'neutral',
+    '行情等待': 'amber',
+    '待开仓': 'amber',
+    '做多开仓': 'green',
+    '做空开仓': 'green',
+    '持有': 'green',
+    '止盈平仓': 'green',
+    '止损平仓': 'red',
+    '到期平仓': 'neutral',
+    '待退出': 'amber',
+    '暂停': 'gray',
+    '需检查': 'red',
+}
+
+
+def action_tone(label):
+    """Return unified semantic color tone for a translated Chinese action label."""
+    return UNIFIED_ACTION_TONES.get(str(label or '').strip(), 'neutral')
+
+
+def action_label(action, *, status_label=None, position_state=None):
+    """Single public action display contract for all 38+ strategies (zero per-series branching).
+
+    Preserves real errors as '需检查' and maps identical semantics identically across
+    A/B/C/D/E/G, PA, Chan, R, S, AY, and any future strategy.
+    """
+    is_recovering = str(status_label or '').strip() == '行情恢复中'
+    is_flat = str(position_state or '').strip().upper() in ('', 'FLAT', '空仓', 'NONE', '—')
+
+    if action is None or str(action).strip() == '':
+        return '行情等待' if (is_recovering and is_flat) else '等待信号'
     raw = str(action).strip()
     code = raw.upper()
-    labels = {
-        'WAIT': '等待', 'IDLE': '等待', 'NO_SETUP': '等待', 'NO_PENDING_SIGNAL': '等待',
-        'OTHER': '等待', 'OTHER_STATE': '等待',
-        'CYCLE_ALREADY_SEEN': '等待', 'WAITING': '等待', 'READY': '等待',
-        'HOLD': '持有', 'OPEN_LONG': '开多信号', 'OPEN_SHORT': '开空信号',
-        'CLOSE_LONG': '平多决策', 'CLOSE_SHORT': '平空决策',
-        'SETUP_DETECTED': '检测到形态', 'CONFLICT_SKIP': '信号冲突，跳过',
-        'REJECTED': '未通过检查', 'PAPER_FILLED': '模拟成交', 'POSITION_MANAGED': '持仓管理',
-        'PENDING': '处理中', 'EXECUTING': '执行中', 'CYCLE_ERROR': '周期异常',
-        'OBSERVE_ONLY': '观察中', 'DATA_NOT_READY': '数据未就绪',
-        'INSUFFICIENT_15M_HISTORY': '等待15分钟K线预热',
-        'INSUFFICIENT_1H_HISTORY': '等待1小时K线预热',
-        'EXECUTION_NOT_IMPLEMENTED': '模拟执行未接通',
-        'E_NOT_INITIALIZED': '账户未初始化',
-        'INSUFFICIENT_15M_HISTORY': '\u7b49\u5f8515\u5206\u949fK\u7ebf\u9884\u70ed',
-        'INSUFFICIENT_1H_HISTORY': '\u7b49\u5f851\u5c0f\u65f6K\u7ebf\u9884\u70ed',
-        'EXECUTION_NOT_IMPLEMENTED': '\u6a21\u62df\u6267\u884c\u672a\u63a5\u901a',
-        'E_NOT_INITIALIZED': '\u8d26\u6237\u672a\u521d\u59cb\u5316',
-        'SIGNAL_LONG': '待开多', 'SIGNAL_SHORT': '待开空',
-        'CLOSE_STOP': '止损平仓', 'CLOSE_TARGET': '止盈平仓',
-        'CLOSE_TIME': '到时平仓', 'CENSOR_POSITION_AT_GAP': '数据缺口，仓位已截断',
-        'WAIT_FOR_C_NEXT_OPEN': '等待C下一笔开仓', 'PAIR_CLOSED': '同步平仓', 'MIRROR_OPEN': '反向镜像开仓',
-        'REVERSE_MIRROR_OPEN': '反向镜像开仓', 'MIRROR_CLOSE': '同步平仓',
-        'MIRROR_PARTIAL_CLOSE': '同步部分平仓', 'MIRROR_RISK_EXIT': '镜像风控紧急退出',
-        'BLOCKED_GAP_RECONCILIATION_REQUIRED': '持仓周期缺口待对账',
-        'BLOCKED_GAP_RECONCILED_AWAITING_NATURAL_CYCLE': '缺口已核对，等待周期',
-        'BLOCKED:QUOTE_UNAVAILABLE_OR_STALE': '报价不可用或已过期',
-        'D_RAW_QUOTE_INVALID': '保护：原始报价无效',
-        'C_EVENT_REJECTED': '跟单被拒绝', 'WAIT_STOP_DIST': '等待止损距离条件',
-        'WAIT_STOP_DISTANCE': '等待止损距离条件', 'WAIT_TRIGGER': '等待触发条件',
-        'WAIT_ENTRY': '等待开仓条件', 'WAIT_NEXT_BAR': '等待下一根K线',
-    }
-    if code in labels:
-        return labels[code]
-    if code.startswith('WAIT_STOP_DIST'):
-        return '等待止损距离条件'
-    if code.startswith('WAIT_'):
-        return '等待条件满足'
+
+    # 1. Explicit real faults / anomalies (NEVER masked!)
+    if code in (
+        'CYCLE_ERROR', 'RECONCILE_ERROR', 'FAULT', 'ERROR',
+        'BLOCKED_GAP_RECONCILIATION_REQUIRED', 'D_RAW_QUOTE_INVALID',
+        'CENSOR_POSITION_AT_GAP', 'EXECUTION_NOT_IMPLEMENTED', 'E_NOT_INITIALIZED',
+    ):
+        return '需检查'
+
+    # 2. Native higher-timeframe waiting
+    if code in ('WAIT_NATIVE_CLOSE', 'WAIT_COMPLETE_NATIVE_BAR') or code.startswith('WARMUP_'):
+        return '等待原生周期'
+
+    # 3. Market-guard waiting / stale quote / warmup history
+    if (
+        code.startswith('MARKET_BLOCKED:')
+        or code in (
+            'MARKET_BLOCKED', 'BLOCKED:QUOTE_UNAVAILABLE_OR_STALE', 'BLOCKED_STALE_QUOTE',
+            'GAP_NO_ENTRY', 'DATA_NOT_READY', 'INSUFFICIENT_15M_HISTORY', 'INSUFFICIENT_1H_HISTORY',
+            'BLOCKED_GAP_RECONCILED_AWAITING_NATURAL_CYCLE',
+        )
+    ):
+        return '行情等待'
+
+    # 4. Pending entry / exit
+    if code.startswith('PENDING_NEXT_OPEN:') or code in ('SIGNAL_LONG', 'SIGNAL_SHORT', 'SIGNAL_PENDING', 'PENDING', 'SETUP_DETECTED'):
+        return '待开仓'
+    if code.startswith('EXIT_PENDING'):
+        return '待退出'
+
+    # 5. Open / Hold / Close semantics
+    if code in ('OPEN_LONG', 'MIRROR_OPEN', 'REVERSE_MIRROR_OPEN'):
+        return '做多开仓' if code == 'OPEN_LONG' else '做空开仓'
+    if code == 'OPEN_SHORT':
+        return '做空开仓'
+    if code in ('HOLD', 'POSITION_MANAGED', 'EXECUTING', 'PAPER_FILLED'):
+        return '持有'
+    if code in ('CLOSE_TARGET', 'CLOSE_TARGET_QUOTE', 'CLOSE_TARGET_RECOVERED', 'CLOSE_TP1', 'CLOSE_TP2'):
+        return '止盈平仓'
+    if code in ('CLOSE_STOP', 'CLOSE_STOP_QUOTE', 'CLOSE_STOP_RECOVERED', 'CLOSE_LIQUIDATION', 'MIRROR_RISK_EXIT'):
+        return '止损平仓'
+    if code in ('CLOSE_TIME', 'CLOSE_MAX_HOLD', 'CLOSE_MAX_HOLD_QUOTE', 'ENTRY_EXPIRED'):
+        return '到期平仓'
+    if code in ('CLOSE_LONG', 'CLOSE_SHORT', 'PAIR_CLOSED', 'MIRROR_CLOSE', 'MIRROR_PARTIAL_CLOSE'):
+        return '止盈平仓' if 'TARGET' in code else '到期平仓'
+
+    # 6. Paused / disabled / non-entry
+    if code in ('PAUSED', 'WAITING_ACTIVATION', 'REGISTERED', 'DISABLED', 'OBSERVE_ONLY', 'ENTRY_BLOCKED'):
+        return '暂停'
+
+    # 7. Benign signal waiting (all flat wait states unify to '行情等待' when market is recovering)
+    if (
+        code in (
+            'WAIT', 'IDLE', 'NO_SETUP', 'NO_PENDING_SIGNAL', 'NO_SIGNAL',
+            'OTHER', 'OTHER_STATE', 'CYCLE_ALREADY_SEEN', 'WAITING', 'READY',
+            'WAIT_NEXT_BAR', 'WAIT_TRIGGER', 'WAIT_ENTRY', 'WAIT_FOR_C_NEXT_OPEN',
+            'CONFLICT_SKIP', 'REJECTED', 'C_EVENT_REJECTED',
+        )
+        or code.startswith('WAIT_STOP_DIST')
+        or code.startswith('WAIT_')
+        or code.startswith('REJECTED:')
+        or code.startswith('ENTRY_REJECTED:')
+    ):
+        return '行情等待' if (is_recovering and is_flat) else '等待信号'
+
+    # 8. Unrecognized internal ASCII codes default to '需检查' (never silently hidden!)
     if raw.isascii() and any(char.isalpha() for char in raw):
-        if any(token in code for token in ('ERROR', 'FAILED', 'FAULT', 'INVALID')):
-            return '需检查'
         return '需检查'
     return raw
 
@@ -1218,11 +1346,16 @@ def cumulative_fees(fills):
 def d_control_state(status):
     if status.get('enabled') is False or status.get('status') == 'PAUSED':
         return 'PAUSED'
-    if status.get('status') == 'AUTO_PAPER':
+    st = status.get('status')
+    if st in ('MARKET_RECOVERING', 'RECONCILING'):
+        return st
+    if st in ('RUNNING', 'WAITING_SIGNAL'):
+        return 'RUNNING'
+    if st == 'AUTO_PAPER':
         return 'RUNNING' if status.get('execution_ready') is True else 'PROTECTION_UNCERTAIN'
-    if status.get('status') == 'PROTECTION_UNCERTAIN':
+    if st == 'PROTECTION_UNCERTAIN':
         return 'PROTECTION_UNCERTAIN'
-    if status.get('status') == 'OBSERVE_ONLY':
+    if st == 'OBSERVE_ONLY':
         return 'OBSERVE_ONLY'
     return 'UNKNOWN'
 
@@ -1726,7 +1859,22 @@ def _collect_rule_detail(strategy_id, row, fill_offset=0):
                 raise RuntimeError('活动版本规则文档不可用；未回退到其他版本')
         else:
             doc = json.loads(selected['document']); raw = selected['document']
-            rule_text = _v2_rule_text(doc, selected)
+            if item.get('is_extension') or item.get('is_r_series') or strategy_id in ('R01', 'R02', 'R03', 'R04', 'R05', 'R06'):
+                grp_lbl = doc.get('group') or item.get('group') or ('R系列' if item.get('is_r_series') else '扩展策略')
+                tf_lbl = doc.get('timeframe') or item.get('timeframe') or '15m'
+                rule_text = (
+                    f"策略名称：{doc.get('name') or strategy_id}\n"
+                    f"策略 ID：{strategy_id} ｜ 分组：{grp_lbl} ｜ 周期：{tf_lbl} ｜ 版本：{doc.get('version')}\n"
+                    f"冻结研究候选编号：{doc.get('candidate_ref') or '—'} ｜ 观察等级：{doc.get('observation_tier') or '—'}\n"
+                    f"配置 SHA-256：{selected.get('sha256') or '—'}\n"
+                    f"策略规则说明：{doc.get('description') or '—'}\n"
+                    f"参数：{json.dumps(doc.get('parameters') or {}, ensure_ascii=False, sort_keys=True)}\n"
+                    f"止损/止盈/持仓：{json.dumps(doc.get('position') or {}, ensure_ascii=False, sort_keys=True)}\n"
+                    f"资金与风控：{json.dumps(doc.get('risk') or {}, ensure_ascii=False, sort_keys=True)}\n"
+                    f"最近自然周期：{item.get('last_cycle') or '—'} ｜ 最近拒绝原因：{item.get('last_rejection_reason') or '—'}"
+                )
+            else:
+                rule_text = _v2_rule_text(doc, selected)
         detail_row = console_rows({}, [item])[strategy_id]
         fills = pa_trade_fills(strategy_id)
         risk = {'策略定义': doc.get('risk'), '止损/止盈/时限': doc.get('position'), '成本模型（运行状态接口）': cost,
@@ -2409,34 +2557,59 @@ def main():
     content.grid(row=3, column=0, sticky='nsew', padx=10, pady=(0, 7))
     content.grid_rowconfigure(1, weight=1)
     content.grid_columnconfigure(0, weight=1)
-    filterbar = tk.Frame(content, bg='white'); filterbar.grid(row=0, column=0, sticky='ew', padx=10, pady=8)
+    filterbar = tk.Frame(content, bg='white'); filterbar.grid(row=0, column=0, sticky='ew', padx=10, pady=(8, 6))
     category = tk.StringVar(value='全部')
     status_filter = tk.StringVar(value='全部状态')
     search = tk.StringVar()
     tab_buttons = {}
-    tab_group = tk.Frame(filterbar, bg='#f1f5f9', padx=3, pady=3)
+    tab_order = {'keys': []}
+    tab_row = tk.Frame(filterbar, bg='white')
+    tab_row.pack(side='top', fill='x', pady=(0, 6))
+    tab_group = tk.Frame(tab_row, bg='#f1f5f9', padx=3, pady=3)
     tab_group.pack(side='left')
-    for label, key, width in (('全部策略', '全部', 116), ('原有策略', '原有', 104), ('镜像策略', '镜像', 98), ('PA策略', 'PA', 94)):
-        button = make_canvas_button(tab_group, label, lambda value=key: (category.set(value), render_rows()), width,
-                                    'selected' if key == '全部' else 'segment')
-        button.pack(side='left', padx=2); tab_buttons[key] = button
-    ttk.Label(filterbar, text='状态', background='white', foreground='#64748b',
-              font=('Microsoft YaHei UI', 9)).pack(side='left', padx=(13, 5))
-    status_combo = ttk.Combobox(filterbar, textvariable=status_filter, state='readonly', width=15,
+    ctrl_row = tk.Frame(filterbar, bg='white')
+    ctrl_row.pack(side='top', fill='x')
+    ttk.Label(ctrl_row, text='状态', background='white', foreground='#64748b',
+              font=('Microsoft YaHei UI', 9)).pack(side='left', padx=(2, 5))
+    status_combo = ttk.Combobox(ctrl_row, textvariable=status_filter, state='readonly', width=15,
                                 style='Light.TCombobox', font=('Microsoft YaHei UI', 9),
                                 values=('全部状态', '运行中', '等待C开仓', '已启用待周期', '周期滞后', '已暂停', '未启用', '观察中', '保护待确认', '异常', '故障', '数据过期', '读取失败', '未知'))
     status_combo.pack(side='left'); status_combo.bind('<<ComboboxSelected>>', lambda event: render_rows())
-    ttk.Label(filterbar, text='搜索', background='white', foreground='#64748b',
+    ttk.Label(ctrl_row, text='搜索', background='white', foreground='#64748b',
               font=('Microsoft YaHei UI', 9)).pack(side='left', padx=(13, 5))
-    search_shell = tk.Frame(filterbar, bg='white', highlightbackground='#d8e1ed', highlightthickness=1)
+    search_shell = tk.Frame(ctrl_row, bg='white', highlightbackground='#d8e1ed', highlightthickness=1)
     search_shell.pack(side='left', ipady=2)
     search_icon = tk.Canvas(search_shell, width=24, height=28, bg='white', highlightthickness=0, bd=0)
     search_icon.pack(side='left', padx=(5, 1))
     search_icon.create_oval(5, 5, 16, 16, outline='#94a3b8', width=1.7)
     search_icon.create_line(14, 14, 21, 21, fill='#94a3b8', width=1.8)
-    search_entry = ttk.Entry(search_shell, textvariable=search, width=24, style='Flat.TEntry')
+    search_entry = ttk.Entry(search_shell, textvariable=search, width=28, style='Flat.TEntry')
     search_entry.pack(side='left', padx=(0, 5), pady=1)
     search.trace_add('write', lambda *_: render_rows())
+
+    def sync_category_tabs(rows):
+        cats = dynamic_console_categories(rows)
+        keys = [k for k, _ in cats]
+        if category.get() not in keys:
+            category.set('全部')
+        if keys != tab_order['keys']:
+            for w in list(tab_buttons.values()):
+                w.destroy()
+            tab_buttons.clear()
+            tab_font = tkfont.Font(root=root, family='Microsoft YaHei UI', size=9, weight='bold')
+            for key, label in cats:
+                w = max(78, tab_font.measure(label) + 22)
+                btn = make_canvas_button(tab_group, label, lambda value=key: (category.set(value), render_rows()), w,
+                                         'selected' if category.get() == key else 'segment')
+                btn.pack(side='left', padx=2)
+                tab_buttons[key] = btn
+            tab_order['keys'] = keys
+        else:
+            for key, label in cats:
+                btn = tab_buttons.get(key)
+                if btn:
+                    btn.set_text(label)
+                    btn.set_kind('selected' if category.get() == key else 'segment')
 
     cols = ('control', 'strategy_id', 'name', 'status', 'state', 'amount', 'leverage', 'equity', 'realized', 'unrealized', 'fees', 'action', 'cycle', 'detail')
     table_frame = tk.Frame(content, bg='white'); table_frame.grid(row=1, column=0, sticky='ew', padx=9, pady=(0, 9))
@@ -2468,14 +2641,8 @@ def main():
                       'OBSERVE_ONLY': '观察中', 'PROTECTION_UNCERTAIN': '保护待确认'}
     def render_rows():
         rows = cached_rows['value']
+        sync_category_tabs(rows)
         selected = filter_console_rows(rows, category.get(), status_filter.get(), search.get())
-        labels = {'全部': f"全部策略（{len(rows)}）",
-                  '原有': f"原有策略（{sum(1 for key in rows if key in ('A','B','C','D','E'))}）",
-                  '镜像': f"镜像策略（{sum(1 for key in rows if key == 'G')}）",
-                  'PA': f"PA/策略池（{sum(1 for key in rows if is_pool_strategy_id(key))}）"}
-        for key, button in tab_buttons.items():
-            button.set_text(labels[key])
-            button.set_kind('selected' if category.get() == key else 'segment')
         for item in table.get_children(): table.delete(item)
         row_stripes.clear()
         for index, row_id in enumerate(selected):
@@ -2809,7 +2976,7 @@ def main():
         current = row.get('control')
         action = 'resume' if current == 'PAUSED' else 'pause' if current in ('RUNNING', 'PAUSING') else None
         if not action or busy['value']: return
-        if action == 'pause' and not messagebox.askyesno('暂停策略', f'将阻止 {agent} 正式盘新开仓，并按纸盘报价强制平掉正式盘持仓。影子盘继续独立运行。确定继续吗？'):
+        if action == 'pause' and not messagebox.askyesno('柔和暂停策略', f'将阻止 {agent} 正式盘新开仓，并保留已有持仓与实时止盈止损保护。影子盘继续独立运行。确定继续吗？'):
             return
         busy['value'] = True
         def worker():
@@ -2863,6 +3030,257 @@ def main():
             open_strategy_rule_details(root, agent, row)
         return 'break'
     table.bind('<Button-1>', row_click)
+
+    def _lifecycle_call(path, method='GET', payload=None):
+        data = None if payload is None else json.dumps(payload, ensure_ascii=False).encode('utf-8')
+        headers = {'Content-Type': 'application/json'} if data is not None else {}
+        req = urllib.request.Request(f'http://127.0.0.1:8012{path}', data=data, headers=headers, method=method)
+        try:
+            with OPENER.open(req, timeout=15) as resp:
+                return resp.status, json.loads(resp.read().decode('utf-8'))
+        except urllib.error.HTTPError as exc:
+            try:
+                err_body = json.loads(exc.read().decode('utf-8'))
+            except Exception:
+                err_body = {'detail': str(exc)}
+            return exc.code, err_body
+
+    def show_resource_and_gates(agent):
+        popup = tk.Toplevel(root)
+        popup.title(f'策略资源占用与安全门禁 · {agent}')
+        popup.geometry('640x480')
+        popup.configure(bg='#f5f7fb')
+        popup.transient(root); popup.lift(); popup.focus_force()
+        txt = tk.Text(popup, wrap='word', bg='white', fg='#172b4d', font=('Microsoft YaHei UI', 9), relief='flat', padx=14, pady=12)
+        txt.pack(fill='both', expand=True, padx=12, pady=12)
+        txt.insert('end', f'正在读取策略 {agent} 的实时资源占用与 8 项安全门禁状态…')
+        txt.configure(state='disabled')
+        def worker():
+            code, res = _lifecycle_call(f'/api/v1/lifecycle/{agent}/gates')
+            if code != 200:
+                out = f'读取失败（HTTP {code}）：{res.get("detail", res)}'
+            else:
+                rt = res.get('runtime') or {}
+                lines = [
+                    f'【策略标识】{res.get("strategy_id")}  （类型：{rt.get("kind")}，当前生命周期：{rt.get("lifecycle_state")}）',
+                    f'【版本 / 哈希】{rt.get("version") or "—"} / {(rt.get("rule_sha256") or "—")[:16]}',
+                    f'【专属账本文件】{rt.get("db_path") or "—"}  （体积：{rt.get("db_size_kb", 0)} KB）',
+                    f'【估算专属内存】{rt.get("estimated_mem_kb", 0)} KB  ｜  【活跃保护索引】{"是" if rt.get("in_active_index") else "否"}',
+                    f'【当前权益 / 成交笔数】{rt.get("equity") or "—"} / {rt.get("fill_count", 0)} 笔',
+                    '',
+                    '【安全删除 / 归档门禁实时核查】',
+                ]
+                for c in res.get('checks') or []:
+                    mark = '✔ 通过' if c.get('passed') else '✘ 阻断'
+                    lines.append(f'  {mark}  [{c.get("gate")}] {c.get("message")}')
+                out = '\n'.join(lines)
+            def render():
+                if not popup.winfo_exists(): return
+                txt.configure(state='normal'); txt.delete('1.0', 'end'); txt.insert('end', out); txt.configure(state='disabled')
+            root.after(0, render)
+        threading.Thread(target=worker, daemon=True).start()
+
+    def run_lifecycle_action(agent, action_name, method, path, payload=None):
+        if busy['value']:
+            return
+        busy['value'] = True
+        def worker():
+            try:
+                code, res = _lifecycle_call(path, method=method, payload=payload)
+                if code == 200:
+                    root.after(0, lambda: messagebox.showinfo('策略生命周期管理', f'策略 {agent} 已完成【{action_name}】（当前状态：{res.get("state")}）。'))
+                else:
+                    detail = res.get('detail') or str(res)
+                    root.after(0, lambda: messagebox.showwarning(f'{action_name}被安全门禁拦截', f'策略 {agent} 无法执行【{action_name}】：\n{detail}'))
+            except Exception as exc:
+                msg = str(exc)
+                root.after(0, lambda: messagebox.showerror('操作失败', msg))
+            finally:
+                busy['value'] = False
+                root.after(0, refresh)
+        threading.Thread(target=worker, daemon=True).start()
+
+    def open_delete_gate_dialog(agent):
+        dlg = tk.Toplevel(root)
+        dlg.title(f'安全删除策略门禁检查 · {agent}')
+        dlg.geometry('620x460')
+        dlg.configure(bg='#f5f7fb')
+        dlg.transient(root); dlg.lift(); dlg.focus_force()
+        tk.Label(dlg, text=f'安全删除前 8 项强制门禁核查：{agent}', bg='#f5f7fb', fg='#0f172a',
+                 font=('Microsoft YaHei UI', 11, 'bold')).pack(anchor='w', padx=14, pady=(12, 6))
+        box = tk.Text(dlg, height=13, wrap='word', bg='white', fg='#172b4d', font=('Microsoft YaHei UI', 9), relief='flat', padx=10, pady=8)
+        box.pack(fill='both', expand=True, padx=14, pady=4)
+        box.insert('end', '正在检查 8 项删除安全门禁（持仓 / 待执行单 / Demo及实盘跟单 / 依赖 / 对账）…')
+        box.configure(state='disabled')
+        confirm_frame = tk.Frame(dlg, bg='#f5f7fb')
+        confirm_frame.pack(fill='x', padx=14, pady=(8, 4))
+        tk.Label(confirm_frame, text=f'二次确认：请输入策略 ID（{agent}）：', bg='#f5f7fb', fg='#334155',
+                 font=('Microsoft YaHei UI', 9)).pack(side='left')
+        confirm_var = tk.StringVar()
+        confirm_entry = ttk.Entry(confirm_frame, textvariable=confirm_var, width=28)
+        confirm_entry.pack(side='left', padx=8)
+        btn_row = tk.Frame(dlg, bg='#f5f7fb')
+        btn_row.pack(fill='x', padx=14, pady=(6, 12))
+        del_btn = ttk.Button(btn_row, text='确认安全删除并冷归档', state='disabled')
+        del_btn.pack(side='right', padx=(8, 0))
+        ttk.Button(btn_row, text='取消', command=dlg.destroy).pack(side='right')
+
+        def worker():
+            code, res = _lifecycle_call(f'/api/v1/lifecycle/{agent}/gates')
+            def render():
+                if not dlg.winfo_exists(): return
+                box.configure(state='normal'); box.delete('1.0', 'end')
+                if code != 200:
+                    box.insert('end', f'门禁读取失败（HTTP {code}）：{res}')
+                    box.configure(state='disabled')
+                    return
+                for c in res.get('checks') or []:
+                    mark = '✔ 通过' if c.get('passed') else '✘ 阻断'
+                    box.insert('end', f'{mark}  [{c.get("gate")}] {c.get("message")}\n')
+                if res.get('allowed'):
+                    box.insert('end', '\n全部前置门禁已通过。删除将自动导出完整冷归档并写入防复活记录，历史账本不会销毁。')
+                    def do_delete():
+                        typed = confirm_var.get().strip()
+                        if typed.lower() != str(agent).lower():
+                            messagebox.showwarning('二次确认不匹配', f'请输入精确的策略 ID：{agent}', parent=dlg)
+                            return
+                        dlg.destroy()
+                        run_lifecycle_action(agent, '安全删除', 'DELETE', f'/api/v1/lifecycle/{agent}', {'confirm_strategy_id': typed})
+                    del_btn.configure(state='normal', command=do_delete)
+                else:
+                    box.insert('end', '\n存在未通过的安全门禁，已禁止删除。请先满足上述全部条件（系统绝不会自动强平或修改跟单配置）。')
+                box.configure(state='disabled')
+            root.after(0, render)
+        threading.Thread(target=worker, daemon=True).start()
+
+    active_ctx_menu = {'win': None}
+
+    def _close_ctx_menu(_event=None):
+        w = active_ctx_menu.get('win')
+        active_ctx_menu['win'] = None
+        if w is not None:
+            try:
+                if w.winfo_exists():
+                    w.destroy()
+            except Exception:
+                pass
+
+    def _apply_native_menu_style(win):
+        """Enable Windows 11 native rounded corners & subtle drop shadow if supported."""
+        try:
+            import ctypes
+            win.update_idletasks()
+            hwnd = ctypes.windll.user32.GetParent(win.winfo_id()) or win.winfo_id()
+            # DWMWA_WINDOW_CORNER_PREFERENCE (33) = DWMWCP_ROUND (2)
+            pref = ctypes.c_int(2)
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 33, ctypes.byref(pref), ctypes.sizeof(pref))
+        except Exception:
+            pass
+
+    def row_right_click(event):
+        _close_ctx_menu()
+        agent = table.identify_row(event.y)
+        if not agent:
+            return
+        table.selection_set(agent)
+        row = controls.get(agent) or cached_rows['value'].get(agent) or {}
+        is_running = bool(row.get('enabled')) or str(row.get('control') or '').upper() == 'RUNNING'
+
+        menu_w = 232
+        popup = tk.Toplevel(root)
+        active_ctx_menu['win'] = popup
+        popup.withdraw()
+        popup.overrideredirect(True)
+        popup.attributes('-topmost', True)
+        popup.configure(bg='#dbe3ee')
+
+        # Subtle outer shadow + crisp light-gray border card
+        card = tk.Frame(popup, bg='#ffffff', bd=0, highlightthickness=1, highlightbackground='#dbe3ee')
+        card.pack(fill='both', expand=True, padx=(1, 2), pady=(1, 2))
+
+        # Header
+        header = tk.Label(
+            card, text=f'策略：{agent}', bg='#f8fafc', fg='#334155',
+            font=('Microsoft YaHei UI', 9, 'bold'), anchor='w', padx=14, pady=8,
+        )
+        header.pack(fill='x')
+        tk.Frame(card, bg='#e8edf3', height=1).pack(fill='x')
+
+        def add_divider():
+            tk.Frame(card, bg='#eef2f6', height=1).pack(fill='x', padx=10, pady=4)
+
+        def add_item(label, command, *, enabled=True, danger=False):
+            fg_normal = '#dc2626' if danger else '#1e293b'
+            fg_disabled = '#94a3b8'
+            bg_hover = '#fef2f2' if danger else '#eff6ff'
+            fg_hover = '#b91c1c' if danger else '#1d4ed8'
+            item = tk.Label(
+                card, text=label, bg='#ffffff',
+                fg=fg_normal if enabled else fg_disabled,
+                font=('Microsoft YaHei UI', 9), anchor='w',
+                padx=14, pady=7,
+                cursor='hand2' if enabled else 'arrow',
+            )
+            item.pack(fill='x', padx=4, pady=1)
+            if enabled:
+                item.bind('<Enter>', lambda _e: item.configure(bg=bg_hover, fg=fg_hover))
+                item.bind('<Leave>', lambda _e: item.configure(bg='#ffffff', fg=fg_normal))
+                def _invoke(_e):
+                    _close_ctx_menu()
+                    command()
+                item.bind('<Button-1>', _invoke)
+
+        add_item('查看规则', lambda: show_rule_details(agent))
+        add_item('查看研究', lambda: __import__('scripts.research_v2_window', fromlist=['open_research_center']).open_research_center(root))
+        add_item('查看 K 线', lambda: __import__('scripts.kline_window', fromlist=['open_kline']).open_kline(root))
+        add_item('查看资源', lambda: show_resource_and_gates(agent))
+
+        add_divider()
+
+        def _confirm_pause():
+            if messagebox.askyesno(
+                '暂停策略确认',
+                f'确定暂停策略 {agent}？\n\n暂停后将停止新开仓，并保留已有持仓与实时止盈止损保护退出。',
+            ):
+                run_lifecycle_action(agent, '暂停策略', 'POST', f'/api/v1/lifecycle/{agent}/pause')
+
+        add_item('暂停策略', _confirm_pause, enabled=is_running)
+        add_item(
+            '恢复运行',
+            lambda: run_lifecycle_action(agent, '恢复运行', 'POST', f'/api/v1/lifecycle/{agent}/resume'),
+            enabled=not is_running,
+        )
+
+        add_divider()
+
+        def _confirm_archive():
+            if messagebox.askyesno(
+                '归档策略确认',
+                f'确定归档策略 {agent}？\n\n归档后将停止调度并移出活跃列表，历史账本、成交记录与规则文档将完整保留冷归档。\n前置条件：已暂停、零持仓、无待执行单且无活跃跟单。',
+            ):
+                run_lifecycle_action(agent, '归档策略', 'POST', f'/api/v1/lifecycle/{agent}/archive')
+
+        add_item('归档策略', _confirm_archive, enabled=True)
+        add_item('安全删除', lambda: open_delete_gate_dialog(agent), enabled=True, danger=True)
+
+        tk.Frame(card, bg='#ffffff', height=4).pack(fill='x')
+
+        popup.update_idletasks()
+        menu_h = popup.winfo_reqheight()
+        scr_w = root.winfo_screenwidth()
+        scr_h = root.winfo_screenheight()
+        win_bottom = min(scr_h - 8, root.winfo_rooty() + root.winfo_height() - 8)
+        px = min(event.x_root, max(0, scr_w - menu_w - 8))
+        py = event.y_root if (event.y_root + menu_h <= win_bottom) else max(8, event.y_root - menu_h)
+        popup.geometry(f'{menu_w}x{menu_h}+{px}+{py}')
+        popup.deiconify()
+        _apply_native_menu_style(popup)
+        popup.focus_force()
+        popup.bind('<FocusOut>', _close_ctx_menu)
+        popup.bind('<Escape>', _close_ctx_menu)
+
+    table.bind('<Button-3>', row_right_click)
+    root.bind('<Button-1>', lambda e: _close_ctx_menu() if active_ctx_menu.get('win') and str(e.widget).startswith(str(root)) and not str(e.widget).startswith(str(active_ctx_menu['win'])) else None, add='+')
     bar = tk.Frame(root, bg=bg); bar.grid(row=4, column=0, sticky='ew', pady=(1, 4))
     bar.grid_columnconfigure(0, weight=1); bar.grid_columnconfigure(1, weight=1)
     button_group = tk.Frame(bar, bg=bg); button_group.grid(row=0, column=0, columnspan=2)
@@ -2897,7 +3315,7 @@ def main():
         for number, button in node_buttons.items():
             button.set_kind('selected' if selected == number else 'segment')
     footer = tk.Frame(root, bg=bg); footer.grid(row=5, column=0, padx=14, pady=(0, 7), sticky='ew')
-    tk.Label(footer, text='ⓘ  点击策略行查看成交明细；点击启停列控制策略。纸盘 USD_RESEARCH；持仓金额是开仓名义金额，并非保证金。',
+    tk.Label(footer, text='ⓘ  左键点击行查看成交明细；右键点击策略行进行暂停/恢复/归档/删除及资源查看。纸盘 USD_RESEARCH；持仓金额是开仓名义金额，并非保证金。',
              bg=bg, fg='#64748b', anchor='w', font=('Microsoft YaHei UI', 8)).pack(side='left', fill='x', expand=True)
     def show_ops_status():
         popup = tk.Toplevel(root); popup.title('系统运行与备份状态'); popup.geometry('760x520')

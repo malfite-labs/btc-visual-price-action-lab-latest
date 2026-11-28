@@ -2537,3 +2537,102 @@ C自然跟单排查：游标78到91读取10笔C，真实Demo五单，仍空头0.
   2. **统一研究数据契约与绩效计算 (`RESEARCH-METRICS-V3.0.0`)**：实现区间期初权益收益率、完整闭合交易配对（在途持仓不误报缺失）、无亏损盈利因子安全显示（绝不伪造 999）、无重复扣费核验、最大回撤起止/恢复跟踪、多空/退出原因/北京时间时段与星期/持仓时长/成本归因、跨版本归属分析与多策略共同区间归一化对比（不同资金模型强制不可排名告警）。
   3. **8 标签页浅色专业桌面 UI**：策略总览（16 列排序+勾选对比）、策略详情（16 指标卡+内嵌双曲线）、策略对比（2–5 策略叠加曲线）、权益与回撤、盈亏日历（北京时间 6×7 月历+单日交易明细）、历史交易（完整闭合/逐笔双视图+100 条分页+CSV 导出）、交易分析（5 维归因）、版本与回测对照（严格隔离纸盘与独立回测账本），并支持 CSV + AI 友好结构化 Markdown 报告导出。
 - **实机验证**：`tests/test_research_center_v3.py` 及回归测试 **22/22 PASS**；全部 17 张真实 Windows 桌面截图实机核验通过；纸盘、行情、Demo（`18868/18888`）与正式实盘（`15756/4808`）全程零扰动。
+
+
+## 2026-11-27｜V3.1 R01–R06 全功能接入对齐与新策略标准化接入强制规范（23 套策略基线）
+- **强制规范升级 (`docs/BTC Paper Lab V3.1 新策略接入规范.md`)**：
+  - 依据用户正式研发授权，将本轮 R01–R06 全功能接入对齐成果正式固化为 BTC Paper Lab V3.1 全系统新策略强制开发与验收标准，适用于 Codex、Gemini 及所有 AI 工具。
+  - 明确写入 8 项核心原则：优先复用公共接口与动态发现、杜绝按策略逐模块硬编码、算法独立但对外接口/管理/保护/口径完全统一、以当前 **23 套策略**作为全量回归基线、13 项强制门禁（G01–G13）未全过严禁标记接入完成、纸盘上线绝不等于实盘跟单授权（默认未选中/未启用）、架构优先做减法、既有策略与实盘运行零扰动。
+- **全功能对齐与零硬编码减法 (`scripts/local_dashboard.py`, `scripts/strategy_pool_ui.py`, `scripts/research_v3_engine.py`, `scripts/live_copy_v2.py`, `scripts/live_copy_window.py`)**：
+  - **主控制台与状态统一**：`pa_status_label()` 将 `WAITING_SIGNAL` 统一映射为绿色中文「运行中」（保留原始 `WAITING_SIGNAL` 与 `last_action='WAIT'`），全 23 套策略共享统一中文状态与配色；`build_live_paper_rows()` 动态扫描 `data/r-series/*.sqlite3` 与策略池。
+  - **策略池与扩展执行器对齐**：补齐 `WAITING_SIGNAL`/`RECONCILING`/`RECONCILE_ERROR`/`DISABLED` 中文状态；对 `is_extension`/`is_r_series`/`PA-09`/`PA-10` 扩展算法策略的「更新/回测」操作给出清晰中文引导，杜绝静默报错。
+  - **策略研究中心 V3**：完整覆盖 23 套策略；`load_backtest_reports()` 自动加载 R01–R06 V1.0 90d 基线与 V1.1 30 个月跨时期验证记录并严格标注 `BACKTEST_SAVED` 与纸盘隔离。
+  - **零硬编码跟单适配（减法改造）**：`scripts/live_copy_v2.py` 的 `paper_fills()` 移除 `PA-09`/`PA-10`/`R*` 字符串前缀硬编码，改为按 SQLite `snapshot` 表 Schema 自动路由至 `pa_ext_fills()`；`scripts/live_copy_window.py` 的 `strategy_source_path()` 自动按标准扩展目录（`pa-v1-extensions`/`r-series`/`extensions`）发现独立账本，所有新策略在 Demo 与正式实盘中默认未选中、未启用。
+- **验证**：`tests/test_r_series_full_alignment.py` + `tests/test_research_center_v3.py` + `tests/test_strategy_pool_bugs_v31.py` + `tests/test_dual_env_copy.py` 全量回归通过；8012/5175、23 套策略账本与 Demo/正式实盘运行态全程零扰动。
+
+
+## 2026-11-27｜V3.1 熬鹰 S / AY 系列 15 实例纸盘上架与 G01–G13 验收（总策略数 38 套）
+- **定位与备份**：本次上架的 15 个配置（S01/S02/COMBO × 15m/1h/4h/1d + AY02/AY03/AY04 × 15m）均标记为「熬鹰量化研究假设 / 前向纸盘观察」（历史稳健性 0 通过，原始规则状态 `BLOCKED_RULE_INCOMPLETE`）。写入前对 21 个活跃 SQLite 完成在线一致性备份至 `.backups/pre-thc-ay-20261127`（21/21 `PRAGMA quick_check = ok`）。
+- **Mode B 实现与接入 (`strategies/thc_ay/`, `backend/thc_ay_extension.py`, `backend/app.py`, `scripts/research_v3_engine.py`)**：
+  - 冻结 15 份源配置 SHA-256 与参数（`v1.0.0`），源码级复现 Wilder ATR/ADX、日线 SMA120（S≥200日/AY≥120日预热，复用 549 天只读 15m 历史种子+实时 `market-candles.sqlite3`，零回溯成交）、UTC 对齐高周期聚合与原周期边界门禁（绝不每 15m 重算 1H/4H/1D 入场）、COMBO 单仓互斥仲裁、AY02 分位压缩、AY03 恐慌反转及 AY04 成本后净 R 检验。
+  - 每实例在 `data/extensions/<strategy_id>.sqlite3` 独立建账（`$10,000 USD_RESEARCH`、2% 风险、5× 上限、单仓、`CostModel`），接入 `COMMON-MARKET-GUARD-V1` 与共享实时报价止盈止损巡检。
+  - `scripts/research_v3_engine.py` 新增通用 `data/extensions/*.sqlite3` 动态发现及 42 条隔离 `BACKTEST_SAVED` 熬鹰历史档案加载；主控制台、策略池及 Demo/正式跟单适配器零硬编码自动发现全部 38 套策略。
+- **验证与实机运行**：
+  - `tests/test_thc_ay_onboarding.py` + 既有 25 项 V3.1 回归测试 **29/29 PASS**（含 S/AY 逐根信号对齐、高周期边界隔离、暂停保护、陈旧报价阻断、重启对账与 `paper_fills` 兼容）。
+  - 通过 `Start-V3Service -Service 'backend'` 受控重载 8012（`PID 15908`），先停用态注册核验后分 3 批启用；实机通过 `09:45:00 UTC` 与 `10:00:00 UTC` 两个自然周期时钟（瞬时报价超龄均按 `COMMON-MARKET-GUARD-V1` 正确阻断并自动恢复为运行中）；既有 23 套基线、`pa-sma20-pullback-confirm` 与 `pa-three-bar-hhhl` 在途持仓及 Demo/正式跟单配置 100% 完好；15 实例在 Demo/正式实盘均默认未选中且停用。
+
+
+## 2026-11-27｜V3.1 38 套策略全功能对齐与新策略上架标准升级（G01–G18 强制标准）
+- **强制标准升级 (`docs/BTC Paper Lab V3.1 新策略接入规范.md`, `docs/BTC Paper Lab V3.1 统一策略研究数据接口规范.md`)**：
+  - 保留既有 G01–G13 编号与安全红线，补充 **G14（独立交易闭环）**、**G15（分类及动态发现）**、**G16（实时 K 线统一接入）**、**G17（自然周期执行质量）**、**G18（双环境跟单端到端隔离兼容）** 及四级成熟度定义（`CODE_READY` / `ISOLATED_TEST_PASS` / `PAPER_RUNTIME_VERIFIED` / `ONBOARDING_COMPLETE`）。
+  - 固化未来新增策略强制标准流程：`规则冻结与回测档案 → 隔离注册（默认停用） → G01–G18 门禁验证 → 授权纸盘启用 → 首个健康原生周期评价 → 全功能回归与真实截图 → 版本同步清单 → 自然观察`；基线动态递增（现为 **38 套**，严禁硬编码策略总数）。
+- **核心专项修复与对齐**：
+  1. **自然周期 `QUOTE_STALE_OR_INVALID` 归因与修复 (`backend/app.py`)**：根因为 `quote_loop()` 轮询间隔 `timeout=2` 与 `max_quote_age_ms=2000` 边界重叠导致 REST 回退报价在周期边缘自陈旧。在不放宽 `2000 ms` 保护阈值的前提下将 `quote_loop()` 间隔收紧至 `0.8s`，消除回退自陈旧。
+  2. **主控制台动态一级分类 (`strategies/thc_ay/specs.py`, `backend/thc_ay_extension.py`, `scripts/local_dashboard.py`)**：新增元数据驱动的 `strategy_category()` 与 `dynamic_console_categories()`，动态生成 `全部策略(38)`、`原有策略(5)`、`镜像策略(1)`、`PA系列(10)`、`Chan(1)`、`R系列(6)`、`S系列(12)`、`AY系列(3)` 及未来任意新分组，两行布局零截断、零硬编码。
+  3. **实时 K 线全 38 套动态接入 (`backend/kline_observation.py`, `backend/app.py`, `frontend/src/KlineWindow.tsx`)**：`/api/v1/observation/events` 动态返回全部 38 套策略列表与全量池/扩展（PA/Chan/R/S/AY）已验证成交事件；前端 `KlineWindow.tsx` 动态消费策略列表并通过 Vite 生产构建（`3.96s`）。
+  4. **跟单契约安全加固 (`scripts/live_copy_v2.py`)**：`pa_ext_fills()` 增加 `snapshot` 身份一致性校验并拒绝回测/虚拟账本；Demo 与正式实盘跟单默认未选中、未启用任何新增策略（0/21）。
+- **验证与证据**：`tests/test_38_strategies_full_alignment.py` + 既有全量回归套件 **32/32 PASS**；前端 `tsc -b && vite build` PASS；8012 通过 `Start-V3Service` 受控重载（`PID 20604`），`OBS_STRATEGIES_COUNT=38`；全部 6 张真实 Win32 桌面截图已归档。
+
+
+## 2026-11-27｜V3.1 38 套策略最近动作统一与公共展示字段对齐专项修复
+- **根因查明**：
+  1. **PA 显示「等待」vs R 显示「需检查」**：旧版 `scripts/local_dashboard.py::action_label()` 未收录 `MARKET_BLOCKED:*`、`WAIT_NATIVE_CLOSE`、`PENDING_NEXT_OPEN:*`、`CLOSE_STOP_QUOTE`、`CLOSE_TARGET_QUOTE`、`EXIT_PENDING_*` 等动作码，导致 R/S/AY 的 `MARKET_BLOCKED:QUOTE_STALE_OR_INVALID` 落入默认 ASCII 兜底返回「需检查」，而 PA 保留 `WAIT` 返回「等待」。
+  2. **0.8s 轮询后仍频繁出现「行情恢复中」的实机根因**：实测 `8012` `/api/v1/system/status` 发现 `received_at = 10:51:50.983Z`（0ms 前收到）但 `event_at = 10:50:01.866Z`（`age_ms = 109,117 ms`），证实为 Binance WebSocket `@bookTicker` 高频推送引发的消费队列积压（陈旧缓冲帧不断覆写 0.8s REST 新鲜报价），非偶发网络抖动；本轮按规范不放宽 2000ms 阈值且不做不必要后端重启，留作后续单独授权的 WS 最新帧合并优化。
+- **公共展示层统一修复 (`scripts/local_dashboard.py`)**：
+  - 建立唯一公共动作契约 `action_label()` / `action_tone()`，覆盖全部 13 类统一语义（等待信号、等待原生周期、行情等待、待开仓、做多开仓、做空开仓、持有、止盈平仓、止损平仓、到期平仓、待退出、暂停、需检查），保留 `raw_action` 诊断码且绝不掩盖真实异常；空仓处于「行情恢复中」时全 38 套统一显示「行情等待」，持仓中仍显示「持有」。
+  - 统一 `money_label()` 千分位两位精度；补齐 `d_control_state()` 对 `MARKET_RECOVERING`/`RUNNING` 的映射（消除 D 策略状态「未知」）。
+- **规范与验证**：同步更新 `docs/BTC Paper Lab V3.1 新策略接入规范.md`（G03、G15）；`tests/test_unified_action_and_fields_38.py` 及全量回归测试通过；修复前后真实 Win32 控制台截图已归档。
+
+
+## 2026-11-27｜V3.1 Binance 实时行情积压根因修复与统一保护链路解耦（P0–P7）
+- **根因实证**：实测 Windows 本地时钟与 Binance `/fapi/v1/time` 偏差仅 `+242 ms`（排除时钟漂移）；live 观测证实 WS `@bookTicker` 峰值推送达 `1,000+ 帧/秒`，原 `stream_events` 逐帧同步 `await process_stop_quote`（25+ 次顺序线程/SQLite 操作）导致 `websockets` 缓冲队列严重积压，`event_at` 落后本地时间达 `165,419–167,463 ms`，并不断覆写新鲜 REST 报价。
+- **最小化修复 (`backend/quote_pipeline.py`, `backend/app.py`)**：
+  - 新增 `accept_quote_update()` 统一 WS/REST 报价接收契约，禁止陈旧（`>2000ms`）或倒退 `event_at` 覆写新鲜有效报价；保持 `COST_MODEL.max_quote_age_ms = 2000` 与真实 `event_at` 不变。
+  - 新增 `ProtectionWatchlist`（直接复用 `backend.domain.stop_triggered`）与 `BoundedQuoteDispatcher`（有界 FIFO 保护队列 `maxsize=64` + 单槽常规行情合并 + 单后台消费者任务 + 过载 `overload_blocked` 联动 `COMMON-MARKET-GUARD-V1` 阻断新开仓），并将 21 个扩展账本的报价巡检合并为单次 `asyncio.to_thread` 批处理。
+- **验证与部署**：
+  - `tests/test_quote_pipeline_protection_p3_p4.py`（覆盖全部 14 项保护场景与 500 帧突发压测）+ 72 项全量回归 **76/76 PASS**。
+  - 37 个活跃 SQLite 在线备份至 `.backups/pre-quote-pipeline-20261127`（37/37 `PRAGMA quick_check = ok`）；通过 `Start-V3Service -Service 'backend'` 受控重载 8012（`PID 1508`）；既有 38 套策略、2 笔在途多单（`pa-sma20-pullback-confirm`、`pa-three-bar-hhhl`）及正式实盘跟单进程 `PID 15756/4808` 100% 完好。
+  - 重载后 15 秒实测（17,601 帧真实 WS 推送）：`age_ms` 由 `167,463 ms` 骤降至 **`209–251 ms`**（突发峰值 `942 ms`），`entry_ready = 15/15 (100%)`，`stale_rejected = 0`，`overload_events = 0`；30 分钟持续观测与 2 个自然 15m 周期按规范标记 `PENDING_RUNTIME_VERIFICATION` 待自然积累完成。
+- **规范固化**：同步更新 `docs/spec/BTC V3统一行情保护与退出保护规范V1.0.md` 与 `docs/BTC Paper Lab V3.1 新策略接入规范.md`。
+
+
+## 2026-11-27｜V3.1 底层行情并发解耦架构升级与 38/50/100 扩容压测
+- **核心架构模块 (`backend/market_hub.py`, `backend/app.py`)**：
+  - 落地 `SharedMarketHub`（共享有效报价与 15m/1h/4h/1d 聚合缓存，单周期仅聚合一次）、`AccountLockRegistry`（单策略账户级可重入锁，保障开/平/保护/账本严格有序与原子性）、`BoundedCycleExecutor`（有界 6 线程并发周期扇出 + 单策略异常隔离）与 `ReadOnlySnapshotCache`（1.0s TTL + 写事件即时失效，隔离控制台/研究中心/实时 K 线/GrokBot 只读查询）。
+  - 优化 `_dispatch_quote_to_consumers` 仅在触发保护或 10s 周期刷新 `ProtectionWatchlist`，消除常规报价的重复全库扫描。
+- **扩容压测与回归 (`tests/test_market_hub_scale_38_50_100.py`)**：
+  - 全量 **80/80 PASS**；实测 38 / 50 / 100 套策略规模下：1,000 帧突发报价提交耗时仅 `29.2–39.2 ms`（中间止损/止盈 100% 无损送达）、高周期聚合均仅 `3` 次（缓存命中 `34/46/96`）、并发 60 次只读查询仅 `18.4–21.1 ms`、单账户 16 并发开仓锁严格只成交 `1` 笔。
+- **受控部署**：通过 `Start-V3Service -Service 'backend'` 受控重载 8012（`PID 2736`，`9,680 ms`），既有 38 套策略、在途持仓及正式实盘跟单进程 100% 完好；同步更新保护规范与新策略接入规范。
+
+### 2026-11-27 38策略盈亏交易快照
+- 本地21:23:42 CST安全只读快照：Binance报价新鲜324ms，公共门禁entry_ready=true，最新完成15m K线21:15 CST。正式策略ID清单38项；账户均空仓，成交流水合计358条，非G完成开平交易128笔；按现金-初始10000合计-5391.34 USD_RESEARCH。无未实现盈亏。
+- A/B/C现金变化+29.39/-77.18/-2055.88，成交14/30/104；D 0/0，保护READY；E -31.08、2条、1笔平仓，API正式账户READY/FLAT，但最新成交仍为11-25 22:30；G镜像-531.17、102条、空仓；PA池9账号（含Chan独立类别）和PA-09/10按各自SQLite只读读取；R01-06、S系列12个时框策略、AY02-04当前均0盈亏/0成交/空仓。
+- Rule：动态ID清单按运行实际列示；P&L用现金-初始本金，已平空仓因此等于已实现值；镜像G单独标为跟单账本。
+- Checklist：读取system/status的新鲜报价与公共门禁；通过observation/events核对38个ID；主账本、D/E/G、策略池及23个扩展账本只读汇总；对照总流水358条和各家成交数。
+- Anti-pattern：按旧16项名单报告、把S多时框合并漏项、把G镜像当独立信号，或把E旧成交快照写成与本次同一时点。
+- 复盘：无账本写入；E当前运行状态与成交历史更新时间不一致，结果保留注明最新成交时间。下次优先确认E账本自然周期同步时间，再宣称所有账户严格同秒。
+
+### 2026-11-27 38策略盈亏快照二次刷新
+- 本地22:13:19 CST行情样本：Binance LIVE，报价事件年龄393ms，bid 61417.10 / ask 61417.20，公共门禁允许入场，最新完整15m K线22:00。38账户快照中两笔持仓：PA三根持续K结构多0.82549847 BTC（入场61429.383420），R01多0.44097988 BTC（入场61434.584460）；其余空仓。现金变动合计-5780.50；两笔未实现按可执行bid及平仓费5bps、滑点2bps估算-72.30；估算权益变化-5852.80。成交记录360条；非镜像已平128笔，另两笔未平。
+- A/B/C成交14/30/104；D 0；E仍2条成交、已平1笔、最新记录11-25 22:30；G镜像102条；PA池107条（含一笔未平开仓）；PA09/10零，R01新增1条开仓，其余R/S/AY零。
+- Rule：持仓现金变动与浮动/估算权益分栏；用有效可执行报价侧估值并扣除估计平仓费和滑点，注明不含资金费。
+- Checklist：核对运行清单38 ID、账本数量与总成交360条、持仓两笔；同一报价时间戳取市场年龄；E显示最后成交日期。
+- Anti-pattern：将现金余额变动误称总权益；用位置JSON里的旧mark代替实时新鲜报价；忽略E成交数据滞后。
+- 复盘：首次刷新脚本有字典键引号拼写错误，未执行；修正后只读查询成功。下次在执行前用最小语法校验/分步查询，避免延迟快照。
+
+
+## V3.1 Lightweight Architecture & Unified Strategy Lifecycle Management — 2026-11-28
+
+- Authorized Phase 1 -> Phase 2 -> Phase 3 continuous execution on `windows-binance-deploy` (38 live paper strategies untouched; no real strategy deleted; V3.1 version retained).
+- **Phase 1 (Lightweight Performance)**:
+  - Fixed `SharedMarketHub` write-only gap: incremental 15m append (`append_15m_bars`), shared `get_or_build_context` (eliminating 6x `MultiTFContextV11` rebuilds across R01-R06), and bit-exact O(1) incremental `ThcAyCycleContext.extend_15m()` (releasing 52.7 MB permanent `_prefix_15m` RAM and eliminating 6.9s full-history recompute).
+  - Verified root cause of 7.07M `regressive_rejected`: 0.8s REST `latest_quote()` synthesized `event_at = local_now` (~240ms ahead of exchange WS `E`), rejecting ~20% of real WS ticks. Implemented adaptive REST fallback (`_ws_quote_is_healthy()`).
+  - Upgraded `ProtectionWatchlist` to `ActivePositionIndex`: zero SQLite I/O for flat idle strategies, staggered mark-price writes, moved ABC/E SQLite stop monitoring off the asyncio event loop into `asyncio.to_thread`.
+  - Upgraded `ReadOnlySnapshotCache` to 15s event-invalidated TTL with `snapshot_meta` (version/cached_at/age_ms) + in-memory summary snapshots for R/S/AY `list()` + bounded 500-row retention for `decision_diagnostics`.
+- **Phase 2 (Unified Strategy Lifecycle & Soft Pause)**:
+  - Unified Soft Pause across ALL 38 strategies including A/B/C/E (`StrategyControl.soft_pause()` blocks new entries while preserving open positions & live SL/TP protection).
+  - Added `backend/lifecycle_manager.py` (`strategy-lifecycle.sqlite3` minimal metadata/tombstone store, 8 mandatory delete gates including Demo/Prod copy-trading checks & C->G dependency, account-locked unload, immutable cold archive under `data/archived-deleted/`, restart anti-resurrection, restore & explicit re-register).
+  - Added `/api/v1/lifecycle/*` endpoints, Desktop Main Console `<Button-3>` right-click menu (View Rules/Research/K-line/Resources & Gates, Soft Pause, Resume, Archive, 8-Gate Safe Delete), and cross-module sync in Research Center V3 & `kline_observation.py`.
+- **Phase 3 (Scale Stress & G19/G20 Specs)**:
+  - Verified 38 / 50 / 100 / 200 realistic strategy load (200 real strategies in 92.6ms cycle / 19.3ms fanout, 100 simultaneous stop triggers in 0.06ms, 0 missed triggers).
+  - Codified G19 (System Resources & Scaling) and G20 (Unified Strategy Lifecycle) in `docs/BTC Paper Lab V3.1 新策略接入规范.md`.

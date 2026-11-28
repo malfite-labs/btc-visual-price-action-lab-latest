@@ -1,0 +1,47 @@
+{
+  "strategy_id": "R06",
+  "name": "R06 · 多周期顺势衰竭策略",
+  "group": "R系列",
+  "version": "1.0.0",
+  "market": "BTC/USD",
+  "provider_symbol": "BTCUSDT",
+  "source": "BINANCE_USDM_PERP",
+  "signal_timeframe": "1h",
+  "exec_timeframe": "15m",
+  "background_timeframe": "4h",
+  "algorithm_baseline": {
+    "repo": "https://github.com/moolish-com/td-sequential-python",
+    "commit_sha": "2716ca374068607c3ac3b9bf5eeef2ac5e72f235",
+    "version": "1.0.1",
+    "license": "MIT"
+  },
+  "parameters": {
+    "bg_tf": "4h",
+    "signal_tf": "1h",
+    "exec_tf": "15m",
+    "ema_fast": 20,
+    "ema_slow": 60,
+    "min_spread_ratio": 0.003,
+    "confirm_window": 16,
+    "atr_period": 14,
+    "stop_atr_mult": 0.5,
+    "target_r": 2.0,
+    "max_hold_bars": 32
+  },
+  "risk": {
+    "initial_equity": "10000",
+    "currency": "USD_RESEARCH",
+    "max_leverage": 5,
+    "risk_fraction": "0.02",
+    "capital_model": "PAPER_10000_RISK_2PCT_5X"
+  },
+  "protection_contract": {
+    "common_guard": "backend/common_guard.py::evaluate_common_market_guard",
+    "unified_status": "backend/common_guard.py::classify_unified_status",
+    "cost_model": "backend/domain.py::CostModel",
+    "exit_priority": "STOP > TARGET > TIME",
+    "same_bar_priority": "stop",
+    "auto_enable_paper": false
+  },
+  "description": "4h EMA20/EMA60(>=0.3%) 趋势识别 + 1h 顺势衰竭(上涨仅接底 TD9/TD13，下跌仅接顶 TD9/TD13，震荡不开仓) + 15m 16 根窗口反转确认(确认时复查 4h 趋势)。"
+}

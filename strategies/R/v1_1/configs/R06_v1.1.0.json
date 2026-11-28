@@ -1,0 +1,55 @@
+{
+  "algorithm_baseline": {
+    "commit_sha": "2716ca374068607c3ac3b9bf5eeef2ac5e72f235",
+    "license": "MIT",
+    "repo": "https://github.com/moolish-com/td-sequential-python",
+    "version": "1.0.1"
+  },
+  "background_timeframe": "4h",
+  "candidate_ref": "C8_R06_PlanE_rel_wide",
+  "description": "4h 放松趋势识别（EMA20>EMA60 且 close>EMA60 且 |EMA20-EMA60|/close>=0.1%，空头镜像）+ 1h 顺势 TD9/TD13 + 16 根 15m 反转确认（复查 4h 趋势 + 确认量能 >= 1.2×SMA20）+ 1.5 ATR 止损缓冲 / 2.0R 止盈 / 64 根持仓上限。",
+  "exec_timeframe": "15m",
+  "frozen_paper_observation": true,
+  "group": "R系列",
+  "live_trading_disabled": true,
+  "market": "BTC/USD",
+  "name": "R06 · 多周期顺势衰竭放量策略 (V1.1)",
+  "observation_tier": "EXPERIMENTAL_OBSERVE",
+  "parameters": {
+    "atr_period": 14,
+    "bg_tf": "4h",
+    "candidate_ref": "C8_R06_PlanE_rel_wide",
+    "confirm_window": 16,
+    "ema_fast": 20,
+    "ema_slow": 60,
+    "exec_tf": "15m",
+    "max_hold_bars": 64,
+    "min_spread_ratio": 0.001,
+    "signal_tf": "1h",
+    "stop_atr_mult": 1.5,
+    "target_r": 2.0,
+    "tdst_filter": "none",
+    "trend_mode": "relaxed_ema60",
+    "vol_mult": 1.2
+  },
+  "position": {
+    "direction": "both",
+    "entry_timing": "next_open",
+    "max_hold_bars": 64,
+    "same_bar_priority": "stop",
+    "stop_atr_mult": 1.5,
+    "target_r": 2.0
+  },
+  "provider_symbol": "BTCUSDT",
+  "risk": {
+    "capital_model": "PAPER_10000_RISK_2PCT_5X",
+    "currency": "USD_RESEARCH",
+    "initial_equity": "10000",
+    "max_leverage": 5,
+    "risk_fraction": "0.02"
+  },
+  "signal_timeframe": "1h",
+  "source": "BINANCE_USDM_PERP",
+  "strategy_id": "R06",
+  "version": "1.1.0"
+}

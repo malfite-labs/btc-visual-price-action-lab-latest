@@ -31,9 +31,10 @@ class PaperLedger(CandidateLedger):
 
 
 class PAExtension:
-    def __init__(self,directory,*,register=False,enabled=(),cost=None):
+    def __init__(self,directory,*,register=False,enabled=(),excluded_ids=(),cost=None):
         self.ledgers={}
-        self.enabled=frozenset(enabled)  # Tests may explicitly exercise the legacy startup fixture.
+        excluded_set={str(x).strip().upper() for x in excluded_ids if str(x).strip()}
+        self.enabled=frozenset(x for x in enabled if str(x).strip().upper() not in excluded_set)  # Tests may explicitly exercise the legacy startup fixture.
         self.exit_checks={}
         if not self.enabled <= NAMES.keys():
             raise ValueError('UNKNOWN_PA_EXTENSION_ENABLE_ID')
@@ -43,6 +44,8 @@ class PAExtension:
         costs=cost or CostModel()
         self.max_age=costs.max_quote_age_ms
         for sid in NAMES:
+            if sid in excluded_set:
+                continue
             if (root/(sid+'.sqlite3')).exists():
                 ledger=PaperLedger.open_existing(root,sid)
             elif register:
@@ -57,6 +60,12 @@ class PAExtension:
             self.ledgers[sid]=ledger
         if not self.enabled <= self.ledgers.keys():
             raise ValueError('PA_EXTENSION_ENABLE_REQUIRES_LEDGER')
+
+    def unload(self,sid):
+        key=str(sid).upper()
+        self.exit_checks.pop(key,None)
+        self.enabled=frozenset(x for x in self.enabled if x!=key)
+        return self.ledgers.pop(key,None) is not None
 
     def set_enabled(self,sid,enabled,now,can_enable):
         ledger=self.ledgers[sid]

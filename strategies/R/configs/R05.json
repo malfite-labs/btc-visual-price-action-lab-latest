@@ -1,0 +1,44 @@
+{
+  "strategy_id": "R05",
+  "name": "R05 · 双周期 TD13 反转策略",
+  "group": "R系列",
+  "version": "1.0.0",
+  "market": "BTC/USD",
+  "provider_symbol": "BTCUSDT",
+  "source": "BINANCE_USDM_PERP",
+  "signal_timeframe": "1h",
+  "exec_timeframe": "15m",
+  "background_timeframe": null,
+  "algorithm_baseline": {
+    "repo": "https://github.com/moolish-com/td-sequential-python",
+    "commit_sha": "2716ca374068607c3ac3b9bf5eeef2ac5e72f235",
+    "version": "1.0.1",
+    "license": "MIT"
+  },
+  "parameters": {
+    "signal_tf": "1h",
+    "exec_tf": "15m",
+    "require_exact_td13": true,
+    "confirm_window": 16,
+    "atr_period": 14,
+    "stop_atr_mult": 0.5,
+    "target_r": 2.0,
+    "max_hold_bars": 32
+  },
+  "risk": {
+    "initial_equity": "10000",
+    "currency": "USD_RESEARCH",
+    "max_leverage": 5,
+    "risk_fraction": "0.02",
+    "capital_model": "PAPER_10000_RISK_2PCT_5X"
+  },
+  "protection_contract": {
+    "common_guard": "backend/common_guard.py::evaluate_common_market_guard",
+    "unified_status": "backend/common_guard.py::classify_unified_status",
+    "cost_model": "backend/domain.py::CostModel",
+    "exit_priority": "STOP > TARGET > TIME",
+    "same_bar_priority": "stop",
+    "auto_enable_paper": false
+  },
+  "description": "1h 已收盘 K 线正式完成底部/顶部 TD13 候选 + 最多 16 根 15m K 线价格反转确认，严禁使用未收盘 1h K 线。"
+}

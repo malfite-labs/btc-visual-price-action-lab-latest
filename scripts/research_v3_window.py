@@ -268,7 +268,7 @@ def open_research_center_v3(parent, *, engine: ResearchV3Engine | None = None):
 
     tk.Label(fbar, text='分组:', bg='white', fg='#334155', font=('Microsoft YaHei UI', 8, 'bold')).pack(side='left', padx=(10, 3), pady=6)
     group_var = tk.StringVar(value='全部')
-    group_cb = ttk.Combobox(fbar, textvariable=group_var, state='readonly', width=9, values=('全部', '原有策略', '镜像策略', '策略池'))
+    group_cb = ttk.Combobox(fbar, textvariable=group_var, state='readonly', width=9, values=('全部', '原有策略', '镜像策略', '策略池', 'R系列'))
     group_cb.pack(side='left', padx=(0, 8))
 
     tk.Label(fbar, text='状态:', bg='white', fg='#334155', font=('Microsoft YaHei UI', 8, 'bold')).pack(side='left', padx=(0, 3))

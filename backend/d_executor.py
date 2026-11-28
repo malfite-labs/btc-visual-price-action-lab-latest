@@ -271,6 +271,10 @@ def pending_verified_quote(ledger, now, *, allow_expired=False):
     import sqlite3
     with sqlite3.connect(ledger.path, timeout=10) as db:
         try:
+            # The evidence table is initialized lazily by the first queued
+            # quote. Its absence is safe only when nothing awaits execution.
+            if not db.execute("SELECT 1 FROM d_quotes WHERE status='PENDING' LIMIT 1").fetchone():
+                return {'status':'EMPTY'}
             row = db.execute("SELECT q.event_id,e.payload,q.event_at,q.bid,q.ask FROM d_quotes q LEFT JOIN d_quote_evidence e ON e.event_id=q.event_id WHERE q.status='PENDING' ORDER BY q.seq LIMIT 1").fetchone()
         except sqlite3.Error:
             return {'status':'BLOCKED','reason':'EVIDENCE_UNAVAILABLE'}

@@ -8,7 +8,7 @@
 
 ## 1. 五层逻辑架构
 
-1. **第一层（动态策略发现）**：自动扫描 `/api/v1/agents`、`data/d/trading.sqlite3`、`/api/v1/e/accounts`、`/api/v1/g-mirror/status`、`data/strategy-pool.sqlite3`（全部未归档策略）与 `data/pa-v1-extensions/*.sqlite3`。**严禁**使用硬编码策略 ID 列表限制研究范围；任何通过策略池新上传的合规策略（如 `pa-chan-center-divergence` 及未来任意新策略）均自动进入研究体系。
+1. **第一层（动态策略发现）**：自动扫描 `/api/v1/agents`、`data/d/trading.sqlite3`、`/api/v1/e/accounts`、`/api/v1/g-mirror/status`、`data/strategy-pool.sqlite3`（全部未归档策略）、`data/pa-v1-extensions/*.sqlite3`、`data/r-series/*.sqlite3` 与 `data/extensions/*.sqlite3`。**严禁**使用硬编码策略 ID 列表限制研究范围；任何通过策略池（Mode A）或标准扩展契约（Mode B）新增的合规策略均自动进入研究体系，分组与主控制台保持一致（`原有策略`/`镜像策略`/`PA系列`/`Chan`/`R系列`/`S系列`/`AY系列` 及未来动态分组）。
 2. **第二层（并发容错只读适配）**：通过 `ThreadPoolExecutor(max_workers=6)` 并发拉取只读 HTTP 接口（单请求 4s 超时、绕过代理直连 `127.0.0.1:8012`）并批量查询本地只读 SQLite（策略池仅 2 次批量 SQL，100 策略规模加载耗时 `< 100ms`）；单接口异常或超时仅记录至 `errors` / `data_quality.missing_data`，不影响其他策略展示。
 3. **第三层（统一绩效与归因计算）**：详见《BTC Paper Lab V3.1 量化绩效指标计算规范.md》。
 4. **第四层（TTL 缓存与回测隔离）**：内置 15 秒内存快照缓存（支持强制刷新），单独只读读取 `data/strategy-pool-backtests.sqlite3` 中的已保存回测报告作为独立数据源（`BACKTEST_SAVED`），严禁与纸盘自然运行数据（`PAPER_LIVE`）混合统计。
@@ -56,3 +56,11 @@
 - 严禁通过研究模块修改策略规则、账户资金、持仓、止盈止损、启停状态或实盘跟单配置。
 - 严禁将历史回测盈利合并计入纸盘实际收益；严禁为补齐曲线凭空生成历史权益点。
 - 多源分接口快照必须在界面与报告中明确标示「非原子时点快照」。
+
+
+---
+
+## 4. 生命周期同步与事件失效快照（V3.1 轻量化升级）
+
+- **只读快照元数据**：`/api/v1/strategy-pool` 与 `/api/v1/system/status` 复用后端 `ReadOnlySnapshotCache`（15s TTL + 状态变更主动失效），并暴露 `snapshot_meta`（`version`、`cached_at`、`age_ms`），供研究中心与未来 AI 只读查询接口（如 GrokBot）直接复用，禁止重复搭建行情与绩效计算链路。
+- **生命周期自动同步**：研究中心与实时 K 线只读查询 `data/strategy-lifecycle.sqlite3`，自动剔除 `DELETED` 策略，为 `ARCHIVED` 策略标注 `lifecycle_state='ARCHIVED'` 及冷归档路径，确保归档策略不混入活跃运行与实时跟单候选。

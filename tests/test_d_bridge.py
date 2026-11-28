@@ -41,6 +41,72 @@ def quote(at,bid,ask):
             'event_at':at.isoformat(),'received_at':at.isoformat(),'timestamp_valid':True,
             'bid':str(bid),'ask':str(ask)}
 
+def test_common_market_callbacks_migrate_flat_latch_and_preserve_execution(tmp_path, monkeypatch):
+    import sqlite3
+
+    bars = bars_with_real_signal()
+    candidate = datetime.fromisoformat(bars[959]['close_at'])
+    confirmed = datetime.fromisoformat(bars[960]['close_at'])
+    current = candidate + timedelta(seconds=1)
+    healthy = True
+    observation = tmp_path/'observe.sqlite'
+    ledger = tmp_path/'trade.sqlite'
+
+    def bridge(common_guard):
+        return DBridge(observation, ledger, Archive(bars), feed_healthy=lambda: healthy,
+                       candles_complete=lambda: True, clock=lambda: current,
+                       common_guard=common_guard)
+
+    async def scenario():
+        nonlocal current, healthy
+        old = bridge(False)
+        await old.start()
+        old.runtime.mark_dispatch_failure('D_DISPATCH_OperationalError')
+        await old.close()
+        live = bridge(True)
+        await live.start()
+        assert live.dispatcher is None
+        assert not live.runtime.has_data_loss()
+        with sqlite3.connect(observation) as db:
+            assert db.execute('SELECT reason FROM d_common_guard_migration').fetchone() == (
+                'D_DISPATCH_OperationalError',)
+        healthy = False
+        assert (await live.process_common('bar', candidate))['status'] == 'BLOCKED'
+        assert (await live.process_common('quote', None))['reason'] == 'INVALID_QUOTE'
+        healthy = True
+        await live.process_common('quote', quote(current, 1124.29, 1124.30))
+        original = live.runtime.on_bar
+        def locked(*args, **kwargs):
+            raise sqlite3.OperationalError('database is locked')
+        with monkeypatch.context() as patch:
+            patch.setattr(live.runtime, 'on_bar', locked)
+            assert (await live.process_common('bar', candidate))['reason'] == 'D_RUNTIME_OperationalError'
+        assert live.runtime.on_bar == original
+        assert (await live.process_common('bar', candidate))['status'] == 'BLOCKED'
+        current += timedelta(seconds=1)
+        await live.process_common('quote', quote(current, 1124.29, 1124.30))
+        assert (await live.process_common('bar', candidate))['status'] == 'WATCH'
+        assert (await live.process_common('bar', candidate))['status'] == 'DUPLICATE_BAR'
+        current = confirmed + timedelta(seconds=1)
+        signal = await live.process_common('bar', confirmed)
+        assert signal['signal'] == evaluate(bars, evaluate(bars[:960])['state'])['signal']
+        current += timedelta(seconds=1)
+        await live.process_common('quote', quote(current, 1125.94, 1125.95))
+        assert live.runtime.ledger.account()['state'] == 'OPEN_LONG'
+        await live.close()
+        live = bridge(True)
+        await live.start()
+        assert live.runtime.ledger.account()['state'] == 'OPEN_LONG'
+        assert len(live.runtime.ledger.fills()) == 1
+        healthy = False
+        current += timedelta(seconds=1)
+        await live.process_common('quote', quote(current, 1120, 1120.01))
+        assert live.runtime.ledger.account()['state'] == 'FLAT'
+        assert len(live.runtime.ledger.fills()) == 2
+        await live.close()
+
+    asyncio.run(scenario())
+
 
 def test_real_signal_to_open_targets_and_restarts(tmp_path):
     bars = bars_with_real_signal()
